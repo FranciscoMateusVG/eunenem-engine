@@ -47,7 +47,7 @@ export function Story({
   const { babyName, parents, genero } = tweaks;
   const artDef = artigoDefinido(genero);
   const shownHistoria = tweaks.historia ?? historia;
-  const shownFoto = tweaks.fotoHistoriaUrl ?? fotoHistoria;
+  const shownFoto = tweaks.fotoHistoriaUrl !== undefined ? tweaks.fotoHistoriaUrl : fotoHistoria;
   const paragraphs = (shownHistoria ?? "")
     .split(/\n+/)
     .map((p) => p.trim())

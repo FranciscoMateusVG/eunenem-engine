@@ -7,6 +7,8 @@ import type {
   IdPlataformaReferencia,
   IdUsuario,
 } from '../../../src/domain/usuario/value-objects/ids.js';
+import type { PendenciaDesativacao } from '../../../src/domain/usuario/value-objects/pendencia-desativacao.js';
+import { ContaComPendenciasFinanceirasError } from '../../../src/errors/usuario/conta-com-pendencias.error.js';
 import { UsuarioNaoEncontradoError } from '../../../src/errors/usuario/nao-encontrado.error.js';
 import { desativarContaUsuario } from '../../../src/use-cases/usuario/desativar-conta-usuario.js';
 import { createTestObservability } from '../../helpers/observability.js';
@@ -40,19 +42,37 @@ async function seedUsuario(repo: UsuarioRepositoryMemory): Promise<Usuario> {
 
 describe('desativarContaUsuario', () => {
   let repo: UsuarioRepositoryMemory;
+  let pendencias: PendenciaDesativacao[];
   const { observability } = createTestObservability();
+  const deps = () => ({
+    usuarioRepository: repo,
+    pendenciasRepository: { listarPendencias: async () => pendencias },
+    observability,
+  });
 
   beforeEach(() => {
     repo = new UsuarioRepositoryMemory();
+    pendencias = [];
+  });
+
+  it('refuses while an owned campaign has pending money, keeping the account active', async () => {
+    const usuario = await seedUsuario(repo);
+    pendencias = ['saldo_a_sacar', 'resgate_em_andamento'];
+
+    const error = await desativarContaUsuario(deps(), usuario.id, new Date()).catch((e) => e);
+
+    expect(error).toBeInstanceOf(ContaComPendenciasFinanceirasError);
+    expect(error.pendencias).toEqual(['saldo_a_sacar', 'resgate_em_andamento']);
+    expect((await repo.findUsuarioById(usuario.id))?.desativadoEm).toBeUndefined();
   });
 
   it('soft-disables the account and returns the persisted timestamp', async () => {
     const usuario = await seedUsuario(repo);
     const agora = new Date('2026-09-25T09:30:00.000Z');
 
-    await expect(
-      desativarContaUsuario({ usuarioRepository: repo, observability }, usuario.id, agora),
-    ).resolves.toEqual({ desativadoEm: agora.toISOString() });
+    await expect(desativarContaUsuario(deps(), usuario.id, agora)).resolves.toEqual({
+      desativadoEm: agora.toISOString(),
+    });
     expect((await repo.findUsuarioById(usuario.id))?.desativadoEm?.getTime()).toBe(agora.getTime());
   });
 
@@ -61,23 +81,15 @@ describe('desativarContaUsuario', () => {
     const t1 = new Date('2026-09-25T09:30:00.000Z');
     const t2 = new Date('2026-09-25T10:30:00.000Z');
 
-    await desativarContaUsuario({ usuarioRepository: repo, observability }, usuario.id, t1);
-    const second = await desativarContaUsuario(
-      { usuarioRepository: repo, observability },
-      usuario.id,
-      t2,
-    );
+    await desativarContaUsuario(deps(), usuario.id, t1);
+    const second = await desativarContaUsuario(deps(), usuario.id, t2);
 
     expect(second).toEqual({ desativadoEm: t1.toISOString() });
   });
 
   it('rejects an unknown usuario', async () => {
     await expect(
-      desativarContaUsuario(
-        { usuarioRepository: repo, observability },
-        randomUUID() as IdUsuario,
-        new Date(),
-      ),
+      desativarContaUsuario(deps(), randomUUID() as IdUsuario, new Date()),
     ).rejects.toBeInstanceOf(UsuarioNaoEncontradoError);
   });
 });

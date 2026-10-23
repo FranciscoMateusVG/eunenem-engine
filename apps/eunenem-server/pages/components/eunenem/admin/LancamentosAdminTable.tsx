@@ -30,6 +30,7 @@ export interface LancamentoAdminRow {
   campanhaTitulo: string;
   idContribuicao: string;
   contribuicaoNome: string | null;
+  contribuinteNome: string | null;
   idPagamento: string;
   metodo: "pix" | "credit_card" | null;
   amountCents: number;
@@ -144,6 +145,7 @@ export function LancamentosAdminTable(p: LancamentosAdminTableProps) {
                 <Th>data</Th>
                 <Th>campanha</Th>
                 <Th>contribuição</Th>
+                <Th>Quem pagou</Th>
                 <Th>pagamento</Th>
                 <Th align="right">líquido</Th>
                 <Th>estado</Th>
@@ -204,6 +206,9 @@ function LancamentoRow({ r }: { r: LancamentoAdminRow }) {
       </td>
       <td className="px-4 py-3 text-[13px] text-ink">
         {r.contribuicaoNome ?? <span className="italic text-ink-mute">(contribuição removida)</span>}
+      </td>
+      <td className="px-4 py-3 text-[13px] text-ink">
+        {r.contribuinteNome ?? <span className="italic text-ink-mute">Não informado</span>}
       </td>
       <td className="px-4 py-3">
         <a

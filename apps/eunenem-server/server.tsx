@@ -1,4 +1,6 @@
 import './src/lib/glitchtip/instrument.js'; // MUST stay first — GlitchTip/Sentry init (aperture-sm4el)
+import { startOptionalFeeJob } from './server/jobs/provider-fees-startup.js';
+import { registerProviderFeesJob, PROVIDER_FEES_QUEUE, INTER_FEES_QUEUE } from './server/jobs/provider-fees.pgboss.js';
 import { serve } from '@hono/node-server';
 import { serveStatic } from '@hono/node-server/serve-static';
 import { fetchRequestHandler } from '@trpc/server/adapters/fetch';
@@ -32,7 +34,11 @@ import {
   PIX_COBRANCA_RECONCILIATION_QUEUE,
   registerPixCobrancaReconciliationJob,
 } from './server/jobs/pix-cobranca-reconciliation.pgboss.js';
+import { LIFECYCLE_EMAIL_QUEUE, registerLifecycleEmailJob } from './server/jobs/lifecycle-email.pgboss.js';
 import { createServerLifecycle, LifecycleAdmissionClosedError } from './server/lifecycle.js';
+import { createLifecycleEmailPages } from './server/lifecycle-email-pages.js';
+import { consumeRateLimit } from './server/trpc/rate-limit.js';
+import { EmailFeedbackPostgres } from '../../src/adapters/email/email-feedback.postgres.js';
 import { createPainelAccessMiddleware } from './server/painel-access.js';
 import {
   createRequestObservabilityMiddleware,
@@ -58,7 +64,7 @@ const env = loadEnv();
 const deps = buildServerDeps(env);
 const lifecycle = createServerLifecycle({
   boss: deps.boss,
-  queues: [REPASSE_EXECUTAR_QUEUE, REPASSE_CONFIRMAR_QUEUE, PIX_COBRANCA_RECONCILIATION_QUEUE],
+  queues: [PROVIDER_FEES_QUEUE, INTER_FEES_QUEUE, LIFECYCLE_EMAIL_QUEUE, REPASSE_EXECUTAR_QUEUE, REPASSE_CONFIRMAR_QUEUE, PIX_COBRANCA_RECONCILIATION_QUEUE],
   log: (event) => console.log(`[lifecycle] ${event}`),
   exit: (code) => process.exit(code),
 });
@@ -118,6 +124,12 @@ try {
       registerPixCobrancaReconciliationJob(deps.boss, deps, lifecycle),
     );
   }
+
+  // Dry-run is an explicit operator read, never a boot dependency.
+  await startOptionalFeeJob('stripe', () => registerProviderFeesJob(deps.boss, deps.providerFeeSync, lifecycle), deps.observability.logger);
+  await startOptionalFeeJob('inter', () => registerProviderFeesJob(deps.boss, deps.interFeeSync, lifecycle, INTER_FEES_QUEUE), deps.observability.logger);
+
+  await lifecycle.startupStep(() => registerLifecycleEmailJob(deps.boss, deps.lifecycleEmail, lifecycle));
 
   console.log(
     pixReconciliationWorkerDisabled
@@ -278,6 +290,26 @@ const interPixWebhookRoutesMounted = mountInterPixWebhookRoutesWhenBound(
 // security rationale (verified-email trust anchor, sk_live server-only, mint
 // rate-limit, fail-open-to-fallback) lives in server/legacy-bridge.ts.
 app.get('/api/legacy-bridge', createLegacyBridgeHandler(deps));
+
+// aperture-tykv8 — token pages linked from the lifecycle emails (Avalie sua
+// experiência, descadastrar, preferências). Before the legacy guest redirect
+// and the SSR catch-all so their root paths are never treated as guest links.
+// GET never writes; POSTs are same-origin and rate-limited per delivery/user.
+app.route(
+  '/',
+  createLifecycleEmailPages({
+    tokens: deps.lifecycleEmailTokens,
+    preferences: deps.lifecycleEmailPreferences,
+    feedback: new EmailFeedbackPostgres(deps.db),
+    allowedOrigins,
+    consumeRateLimit: async (key) =>
+      (await consumeRateLimit(deps.db, { key, max: 20, windowMs: 10 * 60_000 })).allowed,
+    resolveSessionUser: async (headers) => {
+      const sessao = await resolverUsuarioAutenticadoOuNull(deps, headers);
+      return sessao ? { userId: sessao.usuario.id, tenantId: sessao.usuario.idPlataforma } : null;
+    },
+  }),
+);
 
 // aperture-ij2g5 — owner-private painel access runs before the SSR catch-all.
 // Cache policy is attached before every redirect/404/owner response, and denied

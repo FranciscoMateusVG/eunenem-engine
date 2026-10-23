@@ -161,7 +161,15 @@ export function describeCampanhaRepositoryConformance(name: string, options: Con
       });
       await options.saveCampanha(repo, campanha);
       const found = await repo.findById(campanha.id);
-      expect(found).toEqual(campanha);
+      // These relations have no position column/order contract. Postgres may
+      // use the composite-PK index rather than insertion order after ANALYZE.
+      expect(found).toEqual({
+        ...campanha,
+        idsAdministradores: expect.arrayContaining(campanha.idsAdministradores),
+        opcoes: expect.arrayContaining(campanha.opcoes),
+      });
+      expect(found?.idsAdministradores).toHaveLength(campanha.idsAdministradores.length);
+      expect(found?.opcoes).toHaveLength(campanha.opcoes.length);
     });
 
     it('save emits db.arrecadacao_campanhas.save span', async () => {

@@ -545,13 +545,14 @@ describe('admin.repasses.show (aperture-riywh)', () => {
     });
     await expect(
       rig.caller.admin.repasses.resolverManualPago({
+        motivo: 'Conferido no extrato sintético',
         idRepasse,
         codigoSolicitacao: 'different-receipt',
       }),
     ).resolves.toMatchObject({ status: 'enviado_ao_banco' });
     await expect(
       rig.caller.admin.repasses.resolverManualFalhou({ idRepasse }),
-    ).resolves.toMatchObject({ status: 'enviado_ao_banco' });
+    ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
 
     const linked = await rig.livroFinanceiroRepository.findLancamentosByIds(
       idsLancamentos as never,
@@ -717,6 +718,7 @@ describe('admin.repasses.resolverManualPago (aperture-477nz)', () => {
     const { idRepasse, idsLancamentos } = await seedVerificandoFlagged(rig);
 
     const result = await rig.caller.admin.repasses.resolverManualPago({
+      motivo: 'Conferido no extrato sintético',
       idRepasse,
       codigoSolicitacao: CANDIDATO_CODIGO,
     });
@@ -749,6 +751,7 @@ describe('admin.repasses.resolverManualPago (aperture-477nz)', () => {
     const { idRepasse, idsLancamentos } = await seedPendingRepasse(rig);
 
     const result = await rig.caller.admin.repasses.resolverManualPago({
+      motivo: 'Conferido no extrato sintético',
       idRepasse,
       codigoSolicitacao: CANDIDATO_CODIGO,
     });
@@ -769,10 +772,12 @@ describe('admin.repasses.resolverManualPago (aperture-477nz)', () => {
     const { idRepasse, idsLancamentos } = await seedVerificandoFlagged(rig);
 
     await rig.caller.admin.repasses.resolverManualPago({
+      motivo: 'Conferido no extrato sintético',
       idRepasse,
       codigoSolicitacao: CANDIDATO_CODIGO,
     });
     const second = await rig.caller.admin.repasses.resolverManualPago({
+      motivo: 'Conferido no extrato sintético',
       idRepasse,
       codigoSolicitacao: 'a_different_codigo',
     });
@@ -791,6 +796,7 @@ describe('admin.repasses.resolverManualPago (aperture-477nz)', () => {
   it('maps a missing repasse to NOT_FOUND', async () => {
     await expect(
       rig.caller.admin.repasses.resolverManualPago({
+        motivo: 'Conferido no extrato sintético',
         idRepasse: randomUUID(),
         codigoSolicitacao: CANDIDATO_CODIGO,
       }),
@@ -800,54 +806,24 @@ describe('admin.repasses.resolverManualPago (aperture-477nz)', () => {
   it('rejects a blank codigoSolicitacao with BAD_REQUEST', async () => {
     const { idRepasse } = await seedVerificandoFlagged(rig);
     await expect(
-      rig.caller.admin.repasses.resolverManualPago({ idRepasse, codigoSolicitacao: '   ' }),
+      rig.caller.admin.repasses.resolverManualPago({
+        motivo: 'Conferido no extrato sintético',
+        idRepasse,
+        codigoSolicitacao: '   ',
+      }),
     ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
   });
 });
 
-describe('admin.repasses.resolverManualFalhou (aperture-477nz)', () => {
-  let rig: TestRig;
-  beforeEach(async () => {
-    rig = await buildRig();
-  });
-
-  it('positive no-payment assertion: status falhou, no money moves, clears flag, audit row', async () => {
-    const { idRepasse, idsLancamentos } = await seedVerificandoFlagged(rig);
-
-    const result = await rig.caller.admin.repasses.resolverManualFalhou({ idRepasse });
-
-    expect(result.status).toBe('falhou');
-    expect(result.needsManualResolution).toBe(false);
-
-    const repasse = await rig.livroFinanceiroRepository.findRepasseById(idRepasse as never);
-    expect(repasse?.status).toBe('falhou');
-    expect(repasse?.needsManualResolution).toBe(false);
-    // No money moved — the debit point is never touched on a falhou resolution.
-    for (const l of await rig.livroFinanceiroRepository.findLancamentosByIds(
-      idsLancamentos as never,
-    )) {
-      expect(l.transferidoEm).toBeNull();
-    }
-    const attempts = await rig.livroFinanceiroRepository.findTransferAttemptsByRepasseId(
-      idRepasse as never,
-    );
-    expect(attempts.at(-1)?.outcome).toBe('falhou');
-    expect(attempts.at(-1)?.requestSummary).toContain('resolucao_manual_falhou_por:');
-  });
-
-  it('is a no-op on a non-flagged repasse: does not force falhou', async () => {
-    const { idRepasse } = await seedPendingRepasse(rig);
-
-    const result = await rig.caller.admin.repasses.resolverManualFalhou({ idRepasse });
-
-    expect(result.status).toBe('solicitado');
-    const repasse = await rig.livroFinanceiroRepository.findRepasseById(idRepasse as never);
-    expect(repasse?.status).toBe('solicitado');
-  });
-
-  it('maps a missing repasse to NOT_FOUND', async () => {
+describe('45h33 retired unchecked manual-failure route', () => {
+  it('never permits an assertion to bypass fresh Inter evidence', async () => {
+    const rig = await buildRig();
+    const { idRepasse } = await seedVerificandoFlagged(rig);
     await expect(
-      rig.caller.admin.repasses.resolverManualFalhou({ idRepasse: randomUUID() }),
-    ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+      rig.caller.admin.repasses.resolverManualFalhou({ idRepasse }),
+    ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    expect((await rig.livroFinanceiroRepository.findRepasseById(idRepasse as never))?.status).toBe(
+      'verificando',
+    );
   });
 });

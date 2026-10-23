@@ -69,8 +69,8 @@ export function Hero({
 } = {}) {
   const { tweaks } = useTweaks();
   const { babyName, genero } = tweaks;
-  const shownCover = tweaks.fotoCapaUrl ?? coverUrl;
-  const shownProfile = tweaks.fotoPerfilUrl ?? profileUrl;
+  const shownCover = tweaks.fotoCapaUrl !== undefined ? tweaks.fotoCapaUrl : coverUrl;
+  const shownProfile = tweaks.fotoPerfilUrl !== undefined ? tweaks.fotoPerfilUrl : profileUrl;
   const hasEventDate = typeof eventDate === "string" && eventDate.length > 0;
   const eventLabel = tipoEvento ? HERO_EVENT_TYPE_LABEL[tipoEvento] : "chá de bebê";
 

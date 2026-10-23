@@ -1,3 +1,5 @@
+import { ConfiguracoesBody } from '@/components/eunenem/painel/ConfiguracoesBody';
+import { CompartilharBody } from "@/components/eunenem/painel/CompartilharBody";
 import { useEffect, type ReactNode } from "react";
 
 import { BancariosBody } from "@/components/eunenem/painel/BancariosBody";
@@ -7,6 +9,7 @@ import { PainelLayout } from "@/components/eunenem/painel/PainelLayout";
 import { PainelPlaceholder } from "@/components/eunenem/painel/PainelPlaceholder";
 import { ListaPresentesBody } from "@/components/eunenem/painel/ListaPresentesBody";
 import { MensagensBody } from "@/components/eunenem/painel/MensagensBody";
+import { PersonalizarBody } from "@/components/eunenem/painel/PersonalizarBody";
 import { PerfilBody } from "@/components/eunenem/painel/PerfilBody";
 import { PresentesBody } from "@/components/eunenem/painel/PresentesBody";
 import { PAINEL_SECTION_META, type PainelSection } from "@/lib/painelRoutes";
@@ -40,11 +43,14 @@ type PainelSectionBody = (props: PainelSectionBodyProps) => ReactNode;
 export const PAINEL_SECTION_PAGES: Partial<
   Record<PainelSection, PainelSectionBody>
 > = {
+  compartilhar: CompartilharBody,
   presentes: PresentesBody,           // aperture-xjwc
   lista: ListaPresentesBody,          // aperture-4je0p
   convite: ConviteBody,               // aperture-q8rr
   convidados: ConvidadosBody,         // aperture-x1b3u
   mensagens: MensagensBody,           // aperture-1oafq
+  personalizar: PersonalizarBody,
+  configuracoes: ConfiguracoesBody,
   perfil: PerfilBody, // aperture-1z6xa
   bancarios: BancariosBody, // aperture-6xjcw
 };

@@ -19,8 +19,8 @@
  * imported from THIS module (single relative resolution → stable instanceof):
  *   - CampanhaAcessoNegadoError → UNAUTHORIZED (session fail / not-owner /
  *     not-found — all non-leaking)
- *   - CampanhaInexistenteError  → INTERNAL_SERVER_ERROR (absent branch + the
- *     caller administers no campanha = data-model inconsistency; fail loud)
+ *   - CampanhaInexistenteError  → NOT_FOUND (no owned default; a valid member-only
+ *     account must supply explicit campaign context)
  */
 import type { Campanha, IdCampanha, Usuario } from '../../../../src/index.js';
 import type { TrpcContext } from './context.js';
@@ -31,7 +31,7 @@ export class CampanhaAcessoNegadoError extends Error {
   public readonly name = 'CampanhaAcessoNegadoError';
 }
 
-/** INTERNAL-bearing sentinel — the caller administers no campanha at all. */
+/** NOT_FOUND-bearing sentinel — the caller has no owned default campaign. */
 export class CampanhaInexistenteError extends Error {
   public readonly name = 'CampanhaInexistenteError';
 }
@@ -75,7 +75,7 @@ export async function resolverCampanhaAdministrada(
   // Back-compat: bare URL / old client → the oldest campanha (criada_em ASC).
   const campanha = await deps.campanhaRepository.findByAdministrador(usuario.idConta);
   if (!campanha) {
-    throw new CampanhaInexistenteError('Usuario nao administra nenhuma campanha');
+    throw new CampanhaInexistenteError('Nenhuma campanha propria; informe idCampanha' );
   }
   return { usuario, campanha };
 }

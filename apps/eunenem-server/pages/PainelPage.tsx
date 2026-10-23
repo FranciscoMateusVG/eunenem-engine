@@ -16,6 +16,9 @@ import { trpc } from '@/lib/trpc';
 import { sendPageView } from '@/lib/analytics';
 import { pageViewProps } from '@/lib/rota-canonica';
 import { useListaDeConvidadosData } from '@/lib/convidados';
+import { useAcessoCampanha } from '@/components/eunenem/painel/useAcessoCampanha';
+import { filtrarMenuPorAcesso, visibilidadeRecebido } from '@/lib/painel-permissoes';
+import { estadoDadosDashboard } from '@/lib/painel-dashboard-estado';
 import { deriveGiftListUnitCounts, derivePainelCounts } from '@/lib/painel-counts';
 import { PainelDataBoundary } from '@/components/eunenem/painel/PainelDataBoundary';
 
@@ -101,9 +104,13 @@ export function PainelPage({
     : campanhasQ.isLoading
       ? null
       : undefined;
-  const summary = useStubExtratoSummary(idCampanha ?? '');
+  // aperture-1z18g — shared-campanha members only fetch what they may see.
+  const acesso = useAcessoCampanha(idCampanha);
+  const summary = useStubExtratoSummary(acesso.pode('extrato:ver') ? (idCampanha ?? '') : '');
   const listaQuery = useContribuicaoList();
-  const convidadosQuery = useListaDeConvidadosData(idCampanha ?? undefined);
+  const convidadosQuery = useListaDeConvidadosData(idCampanha ?? undefined, {
+    enabled: acesso.pode('convidados:ver'),
+  });
 
   const liveReceivedCents = summary.data?.totalRecebidoCents;
   // aperture-kvpvf — finishes the B1 audit. Wire the strip-only
@@ -154,7 +161,8 @@ export function PainelPage({
   // combined with the #304 OAuth-return redirect (which lands every OAuth user
   // on /painel/<slug>), no per-callback patching is needed.
   const meQ = trpc.auth.me.useQuery(undefined, { staleTime: 0 });
-  const mustOnboard = needsOnboarding(meQ.data);
+  const pediuListaPropria = typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('criarMinhaLista') === '1';
+  const mustOnboard = needsOnboarding(meQ.data) || (pediuListaPropria && meQ.data?.onboardingProprioPendente === true && !idCampanhaRota);
 
   // aperture-3ic62 — the REAL baby name for the "página da <X>" header.
   // null (unset or still loading) → PainelLayout falls back to the neutral
@@ -194,10 +202,14 @@ export function PainelPage({
     recadosStripCount: liveRecadosStrip ?? 0,
   };
 
-  const groups = buildPainelMenu(snapshot, {
-    listaTotal: liveListaCounts.total,
-    listaClaimed: liveListaCounts.claimed,
-  });
+  // aperture-1z18g (kpesy-04) — members only see the rows/cards they may use.
+  const groups = filtrarMenuPorAcesso(
+    buildPainelMenu(snapshot, {
+      listaTotal: liveListaCounts.total,
+      listaClaimed: liveListaCounts.claimed,
+    }),
+    acesso.pode,
+  );
 
   // aperture-7nius / aperture-4my2a — tutorial state (Plan 0018 Phase B,
   // real-tRPC swap).
@@ -345,18 +357,20 @@ export function PainelPage({
     );
   }
 
-  const dashboardDataLoading =
-    summary.isLoading || convidadosQuery.isLoading || listaQuery.isLoading;
-  const dashboardDataFailed = Boolean(
-    summary.error || convidadosQuery.error || listaQuery.error,
-  );
+  // aperture-6wl0f — meuAcesso is part of the gate: a failed permission read
+  // shows the error/retry state instead of a dashboard stripped of every card.
+  const {
+    loading: dashboardDataLoading,
+    failed: dashboardDataFailed,
+    retry: retryDashboardData,
+  } = estadoDadosDashboard({
+    acesso,
+    summary,
+    convidados: convidadosQuery,
+    lista: listaQuery,
+  });
 
   if (dashboardDataLoading || dashboardDataFailed) {
-    const retryDashboardData = () => {
-      if (summary.error) void summary.refetch();
-      if (convidadosQuery.error) void convidadosQuery.refetch();
-      if (listaQuery.error) void listaQuery.refetch();
-    };
 
     return (
       <PainelLayout
@@ -384,7 +398,13 @@ export function PainelPage({
       genero={genero}
     >
       <PainelPageView idCampanha={idCampanha ?? undefined} />
-      <PainelHeaderCard snapshot={snapshot} slug={slug} campanhaTitulo={campanhaTitulo} />
+      {meQ.data?.onboardingProprioPendente && meQ.data.idCampanhaCompartilhada && <a className="mb-4 inline-block rounded border border-plum px-4 py-2 text-plum" href={`/painel/${slug}?criarMinhaLista=1`}>Criar minha própria lista</a>}
+      <PainelHeaderCard
+        snapshot={snapshot}
+        slug={slug}
+        campanhaTitulo={campanhaTitulo}
+        visibilidade={visibilidadeRecebido(acesso.pode)}
+      />
       <PainelMenu groups={groups} slug={slug} />
       <PainelTutorialTrigger
         visible={!overlayOpen}

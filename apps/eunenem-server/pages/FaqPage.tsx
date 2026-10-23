@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 
+import { PublicInfoHeader } from "@/components/eunenem/PublicInfoHeader";
 import { Footer } from "@/components/eunenem/Footer";
 import { sendEvent, sendPageView } from "@/lib/analytics";
 import { pageViewProps } from "@/lib/rota-canonica";
@@ -14,13 +15,6 @@ import { EUNENEM_SUPPORT_WHATSAPP_URL } from "@/lib/painelRoutes";
 // pills, and a "ainda tem dúvidas?" contact CTA. Content is the operator's
 // exact copy — NOT invented.
 //
-// NOTE (content gap flagged to operator via aperture-sgjnn): the source
-// artifact ships TWO answers incomplete — Q3 "taxas" is empty and Q4 "em
-// quanto tempo" is truncated mid-sentence. Those are factual (fee schedule +
-// payout timing) and must come from the operator, not be fabricated. They are
-// marked PENDING below and rendered with a graceful contact fallback until the
-// real copy lands.
-//
 // Reuses the shared <Footer/> + the app's existing design tokens; the
 // FAQ-specific tokens the artifact relies on (--marker, --lime*, --coral*,
 // shadows) are scoped on .faq-page so the page is self-contained.
@@ -29,8 +23,8 @@ type QPart = string | { hl: string };
 
 interface QA {
   q: QPart[];
-  /** Operator's exact answer HTML. `null` = pending operator copy (Q3/Q4). */
-  a: string | null;
+  /** Approved answer HTML. */
+  a: string;
   stamp: string;
 }
 
@@ -38,8 +32,7 @@ interface QA {
 // support WhatsApp, not the legacy eunenem.com contact page.
 const FALAR_CONOSCO_HREF = EUNENEM_SUPPORT_WHATSAPP_URL;
 
-// Verbatim from the artifact's FAQ[] array. Q3 (taxas) + Q4 (tempo) come
-// incomplete in the source → null, pending the operator's real copy.
+// FAQ answers, including the approved fee and payout copy.
 const FAQ: QA[] = [
   {
     q: ["para fazer minha lista de presentes eu preciso ", { hl: "pagar?" }],
@@ -53,16 +46,22 @@ const FAQ: QA[] = [
   },
   {
     q: ["quais são as ", { hl: "taxas" }, " cobradas?"],
-    // PENDING — artifact ships this answer empty; fee schedule must come from
-    // the operator (do not invent).
-    a: null,
+    a: `Criar sua lista na EuNeném é <strong>gratuito</strong> e você recebe <strong>100% do valor que definir para cada presente</strong>. 💛<br />
+Quando um convidado realiza o pagamento, ele verá o valor do presente e o valor total da contribuição antes de finalizar.<br />
+Para você, <strong>não há nenhum desconto sobre o valor do presente</strong>. A taxa é paga pelo convidado e representa apenas um <strong>pequeno acréscimo ao valor da contribuição</strong>.<br />
+A taxa é de <strong>8,9% sobre o valor do presente</strong>.<br />
+<strong>Exemplo:</strong> se você adicionar um presente de <strong>R$ 50</strong>, você recebe <strong>R$ 50</strong>. Para o convidado, o valor total será de <strong>R$ 54,45</strong> — apenas <strong>R$ 4,45 de acréscimo</strong>.<br />
+✨ <strong>Assim, você cria sua lista gratuitamente e recebe integralmente o valor dos presentes.</strong><br /><br />
+<em>Válido para listas criadas a partir de 13/09/2026</em>`,
     stamp: "sem surpresas ♡",
   },
   {
     q: ["em quanto tempo eu recebo o ", { hl: "dinheiro?" }],
-    // PENDING — artifact truncates this answer ("…assim que c"); payout timing
-    // must come from the operator (do not invent).
-    a: null,
+    a: `O prazo para receber o valor depende da forma de pagamento escolhida pelo convidado:<br />
+<strong>PIX:</strong> o valor fica disponível para resgate em até <strong>10 minutos após o pagamento</strong>.<br />
+<strong>Cartão de crédito:</strong> o valor fica disponível para resgate após <strong>31 dias corridos do pagamento</strong>.<br />
+Depois de solicitar o resgate, o valor é transferido para a sua conta bancária em até <strong>3 dias úteis</strong>.<br />
+💛 Assim, você pode acompanhar os valores recebidos pela sua lista e solicitar o resgate quando estiverem disponíveis.`,
     stamp: "rapidinho ♡",
   },
   {
@@ -111,22 +110,7 @@ export function FaqPage() {
     <div className="faq-page">
       <style>{FAQ_CSS}</style>
 
-      <header className="faq-topbar">
-        <div className="faq-topbar-inner">
-          <a className="faq-logo" href="/" aria-label="EuNeném — início">
-            <img src="/public/logo-landing.png" alt="EuNeném" className="faq-logo-img" />
-          </a>
-          <nav className="faq-nav-right">
-            <a
-              className="faq-nav-link"
-              href={FALAR_CONOSCO_HREF}
-              onClick={() => sendEvent("faq_contato_whatsapp_click", { origem: "topbar" })}
-            >
-              falar conosco
-            </a>
-          </nav>
-        </div>
-      </header>
+      <PublicInfoHeader onContactClick={() => sendEvent("faq_contato_whatsapp_click", { origem: "topbar" })} />
 
       <main className="faq-wrap">
         <section className="faq-card" aria-label="Perguntas frequentes">
@@ -169,25 +153,7 @@ export function FaqPage() {
                   <div className="faq-qa-body">
                     <div className="faq-qa-body-inner">
                       <div className="faq-qa-answer">
-                        {item.a !== null ? (
-                          <span dangerouslySetInnerHTML={{ __html: item.a }} />
-                        ) : (
-                          // PENDING operator copy — graceful, non-invented fallback.
-                          <span>
-                            estamos finalizando esse detalhe com todo o cuidado ♡ se
-                            precisar dessa resposta agora, é só{" "}
-                            <a
-                              className="faq-inline-link"
-                              href={FALAR_CONOSCO_HREF}
-                              onClick={() =>
-                                sendEvent("faq_contato_whatsapp_click", { origem: "resposta_pendente" })
-                              }
-                            >
-                              falar com a gente
-                            </a>
-                            .
-                          </span>
-                        )}
+                        <span dangerouslySetInnerHTML={{ __html: item.a }} />
                         <br />
                         <span className="faq-stamp">{item.stamp}</span>
                       </div>
@@ -250,15 +216,6 @@ const FAQ_CSS = `
   padding:0 .06em;border-radius:2px;
 }
 
-/* topbar */
-.faq-topbar{position:sticky;top:0;z-index:50;background:rgba(248,247,246,.78);backdrop-filter:blur(14px) saturate(1.2);-webkit-backdrop-filter:blur(14px) saturate(1.2);border-bottom:1px solid var(--line);}
-.faq-topbar-inner{max-width:1080px;margin:0 auto;padding:12px 26px;display:flex;align-items:center;justify-content:space-between;gap:16px;}
-.faq-logo{display:inline-flex;align-items:center;text-decoration:none;}
-.faq-logo-img{height:54px;width:auto;background:rgba(255,255,255,.95);padding:6px 12px;border-radius:14px;}
-.faq-nav-right{display:flex;align-items:center;gap:18px;}
-.faq-nav-link{font-size:12px;color:var(--ink-soft);text-decoration:none;text-transform:uppercase;letter-spacing:.12em;font-weight:600;}
-.faq-nav-link:hover{color:var(--plum);}
-
 /* page */
 .faq-wrap{max-width:1080px;margin:0 auto;padding:46px 26px 90px;}
 .faq-card{position:relative;background:var(--paper);border:1px solid var(--line);border-radius:26px;box-shadow:var(--sh-mid);padding:60px 56px 56px;overflow:hidden;}
@@ -296,7 +253,6 @@ const FAQ_CSS = `
 .faq-qa-body-inner{overflow:hidden;}
 .faq-qa-answer{padding:0 26px 26px 74px;font-size:15.5px;color:var(--ink-soft);line-height:1.62;max-width:620px;}
 .faq-qa-answer .accent{color:var(--lilac-deep);font-weight:600;}
-.faq-inline-link{color:var(--lilac-deep);font-weight:600;text-decoration:underline;}
 .faq-stamp{display:inline-block;margin-top:14px;font-family:"Caveat",cursive;font-weight:700;font-size:19px;color:var(--lime-deep);border:1.5px solid var(--lime);border-radius:999px;padding:3px 14px;transform:rotate(-3deg);background:rgba(199,220,110,.12);}
 
 /* contact */

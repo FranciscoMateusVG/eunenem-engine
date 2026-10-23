@@ -154,8 +154,12 @@ export const authRouter = t.router({
     const campanhasDoUsuario = await deps.campanhaRepository.findCampanhasByAdministrador(
       usuario.idConta,
     );
+    const compartilhamento = await deps.contextoCompartilhamentoOnboarding?.(usuario.id, usuario.idConta, usuario.idPlataforma);
+    const campanhasProprias = compartilhamento
+      ? campanhasDoUsuario.filter((c) => compartilhamento.idsProprias.includes(c.id))
+      : campanhasDoUsuario; // isolated pre-sharing memory fixtures only
     const perfisDoUsuario = await Promise.all(
-      campanhasDoUsuario.map((c) => deps.perfilCampanhaRepository.findByIdCampanha(c.id)),
+      campanhasProprias.map((c) => deps.perfilCampanhaRepository.findByIdCampanha(c.id)),
     );
     const temCampanhaNomeada = perfisDoUsuario.some(
       (p) => (p?.conteudo.nomeBebe ?? '').trim().length > 0,
@@ -172,7 +176,9 @@ export const authRouter = t.router({
         // future login.
       }
     }
-    const needsOnboarding = onboardingConcluidoEm === null && !temCampanhaNomeada;
+    const onboardingProprioPendente = onboardingConcluidoEm === null && !temCampanhaNomeada;
+    const idCampanhaCompartilhada = compartilhamento?.idCompartilhada ?? null;
+    const needsOnboarding = onboardingProprioPendente && idCampanhaCompartilhada === null;
 
     // aperture-mu1v9 (uxv83 rider) — the default campanha's event date,
     // sourced from the `eventos` single source (the same value the convite
@@ -257,6 +263,8 @@ export const authRouter = t.router({
        * baby name via perfil.atualizar.
        */
       needsOnboarding,
+      onboardingProprioPendente,
+      idCampanhaCompartilhada,
       /**
        * aperture — `true` when the caller's email is in the 1.0 legacy list
        * (same case-insensitive matcher as campanhas.list; self-only). The

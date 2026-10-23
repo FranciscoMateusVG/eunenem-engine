@@ -40,7 +40,7 @@ export function PainelMenu({ groups, slug }: Props) {
   const rightGroups = groups.filter((g) => !LEFT_COLUMN_IDS.has(g.id));
 
   return (
-    <div className="painel-menu-wrap">
+    <div className="painel-menu-wrap painel-menu-compact">
       <div className="painel-menu-grid">
         <div className="painel-menu-col">
           {leftGroups.map((group) => (

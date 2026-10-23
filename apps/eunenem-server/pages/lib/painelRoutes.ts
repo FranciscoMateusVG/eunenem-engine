@@ -17,15 +17,18 @@
 // aperture-7mqsg — EuNeném ATENDIMENTO WhatsApp (support), NOT guest/share
 // links. Single source for every support entry point (painel menu row,
 // landing floating button). No prefilled ?text= — the user writes the message.
-export const EUNENEM_SUPPORT_WHATSAPP_NUMBER_DISPLAY = "(11) 96108-0489";
-export const EUNENEM_SUPPORT_WHATSAPP_URL = "https://wa.me/5511961080489";
+export const EUNENEM_SUPPORT_WHATSAPP_NUMBER_DISPLAY = "(31) 99601-1432";
+export const EUNENEM_SUPPORT_WHATSAPP_URL = "https://wa.me/5531996011432";
 
 export const PAINEL_SECTIONS = [
+  "compartilhar",
   "presentes", // Presentes recebidos (statement + payout) — aperture-xjwc
   "lista", // Minha lista de presentes — aperture-4je0p
   "convite", // Convites (invite builder/preview) — aperture-q8rr
   "convidados", // Lista de convidados (RSVP) — aperture-x1b3u
   "mensagens", // Mensagens recebidas
+  "configuracoes",
+  "personalizar",
   "perfil", // Editar perfil — aperture-1z6xa
   "bancarios", // Dados bancários (Pix/bank) — aperture-6xjcw
 ] as const;
@@ -109,6 +112,8 @@ export function menuItemHref(
   campanhaSlug?: string | null,
 ): string | undefined {
   switch (id) {
+    case "compartilhar":
+      return painelHref(slug, "compartilhar", idCampanha);
     case "presentes":
       return painelHref(slug, "presentes", idCampanha);
     case "lista":
@@ -119,6 +124,10 @@ export function menuItemHref(
       return painelHref(slug, "convidados", idCampanha);
     case "mensagens":
       return painelHref(slug, "mensagens", idCampanha);
+    case "configuracoes":
+      return painelHref(slug, "configuracoes", idCampanha);
+    case "personalizar":
+      return painelHref(slug, "personalizar", idCampanha);
     case "perfil":
       return painelHref(slug, "perfil", idCampanha);
     case "bancarios":
@@ -133,7 +142,7 @@ export function menuItemHref(
       return paginaSharePath(slug, idCampanha, campanhaSlug);
     case "suporte":
       // External support channel — no in-app page in scope.
-      // aperture-7mqsg — EuNeném atendimento: (11) 96108-0489.
+      // aperture-7mqsg — EuNeném atendimento: (31) 99601-1432.
       return EUNENEM_SUPPORT_WHATSAPP_URL;
     default:
       return undefined; // e.g. `rifa` (soon) — not navigable yet.
@@ -149,6 +158,7 @@ export const PAINEL_SECTION_META: Record<
   PainelSection,
   { eyebrow: string; title: string; note: string }
 > = {
+  compartilhar: { eyebrow: "juntos", title: "compartilhar", note: "Gerencie o acesso à campanha." },
   presentes: {
     eyebrow: "quase lá ♡",
     title: "presentes recebidos",
@@ -174,6 +184,8 @@ export const PAINEL_SECTION_META: Record<
     title: "mensagens recebidas",
     note: "Em breve você lê aqui todos os recados carinhosos.",
   },
+  configuracoes: { eyebrow: "do seu jeito", title: "Configurações", note: "Acessos, privacidade e notificações" },
+  personalizar: { eyebrow: "do seu jeitinho ♡", title: "Personalizar página", note: "Fotos, cores e prévia da sua página." },
   perfil: {
     eyebrow: "sobre você ♡",
     title: "editar meu perfil",

@@ -237,6 +237,9 @@ export function PhotoSlot({
   onUpload,
   dropzoneId,
   inline = false,
+  disabled = false,
+  compact = false,
+  onRemove,
   label,
 }: {
   slot: FotoSlot;
@@ -250,6 +253,10 @@ export function PhotoSlot({
    * enviando/salva/erro status (the painel form has its own toasts).
    */
   inline?: boolean;
+  disabled?: boolean;
+  /** Compact square thumbnail; the saved crop keeps SLOT_CONFIG.aspect. */
+  compact?: boolean;
+  onRemove?: () => void;
   /** Override the SLOT_CONFIG header label (inline editor uses page wording). */
   label?: string;
 }) {
@@ -261,7 +268,7 @@ export function PhotoSlot({
   const [saved, setSaved] = useState(false);
   const shownLabel = label ?? cfg.label;
 
-  const openPicker = () => inputRef.current?.click();
+  const openPicker = () => { if (!disabled && !uploading) inputRef.current?.click(); };
   const handleKey = (e: React.KeyboardEvent<HTMLDivElement>) => {
     if (e.key === "Enter" || e.key === " ") {
       e.preventDefault();
@@ -288,7 +295,7 @@ export function PhotoSlot({
   const statusId = dropzoneId ? `${dropzoneId}-status` : undefined;
 
   return (
-    <div className="perfil-foto-slot">
+    <div className={`perfil-foto-slot${compact ? " perfil-foto-slot--compact" : ""}`}>
       <div className="perfil-foto-header">
         <span className="perfil-foto-icon" aria-hidden="true">
           {ico.photo}
@@ -306,13 +313,14 @@ export function PhotoSlot({
         id={dropzoneId}
         className={`perfil-foto-dropzone${filled ? " perfil-foto-dropzone--filled" : ""}`}
         role="button"
-        tabIndex={0}
+        tabIndex={disabled ? -1 : 0}
+        aria-disabled={disabled || undefined}
         aria-label={inline ? `${cfg.cta} (${PHOTO_SAVE_DISCLOSURE})` : cfg.cta}
         aria-describedby={statusId}
         aria-busy={uploading || undefined}
         onClick={openPicker}
         onKeyDown={handleKey}
-        style={{ aspectRatio: String(cfg.aspect), position: "relative" }}
+        style={{ aspectRatio: String(compact ? 1 : cfg.aspect), position: "relative" }}
       >
         {uploading ? (
           <span className="perfil-spinner" aria-hidden="true" />
@@ -356,7 +364,12 @@ export function PhotoSlot({
           {error}
         </span>
       )}
-      {filled && !uploading && (
+      {compact && filled && onRemove && (
+        <button type="button" className="personalizar-photo-remove" aria-label={`Remover ${shownLabel.toLowerCase()}`} disabled={disabled || uploading} onClick={onRemove}>
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7M14 10v7" /></svg>
+        </button>
+      )}
+      {!compact && filled && !uploading && (
         <button
           type="button"
           className="perfil-foto-replace"
@@ -379,6 +392,7 @@ export function PhotoSlot({
         ref={inputRef}
         className="perfil-foto-input"
         type="file"
+        disabled={disabled}
         accept="image/jpeg,image/png,image/webp"
         onChange={(e) => {
           const f = e.target.files?.[0] ?? null;

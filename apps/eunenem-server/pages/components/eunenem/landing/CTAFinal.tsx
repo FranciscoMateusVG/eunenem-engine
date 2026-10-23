@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react';
 import { useAuthModal } from '@/components/eunenem/auth/AuthModalProvider';
 import { LANDING_FAQS } from '@/lib/mocks/landing';
+import { FaqAnswer } from './FaqAnswer';
 import { sendEvent } from '@/lib/analytics';
 // aperture-q1j2 — final CTA on a tri-stop gradient.
 
@@ -56,7 +57,7 @@ export function CTAFinal() {
           → criar minha lista agora — é grátis
         </button>
         <p className="text-[13px] text-ink-mute mt-4.5">
-          Menos de 2 minutos · transparência total em taxas · suporte via
+          Criação grátis · transparência total em taxas · suporte via
           WhatsApp
         </p>
 
@@ -81,7 +82,7 @@ export function CTAFinal() {
               </button>
               <div className="faq-a">
                 <div className="px-5 pb-5 text-ink-soft text-[14.5px] leading-relaxed">
-                  {f.a}
+                  {f.a.includes('**') ? <FaqAnswer text={f.a} /> : f.a}
                   {f.link ? (
                     <>
                       {' '}

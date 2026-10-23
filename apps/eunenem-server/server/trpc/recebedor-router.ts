@@ -61,6 +61,10 @@ import {
   resolverCampanhaAdministrada,
 } from "./resolve-campanha-administrada.js";
 import {
+  PermissaoCampanhaNegadaError,
+  resolverCampanhaComPermissao,
+} from "./exigir-permissao-campanha.js";
+import {
   applyRepasseLiberacao,
   buildMovimentacoes,
   deriveLiberacao,
@@ -305,7 +309,11 @@ function toTRPCError(err: unknown): TRPCError {
     return new TRPCError({ code: "UNAUTHORIZED", message: err.message, cause: err });
   }
   if (err instanceof CampanhaInexistenteError) {
-    return new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: err.message, cause: err });
+    return new TRPCError({ code: "NOT_FOUND", message: err.message, cause: err });
+  }
+  // aperture-1z18g: admin of the campanha, but the owner didn't grant this action.
+  if (err instanceof PermissaoCampanhaNegadaError) {
+    return new TRPCError({ code: "FORBIDDEN", message: err.message, cause: err });
   }
   if (err instanceof FinanceiroRepasseJaPendenteError) {
     return new TRPCError({
@@ -471,7 +479,7 @@ const extratoRouter = t.router({
     .output(ExtratoSummaryDTOSchema)
     .query(async ({ ctx, input }) => {
       try {
-        await resolverCampanhaAdministrada(ctx, input.idCampanha);
+        await resolverCampanhaComPermissao(ctx, input.idCampanha, "extrato:ver");
 
         const now = ctx.deps.clock();
         const [rawStates, repasses] = await Promise.all([
@@ -621,7 +629,7 @@ const extratoRouter = t.router({
     .output(ExtratoListOutputSchema)
     .query(async ({ ctx, input }) => {
       try {
-        await resolverCampanhaAdministrada(ctx, input.idCampanha);
+        await resolverCampanhaComPermissao(ctx, input.idCampanha, "extrato:ver");
 
         const now = ctx.deps.clock();
         const [rawStates, repasses] = await Promise.all([
@@ -729,7 +737,12 @@ const transferenciaRouter = t.router({
       try {
         // Capture the resolved admin usuario for the analytics distinct_id
         // (aperture-ppuay) — the auth check itself is the primary purpose.
-        const { usuario } = await resolverCampanhaAdministrada(ctx, input.idCampanha);
+        // aperture-1z18g: gated by saque:solicitar BEFORE any saldo/recebedor read.
+        const { usuario } = await resolverCampanhaComPermissao(
+          ctx,
+          input.idCampanha,
+          "saque:solicitar",
+        );
 
         // aperture-gdyii bug 2 — SERVER-SIDE recebedor gate. The frontend
         // hasRecebedor gate is advisory only; without this check a campanha
@@ -808,7 +821,11 @@ const criarProcedure = t.procedure
       // non-admin caller / unknown campanha (no existence leak). idConta is
       // the caller's session-derived identity that the use-case re-validates
       // via its admin guard (defense in depth).
-      const { usuario } = await resolverCampanhaAdministrada(ctx, input.idCampanha);
+      const { usuario } = await resolverCampanhaComPermissao(
+        ctx,
+        input.idCampanha,
+        "recebedor:gerenciar",
+      );
       const idConta = usuario.idConta;
 
       const result = await criarRecebedorParaCampanha(
@@ -839,7 +856,7 @@ const listMovimentacoesProcedure = t.procedure
   .output(ListMovimentacoesOutputSchema)
   .query(async ({ ctx, input }) => {
     try {
-      await resolverCampanhaAdministrada(ctx, input.idCampanha); // same auth as extrato.summary / extrato.list
+      await resolverCampanhaComPermissao(ctx, input.idCampanha, "extrato:ver"); // same auth as extrato.summary / extrato.list
       const [states, repasses] = await Promise.all([
         buildExtratoStates(ctx, input.idCampanha, ctx.deps.clock()),
         ctx.deps.livroFinanceiroRepository.findRepassesByIdCampanha(
@@ -869,11 +886,42 @@ const recebedorGetProcedure = t.procedure
   .output(DadosRecebedorSchema.nullable())
   .query(async ({ ctx, input }): Promise<DadosRecebedor | null> => {
     try {
-      await resolverCampanhaAdministrada(ctx, input.idCampanha);
+      // aperture-1z18g: full bank data (CPF, chave/conta) only for owners and
+      // members granted recebedor:gerenciar. Everyone else reads recebedor.status.
+      await resolverCampanhaComPermissao(ctx, input.idCampanha, "recebedor:gerenciar");
       const ativo = await ctx.deps.recebedorRepository.findAtivoByCampanhaId(
         input.idCampanha as IdCampanha,
       );
       return ativo?.dadosRecebedor ?? null;
+    } catch (err) {
+      throw toTRPCError(err);
+    }
+  });
+
+/**
+ * aperture-1z18g — non-sensitive recebedor status for EVERY admin of the
+ * campanha (whether one is configured + which rail). Drives hasRecebedor /
+ * the transfer modal for members who may withdraw but must not see the bank
+ * data that recebedor.get returns.
+ */
+const RecebedorStatusOutputSchema = z.object({
+  configurado: z.boolean(),
+  metodo: z.enum(["pix", "conta"]).nullable(),
+});
+
+const recebedorStatusProcedure = t.procedure
+  .input(RecebedorGetInputSchema)
+  .output(RecebedorStatusOutputSchema)
+  .query(async ({ ctx, input }) => {
+    try {
+      await resolverCampanhaAdministrada(ctx, input.idCampanha);
+      const ativo = await ctx.deps.recebedorRepository.findAtivoByCampanhaId(
+        input.idCampanha as IdCampanha,
+      );
+      return {
+        configurado: ativo !== undefined && ativo !== null,
+        metodo: ativo?.dadosRecebedor.metodo ?? null,
+      };
     } catch (err) {
       throw toTRPCError(err);
     }
@@ -889,7 +937,11 @@ const recebedorAtualizarProcedure = t.procedure
   .output(DadosRecebedorSchema)
   .mutation(async ({ ctx, input }): Promise<DadosRecebedor> => {
     try {
-      const { usuario } = await resolverCampanhaAdministrada(ctx, input.idCampanha);
+      const { usuario } = await resolverCampanhaComPermissao(
+        ctx,
+        input.idCampanha,
+        "recebedor:gerenciar",
+      );
       const idCampanha = input.idCampanha as IdCampanha;
 
       const ativo = await ctx.deps.recebedorRepository.findAtivoByCampanhaId(idCampanha);
@@ -973,7 +1025,8 @@ const marcarResgatePendenteProcedure = t.procedure
   .output(z.object({ pendenteDesde: z.date() }))
   .mutation(async ({ ctx, input }): Promise<{ pendenteDesde: Date }> => {
     try {
-      await resolverCampanhaAdministrada(ctx, input.idCampanha);
+      // aperture-1z18g: "preencher depois" is part of bank onboarding.
+      await resolverCampanhaComPermissao(ctx, input.idCampanha, "recebedor:gerenciar");
       const { pendenteDesde } = await marcarResgatePendente(
         {
           resgatePendenteRepository: ctx.deps.resgatePendenteRepository,
@@ -991,6 +1044,7 @@ const marcarResgatePendenteProcedure = t.procedure
 export const recebedorRouter = t.router({
   criar: criarProcedure,
   get: recebedorGetProcedure,
+  status: recebedorStatusProcedure,
   atualizar: recebedorAtualizarProcedure,
   getResgatePendente: getResgatePendenteProcedure,
   marcarResgatePendente: marcarResgatePendenteProcedure,

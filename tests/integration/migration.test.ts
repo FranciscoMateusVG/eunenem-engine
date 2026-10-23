@@ -484,7 +484,84 @@ describe('Migration round-trip', () => {
     //    this sequence must start at the LATEST migration and walk earlier.
     //    Adding a new migration on top REQUIRES prepending its down-step here.
 
-    // 20260925_055_add_desativado_em_to_usuarios → actual TIP.
+    // 066 owner alert lifecycle emails widen the three type CHECKs; down
+    // refuses while any new-type row exists, then narrows them back.
+    for (const table of [
+      'lifecycle_email_preferences',
+      'lifecycle_email_events',
+      'lifecycle_email_deliveries',
+    ]) {
+      const check = await getConstraintDefinition(db, `${table}_type_check`);
+      expect(check).toContain('new_message');
+      expect(check).toContain('presence_confirmed');
+    }
+    const alertUser = '30000000-0000-4000-8000-000000000066';
+    await sql`INSERT INTO lifecycle_email_preferences(tenant_id,user_id,type,enabled)
+      VALUES(${alertUser},${alertUser},'presence_confirmed',false)`.execute(db);
+    const refusedAlerts = await migrator.migrateDown();
+    expect(refusedAlerts.error).toBeDefined();
+    await sql`DELETE FROM lifecycle_email_preferences WHERE user_id=${alertUser}`.execute(db);
+    const downAlerts = await migrator.migrateDown();
+    expect(downAlerts.error).toBeUndefined();
+    expect(
+      await getConstraintDefinition(db, 'lifecycle_email_deliveries_type_check'),
+    ).not.toContain('new_message');
+
+    // 065 campanha_privacidade (aperture-851nu): "Exibir recados publicamente".
+    expect(await getColumn(db, 'campanha_privacidade', 'exibir_recados')).toMatchObject({
+      is_nullable: 'NO',
+    });
+    const downPrivacidade = await migrator.migrateDown();
+    expect(downPrivacidade.error).toBeUndefined();
+    expect(await tableExists(db, 'campanha_privacidade')).toBe(false);
+
+    expect(await tableExists(db, 'provider_fee_inter_scans')).toBe(true);
+    expect((await migrator.migrateDown()).error).toBeUndefined();
+    expect(await tableExists(db, 'provider_fee_inter_scans')).toBe(false);
+
+    // 063 observed provider fees; preserve the historical tables below.
+    expect(await tableExists(db, 'provider_fee_events')).toBe(true);
+    expect(await tableExists(db, 'provider_fee_sync')).toBe(true);
+    const downProviderFees = await migrator.migrateDown();
+    expect(downProviderFees.error).toBeUndefined();
+    expect(await tableExists(db, 'provider_fee_events')).toBe(false);
+    expect(await tableExists(db, 'provider_fee_sync')).toBe(false);
+
+    // 062 is a historical no-op: the design-only settings page needs no tables.
+    for (const table of [
+      'campanha_privacidade',
+      'recado_moderacao',
+      'solicitacoes_exclusao_conta',
+    ]) {
+      expect(await tableExists(db, table)).toBe(false);
+    }
+    const downSettingsPlaceholder = await migrator.migrateDown();
+    expect(downSettingsPlaceholder.error).toBeUndefined();
+
+    // 061 email_feedback (aperture-tykv8).
+    expect(await tableExists(db, 'email_feedback')).toBe(true);
+    const downEmailFeedback = await migrator.migrateDown();
+    expect(downEmailFeedback.error).toBeUndefined();
+    expect(await tableExists(db, 'email_feedback')).toBe(false);
+
+    // Lifecycle email ledger/outbox (060).
+    const down060 = await migrator.migrateDown();
+    expect(down060.error).toBeUndefined();
+    expect(await listTableNames(db)).not.toContain('lifecycle_email_deliveries');
+    expect(await listTableNames(db)).not.toContain('lifecycle_email_preferences');
+
+    // Invite permissions (059), sharing and permissions come next.
+    expect((await getColumn(db, 'campanha_convites', 'permissoes'))?.is_nullable).toBe('NO');
+    const downConvitesPermissoes = await migrator.migrateDown();
+    expect(downConvitesPermissoes.error).toBeUndefined();
+    expect(await getColumn(db, 'campanha_convites', 'permissoes')).toBeUndefined();
+    const downSharing = await migrator.migrateDown();
+    expect(downSharing.error).toBeUndefined();
+    expect(await listTableNames(db)).not.toContain('campanha_convites');
+    const downMembrosPermissoes = await migrator.migrateDown();
+    expect(downMembrosPermissoes.error).toBeUndefined();
+    expect(await tableExists(db, 'campanha_membros_permissoes')).toBe(false);
+
     const downDesativadoEm = await migrator.migrateDown();
     expect(downDesativadoEm.error).toBeUndefined();
     expect(await getColumn(db, 'usuarios', 'desativado_em')).toBeUndefined();

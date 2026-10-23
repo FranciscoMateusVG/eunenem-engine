@@ -4,11 +4,12 @@ import { artigoPosse } from "@/lib/concordancia";
 import { toast } from "sonner";
 import { useTweaks } from "../TweaksContext";
 import type { PainelEventSnapshot } from "@/lib/mocks/painelDemo";
-import { useCampanhaSlugRota } from "@/lib/campanhas";
+import { useCampanhaSlugRota, useCampanhaPublicOwnerSlugRota } from "@/lib/campanhas";
 import { paginaShareDisplayPath, paginaShareDisplayPrefix, paginaShareUrl } from "@/lib/pagina-share";
 import { painelHref } from "@/lib/painelRoutes";
 import { useCampanhaRota } from "@/lib/campanha-rota";
 import { sendEvent } from "@/lib/analytics";
+import { VISIBILIDADE_TOTAL, type VisibilidadeRecebido } from "@/lib/painel-permissoes";
 
 // aperture-9qu7k — Painel root hero composition (target screenshot 32).
 //
@@ -58,6 +59,11 @@ interface Props {
    * undefined = list unavailable (chip hidden).
    */
   campanhaTitulo?: string | null;
+  /**
+   * aperture-1z18g — which parts of the recebido card the caller may see
+   * (shared-campanha members). Omitted = everything (owner).
+   */
+  visibilidade?: VisibilidadeRecebido;
 }
 
 const MONTHS_PT = [
@@ -65,7 +71,12 @@ const MONTHS_PT = [
   "jul", "ago", "set", "out", "nov", "dez",
 ];
 
-export function PainelHeaderCard({ snapshot, slug, campanhaTitulo }: Props) {
+export function PainelHeaderCard({
+  snapshot,
+  slug,
+  campanhaTitulo,
+  visibilidade = VISIBILIDADE_TOTAL,
+}: Props) {
   const idCampanha = useCampanhaRota();
   const { tweaks } = useTweaks();
   const [copied, setCopied] = useState(false);
@@ -88,13 +99,9 @@ export function PainelHeaderCard({ snapshot, slug, campanhaTitulo }: Props) {
   // the user choose an event time — that idea is parked on aperture-5lu4z).
   const targetDate = rawTarget ? new Date(`${rawTarget}T12:00:00-03:00`) : null;
   const hasDate = targetDate !== null && !Number.isNaN(targetDate.getTime());
-  const weekdayPt = ["dom", "seg", "ter", "qua", "qui", "sex", "sáb"];
   const daysLeft = hasDate
     ? Math.max(0, Math.floor((targetDate.getTime() - now) / 86_400_000))
     : 0;
-  const inlineDate = hasDate
-    ? `${targetDate.getDate()} ${MONTHS_PT[targetDate.getMonth()]}, ${weekdayPt[targetDate.getDay()]}`
-    : "";
   const chipDate = hasDate
     ? `${targetDate.getDate()} ${MONTHS_PT[targetDate.getMonth()]} ${targetDate.getFullYear()}`
     : "";
@@ -113,15 +120,17 @@ export function PainelHeaderCard({ snapshot, slug, campanhaTitulo }: Props) {
   // the copy carries the full addressing — PRETTY campanha-slug form when
   // the user chose one (W1a), /c/<uuid> canonical fallback otherwise.
   const campanhaSlug = useCampanhaSlugRota();
-  const fullShareUrl = paginaShareUrl(slug, idCampanha, campanhaSlug);
+  const publicOwnerSlug = useCampanhaPublicOwnerSlugRota();
+  const fullShareUrl = publicOwnerSlug ? paginaShareUrl(publicOwnerSlug, idCampanha, campanhaSlug) : undefined;
 
   const onCopy = async () => {
+    if (!fullShareUrl) return;
     try {
-      if (navigator.clipboard?.writeText) {
-        await navigator.clipboard.writeText(fullShareUrl);
-      }
+      if (!navigator.clipboard?.writeText) throw new Error('clipboard unavailable');
+      await navigator.clipboard.writeText(fullShareUrl);
     } catch {
-      // fall through — still toast as visual confirmation
+      toast.error("Não consegui copiar. Toque no endereço para abrir sua página.");
+      return;
     }
     sendEvent("painel_compartilhar_link_click");
     setCopied(true);
@@ -139,32 +148,11 @@ export function PainelHeaderCard({ snapshot, slug, campanhaTitulo }: Props) {
           </span>
           {hasDate && (
             <span className="painel-top-strip-line">
-              {daysLeft} dias · {inlineDate}
+              {daysLeft} dias para o evento
             </span>
           )}
         </div>
-        <button
-          type="button"
-          className="painel-share-cta"
-          onClick={onCopy}
-          aria-label="copiar link do evento"
-        >
-          <svg
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            style={{ width: 14, height: 14, strokeWidth: 2.2 }}
-            aria-hidden="true"
-          >
-            {/* sparkle — ✦ shape, traced inline (no new dep) */}
-            <path d="M12 3v4M12 17v4M3 12h4M17 12h4M5.5 5.5l2.5 2.5M16 16l2.5 2.5M5.5 18.5l2.5-2.5M16 8l2.5-2.5" />
-          </svg>
-          <span className="painel-share-cta-label">
-            {copied ? "link copiado ♡" : "compartilhe o link do evento"}
-          </span>
-        </button>
+
       </section>
 
       {/* 2. Title row — greeting + h1 + url chip line */}
@@ -218,9 +206,32 @@ export function PainelHeaderCard({ snapshot, slug, campanhaTitulo }: Props) {
               {/* aperture-2v91z — the campanha's OWN address when it chose a
                   slug ('francisco/teste'), never the same bare user-slug on
                   every campanha. */}
-              {paginaShareDisplayPath(slug, campanhaSlug)}
+              {publicOwnerSlug ? paginaShareDisplayPath(publicOwnerSlug, campanhaSlug) : "carregando link…"}
             </a>
           </span>
+        </div>
+        <div className="painel-share-actions">
+          <button type="button" className="painel-share-small" disabled={!fullShareUrl} onClick={onCopy}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
+              <rect x="9" y="9" width="11" height="11" rx="2" />
+              <path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1" />
+            </svg>
+            {copied ? 'Copiado ♡' : 'Copiar link'}
+          </button>
+          <button type="button" className="painel-share-small" disabled={!fullShareUrl} onClick={async () => {
+            if (!fullShareUrl) return;
+            if (!navigator.share) { await onCopy(); return; }
+            try { await navigator.share({ title: `Página de ${babyNameDisplay}`, url: fullShareUrl }); }
+            catch (err) { if (!(err instanceof Error && err.name === 'AbortError')) await onCopy(); }
+          }}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
+              <circle cx="18" cy="5" r="3" />
+              <circle cx="6" cy="12" r="3" />
+              <circle cx="18" cy="19" r="3" />
+              <path d="m8.6 10.5 6.8-4M8.6 13.5l6.8 4" />
+            </svg>
+            Compartilhar
+          </button>
         </div>
       </header>
 
@@ -232,20 +243,26 @@ export function PainelHeaderCard({ snapshot, slug, campanhaTitulo }: Props) {
           and the amount updates implicitly on snapshot refresh, so
           the live-stream framing was marketing noise on a private
           figure both times. */}
-      <section className="painel-recebido-card" aria-label="recebido até agora">
-        <div className="painel-recebido-head">
-          <span className="painel-recebido-lbl">recebido até agora</span>
-        </div>
-        <div className="painel-recebido-amount">
-          <small>R$</small>
-          {reaisInt}
-          <span className="painel-recebido-cents">,{reaisCents}</span>
-        </div>
+      {visibilidade.card && (
+      <section className="painel-recebido-card" aria-label="resumo do evento">
+        {visibilidade.valor && (
+          <>
+            <div className="painel-recebido-head">
+              <span className="painel-recebido-lbl">recebido até agora</span>
+            </div>
+            <div className="painel-recebido-amount">
+              <small>R$</small>
+              {reaisInt}
+              <span className="painel-recebido-cents">,{reaisCents}</span>
+            </div>
+          </>
+        )}
         {/* aperture-sm7uc (#2 fix) — pill was a dead <button>. Navigates
             to the extrato (presentes) sub-page so the operator lands on
             the place that actually lets them resgatar. Render an <a>
             (not a button) so the painel router picks it up via the same
             full-page nav path every other menu row uses. */}
+        {visibilidade.resgatar && (
         <a
           href={painelHref(slug, "presentes", idCampanha)}
           className="painel-recebido-cta"
@@ -265,6 +282,7 @@ export function PainelHeaderCard({ snapshot, slug, campanhaTitulo }: Props) {
             <path d="M13 5l7 7-7 7" />
           </svg>
         </a>
+        )}
         <div className="painel-stats" role="group" aria-label="resumo do evento">
           {/* aperture-kvpvf — strip swap from snapshot.giftsClaimed
               (distinct-pagamento count) to snapshot.presentesStripCount
@@ -273,24 +291,31 @@ export function PainelHeaderCard({ snapshot, slug, campanhaTitulo }: Props) {
               card on the menu still reads giftsClaimed (distinct
               pagamentos) — those are two intentionally different
               numbers on the same page. */}
-          <div className="painel-stat">
-            <div className="painel-stat-num">{snapshot.presentesStripCount}</div>
-            <div className="painel-stat-lbl">presentes</div>
-          </div>
-          <div className="painel-stat">
-            <div className="painel-stat-num">{snapshot.guestsConfirmed}</div>
-            <div className="painel-stat-lbl">confirmados</div>
-          </div>
+          {visibilidade.presentes && (
+            <div className="painel-stat">
+              <div className="painel-stat-num">{snapshot.presentesStripCount}</div>
+              <div className="painel-stat-lbl">presentes</div>
+            </div>
+          )}
+          {visibilidade.confirmados && (
+            <div className="painel-stat">
+              <div className="painel-stat-num">{snapshot.guestsConfirmed}</div>
+              <div className="painel-stat-lbl">confirmados</div>
+            </div>
+          )}
           {/* aperture-kvpvf — strip swap from snapshot.messagesTotal
               (mock 12) to snapshot.recadosStripCount (real count). The
               "mensagens recebidas" menu row still reads messagesTotal
               (separate follow-up bead aperture-mztrb covers that). */}
-          <div className="painel-stat">
-            <div className="painel-stat-num">{snapshot.recadosStripCount}</div>
-            <div className="painel-stat-lbl">recados</div>
-          </div>
+          {visibilidade.recados && (
+            <div className="painel-stat">
+              <div className="painel-stat-num">{snapshot.recadosStripCount}</div>
+              <div className="painel-stat-lbl">recados</div>
+            </div>
+          )}
         </div>
       </section>
+      )}
     </>
   );
 }

@@ -1,3 +1,4 @@
+import { AdicionarEmailCampanha } from "@/components/eunenem/admin/AdicionarEmailCampanha";
 import {
   AdministradorItem,
   campanhaPublicaPath,
@@ -70,6 +71,7 @@ export function AdminCampanhaPage({ idCampanha }: { idCampanha: string }) {
           <CampanhaHeader campanha={data} />
           <FactsGrid campanha={data} idCampanha={idCampanha} />
           <AdministradoresSection campanha={data} idCampanha={idCampanha} />
+          <AdicionarEmailCampanha idCampanha={idCampanha} />
           {/* PRIMARY — Pagamentos. The transaction aggregate root, where the
               "who paid me what?" question lives. New under Plan 0017. */}
           <PagamentosSection idCampanha={idCampanha} />

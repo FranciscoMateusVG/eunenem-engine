@@ -6,6 +6,7 @@ import { AdminPagamentoPage } from './AdminPagamentoPage.js';
 import { AdminPagamentosPage } from './AdminPagamentosPage.js';
 import { AdminNotaFiscalPage } from './AdminNotaFiscalPage.js';
 import { AdminReceitaPage } from './AdminReceitaPage.js';
+import { AdminDespesasPage } from './AdminDespesasPage.js';
 import { AdminRepasseDetailPage } from './AdminRepasseDetailPage.js';
 import { AdminCatalogoPage } from './AdminCatalogoPage.js';
 import { AdminMigradosPage } from './AdminMigradosPage.js';
@@ -25,6 +26,7 @@ import { PaginaPage } from './PaginaPage.js';
 import { PaginaSucessoPage } from './PaginaSucessoPage.js';
 import { PainelPage } from './PainelPage.js';
 import { PainelSectionPage } from './PainelSectionPage.js';
+import { TaxasEPrazosPage } from './TaxasEPrazosPage.js';
 import { TermosDeUsoPage } from './TermosDeUsoPage.js';
 import { TrpcSmokePage } from './TrpcSmokePage.js';
 import { TrpcProvider } from './lib/TrpcProvider.js';
@@ -65,6 +67,7 @@ export function resolveRoute(pathname: string):
   | { kind: 'trpc-smoke' }
   | { kind: 'auth-demo' }
   | { kind: 'faq' }
+  | { kind: 'taxas-e-prazos' }
   | { kind: 'admin' }
   | { kind: 'admin-usuario'; idConta: string }
   | { kind: 'admin-campanha'; idCampanha: string }
@@ -72,6 +75,7 @@ export function resolveRoute(pathname: string):
   | { kind: 'admin-pagamento'; idPagamento: string }
   | { kind: 'admin-pagamentos' }
   | { kind: 'admin-pagamentos-receita' }
+  | { kind: 'admin-pagamentos-despesas' }
   | { kind: 'admin-pagamentos-nota-fiscal' }
   | { kind: 'admin-repasses' }
   | { kind: 'admin-catalogo' }
@@ -97,8 +101,10 @@ export function resolveRoute(pathname: string):
   if (pathname === '/auth-demo') {
     return { kind: 'auth-demo' };
   }
-  // Perguntas Frequentes (aperture-sgjnn) — public FAQ page, linked from the
-  // footer. Exact "/faq" only.
+  if (pathname === '/taxas-e-prazos' || pathname === '/taxas-e-prazos/') {
+    return { kind: 'taxas-e-prazos' };
+  }
+  // Perguntas Frequentes — exact "/faq" only.
   if (pathname === '/faq') {
     return { kind: 'faq' };
   }
@@ -173,6 +179,13 @@ export function resolveRoute(pathname: string):
     pathname === '/admin/pagamentos/receita/'
   ) {
     return { kind: 'admin-pagamentos-receita' };
+  }
+  // /admin/pagamentos/despesas (aperture-5qoz0) — aba Despesas.
+  if (
+    pathname === '/admin/pagamentos/despesas' ||
+    pathname === '/admin/pagamentos/despesas/'
+  ) {
+    return { kind: 'admin-pagamentos-despesas' };
   }
   // /admin/pagamentos/nota-fiscal (aperture-dh1k7) — prévia da NFS-e mensal.
   if (
@@ -436,6 +449,7 @@ function pickPage(route: ReturnType<typeof resolveRoute>, pathname: string) {
   if (route.kind === 'trpc-smoke') return <TrpcSmokePage />;
   if (route.kind === 'auth-demo') return <AuthDemoPage />;
   if (route.kind === 'faq') return <FaqPage />;
+  if (route.kind === 'taxas-e-prazos') return <TaxasEPrazosPage />;
   if (route.kind === 'admin') return <AdminPage />;
   if (route.kind === 'admin-usuario')
     return <AdminUsuarioPage idConta={route.idConta} />;
@@ -447,6 +461,7 @@ function pickPage(route: ReturnType<typeof resolveRoute>, pathname: string) {
     return <AdminPagamentoPage idPagamento={route.idPagamento} />;
   if (route.kind === 'admin-pagamentos') return <AdminPagamentosPage />;
   if (route.kind === 'admin-pagamentos-receita') return <AdminReceitaPage />;
+  if (route.kind === 'admin-pagamentos-despesas') return <AdminDespesasPage />;
   if (route.kind === 'admin-pagamentos-nota-fiscal') return <AdminNotaFiscalPage />;
   if (route.kind === 'admin-repasses') return <AdminRepassesPage />;
   if (route.kind === 'admin-catalogo') return <AdminCatalogoPage />;

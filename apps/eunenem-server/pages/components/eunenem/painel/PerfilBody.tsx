@@ -3,21 +3,18 @@ import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 
 import { useTweaks } from "@/components/eunenem/TweaksContext";
-import {
-  type FotoContentType,
-  type FotoSlot,
-  PhotoSlot,
-} from "@/components/eunenem/PhotoSlot";
 import { trpc } from "@/lib/trpc";
 import type { Genero } from "@/lib/concordancia";
 import { paginaShareDisplayPath, paginaShareDisplayPrefix, paginaShareUrl } from "@/lib/pagina-share";
-import { useCampanhaSlugInfoRota } from "@/lib/campanhas";
+import { useCampanhaSlugInfoRota, useCampanhaPublicOwnerSlugRota } from "@/lib/campanhas";
 import { painelHref } from "@/lib/painelRoutes";
 import { useCampanhaEscrita } from "@/lib/campanha-escrita";
 import { useCampanhaRota } from "@/lib/campanha-rota";
 import { PERFIL_RELATIONS } from "@/lib/mocks/perfil";
 import { resetAnalyticsIdentity, sendEvent } from "@/lib/analytics";
 import type { PainelSectionBodyProps } from "@/PainelSectionPage";
+import { ComPermissao } from "./ComPermissao";
+import { useAcessoCampanha } from "./useAcessoCampanha";
 
 // aperture-1z6xa / aperture-bnj0z — Editar Perfil body (content only).
 //
@@ -624,7 +621,7 @@ function PerfilDateField({
   );
 }
 
-export function PerfilBody({ slug }: PainelSectionBodyProps) {
+function PerfilBodyConteudo({ slug }: PainelSectionBodyProps) {
   const idCampanha = useCampanhaRota();
   // aperture-qmaoi (fblrt W2-c1) — WRITE target: rota ?? session-default
   // (oldest). Bare /painel/:slug saves now address the default campanha's
@@ -633,10 +630,13 @@ export function PerfilBody({ slug }: PainelSectionBodyProps) {
   // rota-only split: bare URLs hydrate from perfil.getPerfil, whose shim reads
   // the oldest campanha — the same rows these writes now target.
   const idCampanhaEscrita = useCampanhaEscrita();
+  // aperture-1z18g — the public link is its own permission (link:editar).
+  const podeEditarLink = useAcessoCampanha(idCampanhaEscrita).pode("link:editar");
   // aperture-2v91z — the route campanha's pretty slug for the share row.
   // aperture (1-troca) — slugJaAlterado gates whether the SlugEditor
   // renders at all (see the render below).
   const { campanhaSlug: campanhaSlugRota, slugJaAlterado } = useCampanhaSlugInfoRota();
+  const publicOwnerSlug = useCampanhaPublicOwnerSlugRota();
   const { tweaks, setTweaks } = useTweaks();
   const utils = trpc.useUtils();
 
@@ -675,14 +675,6 @@ export function PerfilBody({ slug }: PainelSectionBodyProps) {
   }>({ corPrimaria: null, corAcento: null });
   const personalizacaoHydrated = useRef(false);
 
-  // aperture-w4afb (V4) — photo display URLs (seeded from getPerfil on hydrate;
-  // set to the presigned publicUrl right after an upload). fotoKeys holds the
-  // objectKeys persisted via atualizar.
-  const [fotoUrls, setFotoUrls] = useState<{
-    perfil: string | null;
-    capa: string | null;
-    historia: string | null;
-  }>({ perfil: null, capa: null, historia: null });
   const fotoKeys = useRef<{
     perfil: string | null;
     capa: string | null;
@@ -758,11 +750,6 @@ export function PerfilBody({ slug }: PainelSectionBodyProps) {
     };
     // aperture-7sb1h — carry the wizard-captured gender through saves.
     setGenero(b.genero ?? "");
-    setFotoUrls({
-      perfil: b.fotoPerfilUrl,
-      capa: b.fotoCapaUrl,
-      historia: b.fotoHistoriaUrl,
-    });
     setTweaks({ babyName: b.nomeBebe ?? "" });
     // aperture-1yx1n — capture the echo + skip baselines (Mode-B save flow).
     perfilEchoRef.current = d;
@@ -791,11 +778,6 @@ export function PerfilBody({ slug }: PainelSectionBodyProps) {
         capa: updated.fotoCapaKey,
         historia: updated.fotoHistoriaKey,
       };
-      setFotoUrls({
-        perfil: updated.fotoPerfilUrl,
-        capa: updated.fotoCapaUrl,
-        historia: updated.fotoHistoriaUrl,
-      });
       setTweaks({ babyName: updated.nomeBebe ?? babyName.trim() });
       // aperture-7sb1h — keep the field fresh from the round-trip DTO.
       setGenero(updated.genero ?? "");
@@ -807,7 +789,6 @@ export function PerfilBody({ slug }: PainelSectionBodyProps) {
     },
   });
 
-  const emitirUpload = trpc.perfil.emitirUrlUploadFoto.useMutation();
 
   // aperture-1yx1n — Mode-B mutations. perfilCampanha.atualizar carries the
   // FORM's baby-half to the ROUTE campanha. The user-level echo save uses a
@@ -816,8 +797,6 @@ export function PerfilBody({ slug }: PainelSectionBodyProps) {
   // would clobber the route campanha's state on screen.
   const atualizarCampanha = trpc.perfilCampanha.atualizar.useMutation();
   const atualizarUsuarioEco = trpc.perfil.atualizar.useMutation();
-  const emitirUploadCampanha =
-    trpc.perfilCampanha.emitirUrlUploadFoto.useMutation();
 
   // Single source of truth for the atualizar payload — shared by the manual
   // save and the photo-upload persist. Dates are parsed defensively (invalid →
@@ -917,11 +896,6 @@ export function PerfilBody({ slug }: PainelSectionBodyProps) {
       capa: fresh.fotoCapaKey,
       historia: fresh.fotoHistoriaKey,
     };
-    setFotoUrls({
-      perfil: fresh.fotoPerfilUrl,
-      capa: fresh.fotoCapaUrl,
-      historia: fresh.fotoHistoriaUrl,
-    });
     setGenero(fresh.genero ?? "");
     setTweaks({ babyName: fresh.nomeBebe ?? babyName.trim() });
     // aperture-ohum1 — keep the personalização half fresh from the round-trip
@@ -977,56 +951,6 @@ export function PerfilBody({ slug }: PainelSectionBodyProps) {
       return;
     }
     toast.success("Tudo salvo! Feito com carinho ♡");
-  };
-
-  // V4 flow: presign (emitirUrlUploadFoto) → PUT the cropped blob DIRECT to
-  // MinIO → persist the returned objectKey via atualizar → preview shows the
-  // publicUrl immediately. Throws on failure so PhotoSlot surfaces the error.
-  const uploadFoto = async (slot: FotoSlot, blob: Blob, contentType: FotoContentType) => {
-    // aperture-qmaoi — presign under the WRITE campanha (rota ?? oldest); the
-    // user-level presign survives only for the no-campanha edge. Same presign
-    // output either way.
-    const { uploadUrl, objectKey, publicUrl } = idCampanhaEscrita
-      ? // NOTE: shipped input param is `slot` (not the contract note's `tipo`) —
-          // real router shape wins, flagged to Rex on the aphk8 bead.
-          await emitirUploadCampanha.mutateAsync({
-            idCampanha: idCampanhaEscrita,
-            slot,
-            contentType,
-          })
-      : await emitirUpload.mutateAsync({ slot, contentType });
-    const res = await fetch(uploadUrl, {
-      method: "PUT",
-      headers: { "Content-Type": contentType },
-      body: blob,
-    });
-    if (!res.ok) throw new Error(`upload falhou (${res.status})`);
-    fotoKeys.current = { ...fotoKeys.current, [slot]: objectKey };
-    setFotoUrls((prev) => ({ ...prev, [slot]: publicUrl }));
-    if (idCampanhaEscrita) {
-      // aperture-qmaoi — persist the key on the WRITE campanha (rota ??
-      // oldest). nomeExibicao isn't part of this save, so creatorName doesn't
-      // gate it; errors surface as the save toast (parity with the legacy
-      // path's onError). No echo needed: salvarCampanha never touches
-      // perfil.atualizar.
-      try {
-        await salvarCampanha(idCampanhaEscrita);
-        toast.success("Tudo salvo! Feito com carinho ♡");
-      } catch (err) {
-        toast.error(saveErrorMessage(err));
-      }
-      return;
-    }
-    // aperture-0xoy0 — persist the photo key the moment the bytes land, so they
-    // never orphan in the bucket. babyName no longer gates this (nomeBebe is
-    // nullable → currentPayload sends null when empty). Only the always-present
-    // creatorName (nomeExibicao is required) needs to be set to save.
-    // (no-campanha edge only — aperture-qmaoi)
-    if (creatorName.trim()) {
-      atualizar.mutate(currentPayload());
-    } else {
-      toast("foto enviada ♡ — preencha o seu nome e salve pra guardar");
-    }
   };
 
   const handleSave = () => {
@@ -1135,7 +1059,7 @@ export function PerfilBody({ slug }: PainelSectionBodyProps) {
             that, only the "copiar link" block below remains. idCampanhaEscrita
             is the actual write target (mirrors every other save call in
             this component — see currentPayload/campanhaPayload above). */}
-        {!slugJaAlterado && idCampanhaEscrita && (
+        {!slugJaAlterado && idCampanhaEscrita && podeEditarLink && (
           <SlugEditor
             idCampanha={idCampanhaEscrita}
             currentSlug={campanhaSlugRota ?? ""}
@@ -1154,18 +1078,20 @@ export function PerfilBody({ slug }: PainelSectionBodyProps) {
                 pretty slug when chosen; /c/<uuid> copy fallback otherwise. */}
             <span
               className="perfil-share-url"
-              title={paginaShareUrl(profileSlug, idCampanha, campanhaSlugRota)}
+              title={publicOwnerSlug ? paginaShareUrl(publicOwnerSlug, idCampanha, campanhaSlugRota) : undefined}
             >
               {paginaShareDisplayPrefix()}
-              {paginaShareDisplayPath(profileSlug, campanhaSlugRota)}
+              {publicOwnerSlug ? paginaShareDisplayPath(publicOwnerSlug, campanhaSlugRota) : "carregando link…"}
             </span>
             <button
               type="button"
               className="perfil-share-copy"
+              disabled={!publicOwnerSlug}
               onClick={() => {
                 // aperture-1yx1n — copy the REAL public page URL, campanha-
                 // addressed when this perfil sits under a /c/:id route.
-                const link = paginaShareUrl(profileSlug, idCampanha, campanhaSlugRota);
+                if (!publicOwnerSlug) return;
+                const link = paginaShareUrl(publicOwnerSlug, idCampanha, campanhaSlugRota);
                 sendEvent("painel_compartilhar_link_click");
                 void navigator.clipboard
                   .writeText(link)
@@ -1328,18 +1254,7 @@ export function PerfilBody({ slug }: PainelSectionBodyProps) {
         </Field>
       </PerfilSection>
 
-      {/* 5 — Fotos da página (aperture-ou9bp; upload real = V4) */}
-      <PerfilSection icon={ico.camera} title="fotos da página" variant="pink">
-        <div className="perfil-fotos-grid">
-          <PhotoSlot slot="perfil" displayUrl={fotoUrls.perfil} onUpload={uploadFoto} />
-          <PhotoSlot slot="capa" displayUrl={fotoUrls.capa} onUpload={uploadFoto} />
-          <PhotoSlot
-            slot="historia"
-            displayUrl={fotoUrls.historia}
-            onUpload={uploadFoto}
-          />
-        </div>
-      </PerfilSection>
+      <a className="perfil-btn perfil-btn-ghost" href={painelHref(profileSlug, "personalizar", idCampanha)}>Personalizar fotos e cores da página →</a>
 
       <div className="perfil-actions">
         <a className="perfil-btn perfil-btn-ghost" href={painelHref(profileSlug, undefined, idCampanha)}>
@@ -1384,5 +1299,14 @@ export function PerfilBody({ slug }: PainelSectionBodyProps) {
         />
       )}
     </div>
+  );
+}
+
+/** aperture-1z18g — gated by `perfil:editar` for members of a shared campanha. */
+export function PerfilBody(props: PainelSectionBodyProps) {
+  return (
+    <ComPermissao acao="perfil:editar" titulo="Perfil">
+      <PerfilBodyConteudo {...props} />
+    </ComPermissao>
   );
 }

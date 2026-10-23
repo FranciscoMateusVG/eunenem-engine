@@ -765,15 +765,15 @@ describe('Receita EuNeném — painel 1b (aperture-zn5cm)', () => {
     expect(p.janela).toEqual({ de: '2030-07-01', ate: '2031-07-01' });
     const mes = (de: string) => p.meses.find((m) => m.de === de);
     expect(mes('2031-05-01')?.tarifas).toEqual({
-      registradoCents: 100,
+      registradoCents: 130,
       canceladoCents: 0,
-      resultadoCents: 100,
+      resultadoCents: 130,
     });
     expect(mes('2031-05-01')?.recebido.resultadoCents).toBe(1_130);
     expect(p.kpis.mesAtual).toMatchObject({
       de: '2031-06-01',
       ate: '2031-06-19',
-      tarifas: { registradoCents: 50, canceladoCents: 100, resultadoCents: -50 },
+      tarifas: { registradoCents: 50, canceladoCents: 130, resultadoCents: -80 },
       recebido: { registradoCents: 500 + 50, canceladoCents: 1_130, resultadoCents: -580 },
     });
     expect(p.kpis.mesAnterior.recebido.resultadoCents).toBe(1_130);
@@ -788,7 +788,7 @@ describe('Receita EuNeném — painel 1b (aperture-zn5cm)', () => {
       de: '2031-06-01',
       ate: '2031-06-02',
       estado: 'passada',
-      tarifas: { resultadoCents: -100 },
+      tarifas: { resultadoCents: -130 },
       recebido: { resultadoCents: -1_130 },
     });
     expect(p.semanas.map((s) => s.estado)).toEqual([

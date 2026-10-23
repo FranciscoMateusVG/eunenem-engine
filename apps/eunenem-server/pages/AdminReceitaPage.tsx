@@ -10,7 +10,7 @@ import { trpc } from "@/lib/trpc.js";
  * /admin/pagamentos/receita — aba Receita EuNeném, proposta 1b
  * (aperture-zn5cm; antes aperture-9bpre).
  *
- * Tarifas EuNeném (taxas da plataforma menos cancelamentos) e Recebido no
+ * Tarifas EuNeném (taxas da plataforma + adicional do cartão menos cancelamentos) e Recebido no
  * banco (pagamentos aprovados menos estornos, estimativa) lado a lado: mês e
  * semana atuais, os últimos 12 meses e as semanas do mês corrente, em
  * America/Sao_Paulo.

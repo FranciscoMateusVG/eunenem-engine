@@ -109,7 +109,7 @@ export function CampanhasPage() {
   useEffect(() => {
     if (meQ.isLoading || !meQ.data) return;
     const target = postLoginTarget(meQ.data);
-    if (target !== '/campanhas' && window.location.pathname !== target) {
+    if (meQ.data.needsOnboarding && target !== '/campanhas' && window.location.pathname !== target) {
       window.location.assign(target);
     }
   }, [meQ.isLoading, meQ.data]);
@@ -317,7 +317,7 @@ export function CampanhasPage() {
               <span className="camp-nova-plus" aria-hidden="true">
                 <span>+</span>
               </span>
-              <span className="camp-nova-lbl">nova lista</span>
+              <span className="camp-nova-lbl">Criar nova lista</span>
             </button>
           </div>
         )}
@@ -591,6 +591,10 @@ function CardNova({
   // aperture-1yx1n — the canonical blank-perfil signal (aphk8 amendment #2):
   // nomeBebe === null EXACTLY (real DTO field post-#359).
   const precisaCompletar = campanha.nomeBebe === null;
+  const perfil = trpc.perfilCampanha.get.useQuery({ idCampanha: campanha.id });
+  const foto = perfil.data?.fotoPerfilUrl ?? perfil.data?.fotoCapaUrl;
+  const [fotoFalhou, setFotoFalhou] = useState(false);
+  useEffect(() => setFotoFalhou(false), [foto]);
   return (
     <article
       className="camp-card"
@@ -600,7 +604,11 @@ function CardNova({
       <span className="camp-tape" style={{ background: TAPES[index % TAPES.length] }} aria-hidden="true" />
       <span className="camp-selo camp-selo-20" title="lista na EuNeném 2.0">2.0</span>
       <div className="camp-cover" style={{ background: TINTS[index % TINTS.length] }}>
-        <span className="camp-cover-ini" aria-hidden="true">{campanha.titulo.charAt(0).toLowerCase()}</span>
+        {foto && !fotoFalhou ? (
+          <img src={foto} alt="" loading="lazy" onError={() => setFotoFalhou(true)} />
+        ) : (
+          <span className="camp-cover-ini" aria-hidden="true">{campanha.titulo.charAt(0).toLowerCase()}</span>
+        )}
       </div>
       <div className="camp-card-body">
         <h3 className="camp-card-name">{campanha.titulo}</h3>
@@ -619,8 +627,8 @@ function CardNova({
         )}
         {/* aperture-h0hom — each card opens ITS OWN campanha's painel
          *  (/c/:idCampanha), not the oldest-resolving bare URL. */}
-        <a className="camp-cta" href={`/painel/${campanha.slug}/c/${campanha.id}`}>
-          acessar lista ♡
+        <a className="camp-cta" href={`/painel/${campanha.slug}/c/${campanha.id}`} aria-label={`Acessar lista ${campanha.titulo}`}>
+          <span aria-hidden="true">→</span>
         </a>
       </div>
     </article>
@@ -646,8 +654,8 @@ function CardLegado({ index, href }: { index: number; href: string }) {
       </div>
       <div className="camp-card-body">
         <h3 className="camp-card-name">EuNeném 1.0</h3>
-        <a className="camp-cta" href={href} rel="noopener">
-          continuar na 1.0 <span aria-hidden="true">↗</span>
+        <a className="camp-cta" href={href} rel="noopener" aria-label="Continuar na EuNeném 1.0">
+          <span aria-hidden="true">↗</span>
         </a>
       </div>
     </article>

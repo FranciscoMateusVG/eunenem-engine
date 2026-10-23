@@ -10,11 +10,15 @@
  */
 export const E2E_SPEC_SAFETY = [
   { file: '118sb-clickthrough-gate.spec.ts', safety: 'non-payment' },
+  { file: '1z18g-member-permissions-ui.spec.ts', safety: 'non-payment' },
   {
     file: '4uvgf-admin-estorno.spec.ts',
     safety: 'money-movement',
     capability: 'Confirms a Stripe or Inter refund through admin.pagamentos.estornar.',
   },
+  // Read-only admin screen (Despesas). Self-skips unless launched by the
+  // 9bpre ephemeral-DB runner with this spec as argument.
+  { file: '5qoz0-admin-despesas.spec.ts', safety: 'non-payment' },
   { file: '8bac7-postlogin-routing.spec.ts', safety: 'non-payment' },
   { file: '8bac7-welcome-optout.spec.ts', safety: 'non-payment' },
   { file: '8jcec-campanhas-multicampanha.spec.ts', safety: 'non-payment' },
@@ -38,6 +42,8 @@ export const E2E_SPEC_SAFETY = [
   { file: 'admin-authz-denial.spec.ts', safety: 'non-payment' },
   { file: 'admin-grouped-legacy.spec.ts', safety: 'non-payment' },
   { file: 'admin-pagamento-multi-item.spec.ts', safety: 'non-payment' },
+  // Sharing is local-only (the spec self-skips remote targets); never moves money.
+  { file: 'campanha-compartilhar.spec.ts', safety: 'non-payment' },
   { file: 'cross-user-denial.spec.ts', safety: 'non-payment' },
   { file: 'd3tlf-convidados-save-deadend.spec.ts', safety: 'non-payment' },
   { file: 'fblrt-fix-wave.spec.ts', safety: 'non-payment' },
@@ -55,6 +61,8 @@ export const E2E_SPEC_SAFETY = [
   { file: 'ohum1-personalizar-palette-only.spec.ts', safety: 'non-payment' },
   { file: 'whxzg-inline-edit.spec.ts', safety: 'non-payment' },
   { file: 'painel-adicionar-qty.spec.ts', safety: 'non-payment' },
+  // Settings uses synthetic database fixtures and self-skips remote targets.
+  { file: 'painel-configuracoes.spec.ts', safety: 'non-payment' },
   { file: 'painel-editar-mimo-qty-changed.spec.ts', safety: 'non-payment' },
   { file: 'painel-editar-mimo.spec.ts', safety: 'non-payment' },
   // Read-only admin screen (Receita 1b). Self-skips unless launched by the
@@ -77,6 +85,7 @@ export const E2E_SPEC_SAFETY = [
     safety: 'money-movement',
     capability: 'Posts a signed PIX settlement webhook and advances payment state.',
   },
+  { file: 'taxas-e-prazos.spec.ts', safety: 'non-payment' },
   { file: 'tqp4t-postlogin-routing-gaps.spec.ts', safety: 'non-payment' },
   { file: 'u38rz-nova-lista-create.spec.ts', safety: 'non-payment' },
   // Prévia da NFS-e (somente leitura, nada é enviado). Self-skips unless

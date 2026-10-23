@@ -3,23 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useAuthModal } from '@/components/eunenem/auth/AuthModalProvider';
 import { sendEvent } from '@/lib/analytics';
 
-// aperture-ospu7 — v2 rewrite of section 01 "Hero" (data-screen-label="01 Hero"
-// in EuNenem Landing v2.html). Out goes the hero-bg.jpg page background +
-// blob illustration + giant heart-cluster of v1; in comes:
-//   - live-badge with daily-counter (animated drift, seed = 27 per v2 HTML)
-//   - new headline "Seu chá de bebê do seu jeito" with .hl marca-texto on
-//     "chá de bebê" and plum emphasis on "seu jeito" (matches v2 markup)
-//   - 3 check-prefixed bullets (Pix in 10 min · 5 min setup · convite grátis)
-//   - polaroid + Pix notification card on the right
-//   - avatar stack + 5-star rating strip below the CTAs
-//
-// The hero-bg.jpg asset is still used inside the polaroid photo mask (per v2
-// HTML line 126); it is NOT the page background anymore.
-//
-// CSS additions live in tailwind.css under "aperture-ospu7" — keyframes for
-// the polaroid float, plus selectors for the polaroid / tape / photo mask
-// / floating cards / counter card that need pseudo-elements + absolute
-// positioning utilities don't cleanly express in Tailwind utilities alone.
+// Hero retains the existing visual treatment and signup/simulator controls.
 
 const LIVE_BADGE_SEED = 27;
 
@@ -52,12 +36,12 @@ export function Hero() {
           </span>
 
           <h1 className="hero-headline mt-5 font-display text-[clamp(40px,5.6vw,64px)] font-semibold leading-[1.02] tracking-tight text-ink text-balance">
-            Seu <span className="hl">chá de bebê</span> do{' '}
-            <span className="text-plum">seu jeito.</span>
+            Transforme os <span className="hl">presentes do chá</span> em{' '}
+            <span className="text-plum">dinheiro para o enxoval</span>
           </h1>
 
           <p className="mt-5 max-w-[540px] text-[18px] leading-[1.6] text-ink-soft text-pretty">
-            Crie a lista grátis em 5 minutos. Convidados presenteiam
+            Crie a lista grátis. Convidados presenteiam
             online,{' '}
             <strong className="text-plum font-bold">
               você recebe 100% em dinheiro via Pix
@@ -65,6 +49,13 @@ export function Hero() {
             e compra o que o bebê{' '}
             <em className="not-italic text-plum font-semibold">realmente</em>{' '}
             precisa.
+          </p>
+          <p className="mt-3 max-w-[540px] text-[14px] leading-relaxed text-ink-soft">
+            Você recebe o valor cadastrado na lista. As taxas aplicáveis são
+            cobradas de quem compra o presente.{' '}
+            <a href="#taxas" className="font-semibold text-lilac-deep underline hover:text-plum">
+              Veja os detalhes das taxas e dos saques
+            </a>.
           </p>
         </div>
 
@@ -102,7 +93,7 @@ export function Hero() {
             <div>
               <div className="hero-fcard-title">Pix recebido!</div>
               <div className="hero-fcard-meta">
-                <strong className="text-plum">R$ 380</strong> · em 8 min
+                <strong className="text-plum">R$ 380</strong> · presente recebido
               </div>
             </div>
           </div>

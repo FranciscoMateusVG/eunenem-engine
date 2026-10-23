@@ -46,6 +46,42 @@ export interface CampanhaAdministradores {
   id_usuario: string;
 }
 
+export interface CampanhaCompartilhamentoAudit {
+  acao: string;
+  alvo: string;
+  ator_id: string;
+  campanha_id: string;
+  criado_em: Generated<Timestamp>;
+  id: string;
+}
+
+export interface CampanhaConvites {
+  campanha_id: string;
+  consumido_em: Timestamp | null;
+  consumido_por: string | null;
+  criado_em: Generated<Timestamp>;
+  criado_por: string;
+  email: string;
+  expira_em: Timestamp;
+  id: string;
+  permissoes: string[];
+  revogado_em: Timestamp | null;
+}
+
+export interface CampanhaMembrosPermissoes {
+  atualizado_em: Generated<Timestamp>;
+  campanha_id: string;
+  id_conta: string;
+  papel: string;
+  permissoes: Generated<string[]>;
+}
+
+export interface CampanhaPrivacidade {
+  atualizado_em: Generated<Timestamp>;
+  campanha_id: string;
+  exibir_recados: Generated<boolean>;
+}
+
 export interface Campanhas {
   criada_em: Generated<Timestamp>;
   id: string;
@@ -169,6 +205,18 @@ export interface Convites {
   remetente: string;
 }
 
+export interface EmailFeedback {
+  comentario: string | null;
+  created_at: Generated<Timestamp>;
+  delivery_id: string;
+  id: string;
+  nota: number | null;
+  tenant_id: string;
+  type: string;
+  updated_at: Generated<Timestamp>;
+  user_id: string;
+}
+
 export interface Eventos {
   atualizado_em: Generated<Timestamp>;
   criado_em: Generated<Timestamp>;
@@ -210,6 +258,63 @@ export interface LancamentosFinanceiros {
   id_repasse: string | null;
   tipo: string;
   transferido_em: Timestamp | null;
+}
+
+export interface LifecycleEmailDeliveries {
+  attempts: Generated<number>;
+  claimed_at: Timestamp | null;
+  email_key: string | null;
+  event_id: string;
+  id: string;
+  next_attempt_at: Generated<Timestamp>;
+  reason: string | null;
+  sent_at: Timestamp | null;
+  state: Generated<string>;
+  template_version: Generated<number>;
+  tenant_id: string;
+  type: string;
+  user_id: string;
+}
+
+export interface LifecycleEmailEvents {
+  campaign_id: string | null;
+  created_at: Generated<Timestamp>;
+  id: string;
+  occurred_at: Timestamp;
+  snapshot: Generated<Json>;
+  subject_id: string;
+  tenant_id: string;
+  type: string;
+}
+
+export interface LifecycleEmailFirstGifts {
+  campaign_id: string;
+  occurred_at: Generated<Timestamp>;
+}
+
+export interface LifecycleEmailPreferences {
+  enabled: Generated<boolean>;
+  tenant_id: string;
+  type: string;
+  updated_at: Generated<Timestamp>;
+  user_id: string;
+}
+
+export interface LifecycleEmailProvisioned {
+  campaign_id: string;
+  completed_at: Timestamp | null;
+  expected_gift_count: number;
+  user_id: string;
+}
+
+export interface LifecycleEmailRollout {
+  launch_at: Timestamp;
+  singleton: Generated<boolean>;
+}
+
+export interface LifecycleEmailScanCursors {
+  last_id: Generated<string>;
+  type: string;
 }
 
 export interface ListasDeConvidados {
@@ -357,6 +462,45 @@ export interface PixCobrancaDevolucoes {
   id_pagamento: string;
   rtr_id: string | null;
   status: string;
+}
+
+export interface ProviderFeeEvents {
+  account_ref: string;
+  amount_cents: Int8;
+  category: Generated<string>;
+  currency: string;
+  environment: string;
+  external_ref: string;
+  id: Generated<string>;
+  matching_ref: string | null;
+  observed_at: Timestamp;
+  occurred_at: Timestamp;
+  payment_id: string | null;
+  provider: string;
+  source: string;
+}
+
+export interface ProviderFeeInterScans {
+  account_ref: string;
+  attempts: Generated<number>;
+  claim_token: string | null;
+  claimed_until: Timestamp | null;
+  day: Timestamp;
+  last_reason: string | null;
+  last_success_at: Timestamp | null;
+  next_attempt_at: Generated<Timestamp>;
+  unmatched_count: Generated<number>;
+}
+
+export interface ProviderFeeSync {
+  attempts: Generated<number>;
+  claim_token: string | null;
+  claimed_until: Timestamp | null;
+  last_reason: string | null;
+  next_attempt_at: Generated<Timestamp>;
+  payment_id: string;
+  status: Generated<string>;
+  updated_at: Generated<Timestamp>;
 }
 
 export interface RateLimit {
@@ -528,6 +672,10 @@ export interface Verifications {
 export interface DB {
   accounts: Accounts;
   campanha_administradores: CampanhaAdministradores;
+  campanha_compartilhamento_audit: CampanhaCompartilhamentoAudit;
+  campanha_convites: CampanhaConvites;
+  campanha_membros_permissoes: CampanhaMembrosPermissoes;
+  campanha_privacidade: CampanhaPrivacidade;
   campanhas: Campanhas;
   catalogo_admin_audit_events: CatalogoAdminAuditEvents;
   catalogo_categorias: CatalogoCategorias;
@@ -540,9 +688,17 @@ export interface DB {
   contribuicoes: Contribuicoes;
   convidados: Convidados;
   convites: Convites;
+  email_feedback: EmailFeedback;
   eventos: Eventos;
   intencao_items: IntencaoItems;
   lancamentos_financeiros: LancamentosFinanceiros;
+  lifecycle_email_deliveries: LifecycleEmailDeliveries;
+  lifecycle_email_events: LifecycleEmailEvents;
+  lifecycle_email_first_gifts: LifecycleEmailFirstGifts;
+  lifecycle_email_preferences: LifecycleEmailPreferences;
+  lifecycle_email_provisioned: LifecycleEmailProvisioned;
+  lifecycle_email_rollout: LifecycleEmailRollout;
+  lifecycle_email_scan_cursors: LifecycleEmailScanCursors;
   listas_de_convidados: ListasDeConvidados;
   opcoes_contribuicao: OpcoesContribuicao;
   pagamentos: Pagamentos;
@@ -552,6 +708,9 @@ export interface DB {
   perfil_campanhas: PerfilCampanhas;
   perfil_criadores: PerfilCriadores;
   pix_cobranca_devolucoes: PixCobrancaDevolucoes;
+  provider_fee_events: ProviderFeeEvents;
+  provider_fee_inter_scans: ProviderFeeInterScans;
+  provider_fee_sync: ProviderFeeSync;
   rate_limit: RateLimit;
   recebedores: Recebedores;
   repasse_reconciliacao_candidatos: RepasseReconciliacaoCandidatos;

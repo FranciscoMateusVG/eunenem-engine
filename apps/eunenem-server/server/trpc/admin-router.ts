@@ -1,3 +1,5 @@
+import { consultarRecuperacaoRepasse, recuperarRepasse, RecoveryInputSchema } from '../../../../src/use-cases/pagamentos/financeiro/consultar-recuperacao-repasse.js';
+import { CampanhaCompartilhamentoPostgres, EmailJaMembroCampanhaError } from '../../../../src/adapters/arrecadacao/campanha-compartilhamento.postgres.js';
 /**
  * Admin tRPC router (rsidz.2 + tinly + rsidz.3).
  *
@@ -58,7 +60,6 @@ import {
   PagamentoNaoEncontradoError,
   PagamentoTransicaoStatusInvalidaError,
   prepareInitialCampaignTemplateItems,
-  resolverManualFalhouRepasse,
   resolverManualPagoRepasse,
   retentarTransferenciaRepasse,
   ValorUnitarioPresenteWriteSchema,
@@ -87,6 +88,7 @@ import {
   RECEITA_CAMPANHAS_LIMIT,
 } from "../admin-receita.js";
 import { GRANULARIDADES, isLocalDate } from "../../pages/lib/receitaPeriodo.js";
+import { type CoberturaDespesas, loadDespesasPainel } from "../admin-despesas.js";
 import { carregarPreviaMensal, MesFuturoError } from "../nfse/previa-mensal.js";
 import {
   AdminPaymentAdministratorsSchema,
@@ -376,6 +378,7 @@ const LancamentoAdminUsuarioSchema = z.object({
   campanhaTitulo: z.string(),
   idContribuicao: z.string(),
   contribuicaoNome: z.string().nullable(),
+  contribuinteNome: z.string().nullable(),
   idPagamento: z.string(),
   metodo: z.enum(["pix", "credit_card"]).nullable(),
   amountCents: cents(),
@@ -584,6 +587,7 @@ const usuarioFinanceiroRouter = t.router({
             campanhaTitulo: fato.campanhaTitulo,
             idContribuicao: fato.idContribuicao,
             contribuicaoNome: fato.contribuicaoNome,
+            contribuinteNome: fato.contribuinteNome,
             idPagamento: fato.idPagamento,
             metodo: fato.metodo,
             amountCents: fato.amountCents,
@@ -771,6 +775,26 @@ function toCampanhaAdminDTO(c: Campanha): CampanhaAdminDTO {
 }
 
 const campanhasRouter = t.router({
+  adicionarEmail: adminProcedure
+    .input(z.object({ idCampanha: z.string().uuid(), email: z.string().trim().email().max(254), confirmarApenasAcesso: z.literal(true) }))
+    .mutation(async ({ ctx, input }) => {
+      // The operator grants access, NEVER changes owner or bank-account data.
+      await enforceRateLimit(ctx.deps.db, { key: `admin:compartilhar:${ctx.adminUsuario.id}`, max: 20, windowMs: 3600_000 });
+      const sharing = new CampanhaCompartilhamentoPostgres(ctx.deps.db);
+      await ctx.deps.db.transaction().execute(async (trx) => {
+        const campaign = await trx.selectFrom('campanhas').select('id')
+          .where('id', '=', input.idCampanha).where('id_plataforma', '=', ID_PLATAFORMA_EUNENEM)
+          .forUpdate().executeTakeFirst();
+        if (!campaign) throw new TRPCError({ code: 'NOT_FOUND' });
+        await sharing.convidar({ campanhaId: input.idCampanha, plataformaId: ID_PLATAFORMA_EUNENEM,
+          email: input.email, atorId: ctx.adminUsuario.id, origem: 'admin' }, trx).catch((error: unknown) => {
+            if (error instanceof EmailJaMembroCampanhaError) throw new TRPCError({ code: 'BAD_REQUEST', message: error.message });
+            throw error;
+          });
+      });
+      await ctx.deps.enviarConviteCampanha(input.email.trim().toLowerCase());
+      return { ok: true };
+    }),
   /**
    * Campanhas administered by the usuario identified by `idConta`.
    *
@@ -3126,6 +3150,7 @@ const repassesRouter = t.router({
       z.object({
         idRepasse: z.string().uuid(),
         codigoSolicitacao: z.string().trim().min(1).max(255),
+        motivo: z.string().trim().min(10).max(1000),
       }),
     )
     .output(
@@ -3150,6 +3175,7 @@ const repassesRouter = t.router({
           {
             idRepasse: input.idRepasse,
             interCodigoSolicitacao: input.codigoSolicitacao,
+            motivo: input.motivo,
             resolvidoPor: usuario.email,
           },
         );
@@ -3190,60 +3216,31 @@ const repassesRouter = t.router({
    * any other state is an idempotent no-op returning the current status. Acting
    * admin recorded on the audit trail. NOT_FOUND if the repasse doesn't exist.
    */
+  // Retired unsafe assertion path: callers must inspect fresh bank evidence.
   resolverManualFalhou: adminProcedure
     .input(z.object({ idRepasse: z.string().uuid() }))
-    .output(
-      z.object({
-        idRepasse: z.string(),
-        status: z.string(),
-        needsManualResolution: z.boolean(),
-      }),
-    )
+    .mutation(() => { throw new TRPCError({ code: "BAD_REQUEST", message: "Use a consulta de recuperação antes de retentar" }); }),
+  consultarRecuperacao: adminProcedure
+    .input(z.object({ idRepasse: z.string().uuid() }))
     .mutation(async ({ ctx, input }) => {
-      const { usuario } = await resolverUsuarioAutenticado(
-        ctx.deps,
-        ctx.headers,
-      );
-      try {
-        const result = await resolverManualFalhouRepasse(
-          {
-            livroFinanceiroRepository: ctx.deps.livroFinanceiroRepository,
-            clock: ctx.deps.clock,
-            observability: ctx.deps.observability,
-          },
-          {
-            idRepasse: input.idRepasse,
-            resolvidoPor: usuario.email,
-          },
-        );
-
-        return {
-          idRepasse: result.repasse.id,
-          status: result.repasse.status,
-          needsManualResolution: result.repasse.needsManualResolution,
-        };
-      } catch (error: unknown) {
-        if (error instanceof FinanceiroRepasseNaoEncontradoError) {
-          throw new TRPCError({
-            code: "NOT_FOUND",
-            message: "repasse_nao_encontrado",
-          });
-        }
-        if (error instanceof FinanceiroRepasseStatusInvalidoError) {
-          throw new TRPCError({
-            code: "CONFLICT",
-            message: "repasse_status_invalido",
-          });
-        }
-        if (error instanceof FinanceiroInputInvalidoError) {
-          throw new TRPCError({
-            code: "BAD_REQUEST",
-            message: error.message,
-          });
-        }
+      try { return await consultarRecuperacaoRepasse(ctx.deps, input.idRepasse); }
+      catch (error) {
+        if (error instanceof FinanceiroInputInvalidoError) throw new TRPCError({ code: "BAD_REQUEST", message: error.message });
         throw error;
       }
-  }),
+    }),
+  recuperar: adminProcedure.input(RecoveryInputSchema)
+    .mutation(async ({ ctx, input }) => {
+      const { usuario } = await resolverUsuarioAutenticado(ctx.deps, ctx.headers);
+      try {
+        const result = await recuperarRepasse(ctx.deps, input, usuario.email);
+        return { idRepasse: result.repasse.id, status: result.repasse.status };
+      } catch (error) {
+        if (error instanceof FinanceiroInputInvalidoError) throw new TRPCError({ code: "BAD_REQUEST", message: error.message });
+        throw error;
+      }
+    }),
+
 });
 
 /* ─────────────────────────────────────────────────────────────────────────
@@ -4623,6 +4620,95 @@ const notaFiscalRouter = t.router({
     }),
 });
 
+// ────────────────────────────────────────────────────────────────────
+//  despesas.* — aba Despesas (aperture-5qoz0 PR3). Tarifas OBSERVADAS no
+//  provedor, pela data de débito; pendente/falho aparecem como tal na
+//  cobertura, nunca como zero. Nenhuma chamada a provedor nesta leitura.
+// ────────────────────────────────────────────────────────────────────
+
+const ContagemCoberturaSchema = z.object({
+  confirmados: z.number().int().nonnegative(),
+  pendentes: z.number().int().nonnegative(),
+  falhos: z.number().int().nonnegative(),
+});
+
+const DespesasValoresShape = {
+  stripeCents: z.number().int().nonnegative(),
+  interCents: z.number().int().nonnegative(),
+  totalCents: z.number().int().nonnegative(),
+  naoVinculadas: z.object({
+    count: z.number().int().nonnegative(),
+    cents: z.number().int().nonnegative(),
+  }),
+  /** Pagamentos do período (data do pagamento): confirmados/pendentes/falhos. */
+  cobertura: z.object({ stripe: ContagemCoberturaSchema, inter: ContagemCoberturaSchema }),
+};
+
+const DespesasIntervaloSchema = z.object({
+  de: LocalDateSchema,
+  ate: LocalDateSchema,
+  ...DespesasValoresShape,
+});
+
+const CoberturaDespesasSchema = z.object({
+  desdeInicio: ContagemCoberturaSchema,
+  desde: LocalDateSchema,
+  ultimaLeituraEm: z.string().datetime().nullable(),
+});
+
+const DespesasPainelSchema = z.object({
+  snapshotAt: z.string().datetime(),
+  timezone: z.literal("America/Sao_Paulo"),
+  hoje: LocalDateSchema,
+  janela: z.object({ de: LocalDateSchema, ate: LocalDateSchema }),
+  kpis: z.object({
+    mesAtual: DespesasIntervaloSchema,
+    mesAnterior: DespesasIntervaloSchema,
+    semanaAtual: DespesasIntervaloSchema,
+    semanaAnterior: DespesasIntervaloSchema,
+  }),
+  meses: z.array(DespesasIntervaloSchema.extend({ parcial: z.boolean() })).length(12),
+  semanas: z.array(
+    DespesasIntervaloSchema.extend({ estado: z.enum(["passada", "atual", "futura"]) }),
+  ),
+  cobertura: z.object({ stripe: CoberturaDespesasSchema, inter: CoberturaDespesasSchema }),
+  diferencaConciliacao: z.object({
+    stripeCents: z.number().int(),
+    interCents: z.number().int(),
+    naoVinculadasCents: z.number().int(),
+  }),
+});
+
+function toCoberturaDTO(
+  cobertura: CoberturaDespesas,
+): z.infer<typeof CoberturaDespesasSchema> {
+  return { ...cobertura, ultimaLeituraEm: cobertura.ultimaLeituraEm?.toISOString() ?? null };
+}
+
+const despesasRouter = t.router({
+  painel: adminProcedure.output(DespesasPainelSchema).query(async ({ ctx }) => {
+    const painel = await loadDespesasPainel(ctx.deps.db, {
+      platformId: ID_PLATAFORMA_EUNENEM,
+      now: ctx.deps.clock(),
+      interAccountRef: ctx.deps.interFeeAccountRef,
+    });
+    return {
+      snapshotAt: painel.snapshotAt.toISOString(),
+      timezone: painel.timezone,
+      hoje: painel.hoje,
+      janela: painel.janela,
+      kpis: painel.kpis,
+      meses: [...painel.meses],
+      semanas: [...painel.semanas],
+      cobertura: {
+        stripe: toCoberturaDTO(painel.cobertura.stripe),
+        inter: toCoberturaDTO(painel.cobertura.inter),
+      },
+      diferencaConciliacao: painel.diferencaConciliacao,
+    };
+  }),
+});
+
 export const adminRouter = t.router({
   /** Nested sub-router for usuarios browse + paginated list. */
   usuarios: usuariosRouter,
@@ -4709,6 +4795,7 @@ export const adminRouter = t.router({
 
   /** Receita EuNeném — taxas da plataforma por evento (aperture-9bpre). */
   receita: receitaRouter,
+  despesas: despesasRouter,
 
   /** Prévia (dry run, sem envio) da NFS-e mensal da EuNeném (aperture-dh1k7). */
   notaFiscal: notaFiscalRouter,

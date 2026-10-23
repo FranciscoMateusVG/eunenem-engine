@@ -1341,9 +1341,6 @@ h4 {
     color-mix(in srgb, var(--pink-soft) 40%, transparent) 100%
   );
 }
-.painel-row.featured .painel-row-label {
-  font-size: 21px;
-}
 
 /* Pill badges. */
 .painel-badge {
@@ -8229,4 +8226,162 @@ button.painel-topbar-link:hover {
     bottom: 10px;
     right: 0;
   }
+}
+
+/* Compact customization, scoped to this screen. */
+.personalizar-body { gap: 12px; margin-top: 14px; min-width: 0; }
+.personalizar-body .perfil-hero { padding: 0 16px; }
+.personalizar-body .perfil-hero-title { font-size: 28px; margin: 0; }
+.personalizar-body .perfil-hero p { font-size: 13px; margin-top: 4px; color: var(--ink-soft); }
+.personalizar-body .personalizar-section { padding: 14px; margin: 0 16px; border-radius: 18px; background: var(--paper); min-width: 0; }
+.personalizar-section::after { content: none; }
+.personalizar-body h2 { font-family: var(--font-patrick-hand), "Patrick Hand", cursive; font-size: 22px; line-height: 1.15; margin: 0 0 8px; }
+.personalizar-body section > p { color: var(--ink-soft); font-size: 12px; line-height: 1.4; margin: 0 0 12px; }
+.personalizar-body > fieldset { display: grid; gap: 12px; }
+.personalizar-photos { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; max-width: 360px; }
+.personalizar-photos .perfil-foto-slot { position: relative; gap: 6px; }
+.personalizar-photos .perfil-foto-header { justify-content: center; height: 18px; }
+.personalizar-photos .perfil-foto-icon, .personalizar-photos .perfil-foto-cta { display: none; }
+.personalizar-photos .perfil-foto-label { font-size: 15px; }
+.personalizar-photos .perfil-foto-dropzone { min-height: 0; padding: 0; border-radius: 12px; width: 100%; }
+.personalizar-photos .perfil-foto-preview { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.personalizar-photos .perfil-foto-plus-circle { width: 28px; height: 28px; }
+.personalizar-photo-remove { position: absolute; top: 24px; right: 0; display: grid; place-items: center; width: 44px; height: 44px; padding: 0; border: 0; background: transparent; color: var(--plum); cursor: pointer; }
+.personalizar-photo-remove svg { box-sizing: content-box; padding: 6px; border-radius: 50%; background: var(--paper); box-shadow: var(--shadow-sm); }
+.personalizar-color { border: 0; padding: 0; margin: 12px 0 0; min-width: 0; }
+.personalizar-color legend { font-size: 13px; font-weight: 600; color: var(--plum); margin-bottom: 5px; }
+.personalizar-swatches { display: flex; flex-wrap: wrap; gap: 4px; }
+.personalizar-swatch { position: relative; display: grid; place-items: center; width: 44px; height: 44px; flex: 0 0 44px; padding: 5px; border: 2px solid transparent; border-radius: 50%; background-clip: content-box !important; cursor: pointer; }
+.personalizar-swatch[aria-pressed="true"], .personalizar-custom[data-selected="true"] { border-color: var(--plum); }
+.personalizar-custom { background: conic-gradient(#E78FA7, #F7D560, #C7DC6E, #9CD7DD, #A77BBE, #E78FA7); }
+.personalizar-custom span { color: var(--plum); font-size: 20px; line-height: 1; border-radius: 50%; width: 22px; height: 22px; text-align: center; }
+.personalizar-custom input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
+.personalizar-preview { width: 100%; min-width: 0; overflow: hidden; border: 1px solid var(--line); border-radius: 12px; background: var(--paper); }
+.personalizar-preview-stage { margin: 0 auto; overflow: hidden; }
+.personalizar-preview iframe { display: block; max-width: none; border: 0; transform-origin: top left; }
+.personalizar-body > [role="status"], .personalizar-body > [role="alert"] { margin: 0 16px; font-size: 12px; }
+.personalizar-body .perfil-actions { gap: 8px; margin: 0 16px 16px; padding: 0; }
+.personalizar-body .perfil-btn { min-height: 44px; padding: 10px 16px; font-size: 12px; }
+.personalizar-body button:focus-visible, .personalizar-custom:focus-within { outline: 2px solid var(--plum); outline-offset: 2px; }
+@media (min-width: 900px) {
+  .personalizar-body .perfil-hero { padding: 0; }
+  .personalizar-body .personalizar-section { margin: 0; padding: 18px; }
+  .personalizar-body .perfil-hero-title { font-size: 32px; }
+  .personalizar-body > [role="status"], .personalizar-body > [role="alert"], .personalizar-body .perfil-actions { margin-left: 0; margin-right: 0; }
+}
+@media (min-width: 900px) {
+  .personalizar-body > fieldset { grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: stretch; }
+}
+
+/* Dashboard refinements: presentation only, no financial calculation changes. */
+.painel-top-strip { padding-top: 10px; padding-bottom: 0; margin-bottom: 4px; min-height: 0; }
+.painel-top-strip-eyebrow { font-size: 16px; }
+.painel-top-strip-line { font-size: 13px; }
+.painel-title-row { padding-top: 4px; padding-bottom: 12px; gap: 4px; min-width: 0; }
+.painel-hc-title { font-size: clamp(28px, 6vw, 38px); margin-top: 2px; }
+.painel-campanha-chip { font-size: 11px; padding: 3px 8px; }
+.painel-url-row { font-size: 11px; flex-wrap: wrap; gap: 5px; min-width: 0; }
+.painel-url-link { overflow-wrap: anywhere; min-width: 0; }
+.painel-share-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
+.painel-share-small { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 44px; padding: 8px 14px; border: 1px solid var(--line); border-radius: 999px; background: var(--paper); color: var(--plum); font-size: 12px; font-weight: 600; cursor: pointer; }
+.painel-share-small svg { flex-shrink: 0; }
+.painel-recebido-card { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 8px; padding: 14px; border-radius: 20px; }
+.painel-recebido-head { grid-column: 1; grid-row: 1; margin: 0; justify-content: flex-start; }
+.painel-recebido-lbl { font-size: 11px; }
+.painel-recebido-amount { grid-column: 1; grid-row: 2; font-size: clamp(22px, 5vw, 32px); text-align: left; margin: 0; min-width: 0; display: block; overflow-wrap: anywhere; line-height: 1.2; }
+.painel-recebido-amount small, .painel-recebido-cents { font-size: 14px; }
+.painel-recebido-cta { grid-column: 2; grid-row: 1 / span 2; align-self: center; width: auto; margin: 0; padding: 9px 10px; min-height: 44px; font-size: 10px; gap: 5px; }
+.painel-stats { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); margin-top: 8px; padding-top: 8px; }
+.painel-stat { min-width: 0; padding: 2px; }
+.painel-stat-num { font-size: 21px; }
+.painel-stat-lbl { font-size: 10px; letter-spacing: .03em; }
+.painel-menu-compact .painel-menu-grid { gap: 12px; }
+.painel-menu-compact .painel-group-title { margin: 12px 6px 7px; font-size: 10px; }
+.painel-menu-compact .painel-row { min-height: 56px; padding: 10px 12px; gap: 10px; }
+.painel-menu-compact .painel-row.featured { min-height: 64px; }
+.painel-menu-compact .painel-row-icon { width: 36px; height: 36px; }
+.painel-menu-compact .painel-row-label { font-size: 17px; }
+.painel-menu-compact .painel-row-sub { font-size: 11px; white-space: normal; overflow-wrap: anywhere; }
+.painel-menu-compact .painel-group-novo .painel-row { min-height: 54px; padding-top: 8px; padding-bottom: 8px; }
+.painel-tutorial-trigger { position: static; display: flex; width: max-content; min-height: 44px; margin: 16px 16px 0 auto; padding: 8px 12px; font-size: 10px; background: var(--paper); color: var(--plum); border: 1px solid var(--line); box-shadow: var(--shadow-sm); }
+
+.config-body { max-width: 800px; min-width: 0; margin: 18px auto; padding: 0 16px; display: grid; gap: 12px; color: var(--ink); }
+.config-body h1 { font-family: var(--font-patrick-hand), cursive; font-size: 32px; margin: 0; }
+.config-body h2 { font-family: var(--font-patrick-hand), cursive; font-size: 24px; margin: 0 0 8px; }
+.config-body p { font-size: 13px; color: var(--ink-soft); line-height: 1.5; margin: 0 0 12px; }
+.config-card { min-width: 0; padding: 16px; border-radius: 20px; border: 1px solid var(--line); background: var(--paper); box-shadow: var(--shadow-sm); }
+.config-card > small, .config-toggle small { display: block; font-size: 11px; color: var(--ink-soft); line-height: 1.45; margin-top: 4px; }
+.config-card a { color: var(--plum); overflow-wrap: anywhere; }
+.config-card .perfil-btn { min-height: 44px; padding: 10px 14px; font-size: 12px; }
+.config-toggle { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 0; cursor: pointer; min-height: 44px; }
+.config-toggle > span { min-width: 0; }
+.config-toggle strong { font-size: 13px; }
+.config-toggle input { appearance: none; position: relative; flex: 0 0 44px; width: 44px; height: 28px; border-radius: 999px; background: var(--line); border: 1px solid var(--ink-mute); cursor: pointer; }
+.config-toggle input::after { content: ''; position: absolute; top: 3px; left: 3px; width: 20px; height: 20px; border-radius: 50%; background: white; box-shadow: var(--shadow-sm); transition: transform .15s; }
+.config-toggle input:checked { background: var(--lilac-deep); }
+.config-toggle input:checked::after { transform: translateX(15px); }
+.config-toggle input:focus-visible { outline: 2px solid var(--plum); outline-offset: 3px; }
+.config-toggle input:disabled { opacity: .6; }
+.config-danger { margin-top: 8px; }
+.config-danger .perfil-btn { color: #9c3e57; }
+.config-modal-backdrop { position: fixed; inset: 0; z-index: 100; background: #33233380; padding: 16px; display: grid; place-items: center; }
+.config-modal { width: 100%; max-width: 540px; max-height: 90dvh; overflow-y: auto; }
+.config-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+.config-consent { display: flex; align-items: flex-start; gap: 8px; font-size: 13px; line-height: 1.5; }
+.config-consent input { width: 20px; height: 20px; flex-shrink: 0; }
+dialog.config-modal { margin: auto; color: var(--ink); border: 1px solid var(--line); width: calc(100% - 32px); }
+dialog.config-modal::backdrop { background: #33233380; }
+
+/* Minhas listas: compact scrapbook cards, scoped away from panels/modals. */
+.camp-main { padding: 24px 20px 48px; }
+.camp-hero { margin-bottom: 22px; }
+.camp-hero-eyebrow { font-size: 22px; }
+.camp-hero-title { margin-top: 4px; font-size: clamp(24px, 3.5vw, 36px); }
+.camp-hero-help { margin-top: 2px; min-height: 44px; padding: 8px 10px; }
+.camp-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
+.camp-grid .camp-card {
+  min-width: 0; min-height: 124px; padding: 12px; border-radius: 18px;
+  flex-direction: row; align-items: center; gap: 12px;
+}
+.camp-grid .camp-tape { top: -6px; left: 26px; width: 44px; height: 13px; }
+.camp-grid .camp-cover { flex: 0 0 92px; width: 92px; height: 92px; border-radius: 13px; }
+.camp-grid .camp-cover img { width: 100%; height: 100%; object-fit: cover; }
+.camp-grid .camp-cover-ini { font-size: 46px; }
+.camp-grid .camp-selo {
+  top: 10px; right: 12px; width: 27px; height: 21px; border-radius: 7px; font-size: 12px;
+}
+.camp-grid .camp-card-body { min-width: 0; padding: 0 30px 0 0; gap: 3px; }
+.camp-grid .camp-card-body > :nth-last-child(2) { margin-bottom: 0; }
+.camp-grid .camp-card-name {
+  font-size: 23px; line-height: 1.08; display: -webkit-box;
+  -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+.camp-grid .camp-card-mimos { font-size: 11px; margin-top: 0; }
+.camp-grid .camp-cta {
+  position: absolute; inset: 0; display: block; width: auto; min-height: 0;
+  margin: 0; padding: 0; background: transparent; box-shadow: none; color: var(--lilac-deep);
+  border-radius: 18px; transform: none;
+}
+.camp-grid .camp-cta > span {
+  position: absolute; right: 5px; top: 50%; width: 44px; height: 44px;
+  display: grid; place-items: center; font-size: 25px; transform: translateY(-50%);
+}
+/* The real anchor covers the card; the separate setup action stays above it. */
+.camp-grid .camp-cta:hover { background: transparent; transform: none; }
+.camp-grid .camp-card:has(.camp-cta:focus-visible) { outline: 2px solid var(--lilac-deep); outline-offset: 3px; }
+.camp-grid .camp-card-completar { position: relative; z-index: 2; min-height: 32px; margin: 0; padding: 4px 0; align-self: flex-start; }
+.camp-grid .camp-nova { flex-direction: row; min-height: 124px; padding: 12px; gap: 14px; border-radius: 18px; }
+.camp-grid .camp-nova-plus { width: 48px; height: 48px; border-radius: 14px; }
+.camp-grid .camp-nova-plus > span { font-size: 34px; }
+.camp-grid .camp-skel-btn { display: none; }
+@media (min-width: 1024px) { .camp-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 640px) {
+  .camp-main { padding: 16px 16px 36px; }
+  .camp-hero { margin-bottom: 16px; }
+  .camp-hero-eyebrow { font-size: 20px; }
+  .camp-hero-title { font-size: clamp(17px, 5.15vw, 22px); white-space: nowrap; }
+  .camp-grid { grid-template-columns: minmax(0, 1fr); gap: 14px; }
+  .camp-grid .camp-card, .camp-grid .camp-nova { min-height: 116px; padding: 10px; }
+  .camp-grid .camp-cover { flex-basis: 88px; width: 88px; height: 88px; }
+  .camp-grid .camp-card-name { font-size: 22px; }
 }

@@ -9,6 +9,7 @@ import {
 } from '../../../adapters/pagamentos/transferencia-provider.js';
 import type { IdRepasse } from '../../../domain/pagamentos/financeiro/value-objects/ids.js';
 import type { Observability } from '../../../observability/observability.js';
+import { pixKeyFingerprint } from './manual-recovery-policy.js';
 
 /**
  * aperture-vvh2j — `repasse.executar` job handler. Fires one PIX attempt
@@ -130,8 +131,8 @@ export async function executarTransferenciaRepasse(
       }
 
       const agora = clock();
-      // Non-PII audit summary: amount + chave TYPE only (never the chave value).
-      const requestSummary = `valor:${repasse.amountCents};tipo_chave:${recebedor.tipoChavePix}`;
+      // Audit: amount, key type and approved comparison fingerprint; never the plaintext key.
+      const requestSummary = `valor:${repasse.amountCents};tipo_chave:${recebedor.tipoChavePix};key_sha256:${pixKeyFingerprint(recebedor.chavePix)}`;
 
       const iniciado = await livroFinanceiroRepository.iniciarTransferenciaTransaction({
         idRepasse,

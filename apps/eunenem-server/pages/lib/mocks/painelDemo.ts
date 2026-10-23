@@ -243,17 +243,13 @@ export function buildPainelMenu(
     },
     {
       id: "conta",
-      title: "conta & ajuda",
+      title: "Sua página & Conta",
       items: [
         // TODO(aperture-5q39i): wire to the real perfil edit backend
         // (nome/foto/história) when trpc.usuario.updateProfile ships.
-        {
-          id: "perfil",
-          label: "editar meu perfil",
-          sub: "nome, foto, história do bebê",
-          variant: null,
-          icon: "edit-profile",
-        },
+        { id: "perfil", label: "editar meu perfil", sub: "Nome, datas e informações do bebê", variant: null, icon: "edit-profile" },
+        { id: "personalizar", label: "personalizar página", sub: "Fotos e cores da sua página", variant: null, icon: "edit-profile" },
+        { id: "configuracoes", label: "configurações", sub: "Acessos, privacidade e notificações", variant: null, icon: "edit-profile" },
         // aperture-tja4d — NO "verificado" badge. eunenem 2.0 performs ZERO
         // bank-data / PIX-key-ownership / identity verification (recebedores
         // supply a raw PIX chave; Inter has no DICT key-lookup — aperture-1n53f).
@@ -267,14 +263,14 @@ export function buildPainelMenu(
         {
           id: "bancarios",
           label: "dados bancários",
-          sub: "para onde a gente envia o dinheiro",
+          sub: "Informações para receber seus valores",
           variant: null,
           icon: "bank",
         },
         {
           id: "suporte",
           label: "fale com a gente",
-          sub: "WhatsApp · seg a sex, 9h–16h",
+          sub: "Ajuda e atendimento",
           variant: null,
           icon: "phone",
         },

@@ -511,7 +511,7 @@ async function inconsistenciasDoIntervalo(
  * Uma transação `REPEATABLE READ` + `READ ONLY`: toda leitura de `fn` vê o
  * mesmo snapshot. A primeira consulta fixa o snapshot e registra o instante.
  */
-async function emSnapshotDeLeitura<T>(
+export async function emSnapshotDeLeitura<T>(
   db: Database,
   fn: (trx: Database, snapshotAt: Date) => Promise<T>,
 ): Promise<T> {
@@ -665,9 +665,9 @@ export async function loadReceitaDashboard(
 // ────────────────────────────────────────────────────────────────────
 //  Painel 1b (aperture-zn5cm): Tarifas EuNeném e Recebido no banco
 //
-//  Tarifas  = o mesmo resultado de taxas do dashboard (`credito_receita_
-//             plataforma`, registro por criado_em − cancelamento por
-//             cancelado_em).
+//  Tarifas  = taxa da plataforma + adicional do cartão, por criado_em,
+//             menos cancelamentos das duas linhas por cancelado_em.
+//             Não altera a projeção contábil/fiscal de receita da plataforma.
 //  Recebido = os TRÊS tipos que um pagamento aprovado gera, no mesmo modelo de
 //             eventos. Por invariante do livro, a soma deles por pagamento é
 //             `intencao_total_paid_cents` (o bruto pago pelo contribuinte), e
@@ -695,8 +695,12 @@ export interface ReceitaPainel extends PainelAgregado {
 }
 
 const SOMAS_PAINEL = sql`
-  ${SOMA_REGISTRADAS} AS tarifas_registradas,
-  ${SOMA_CANCELAMENTOS} AS tarifas_canceladas,
+  COALESCE(SUM(e.amount_cents) FILTER (
+    WHERE e.tipo IN (${sql.lit(TIPO_RECEITA)}, ${sql.lit(TIPO_ADICIONAL)})
+      AND e.evento = 'registro'), 0)::bigint AS tarifas_registradas,
+  COALESCE(SUM(e.amount_cents) FILTER (
+    WHERE e.tipo IN (${sql.lit(TIPO_RECEITA)}, ${sql.lit(TIPO_ADICIONAL)})
+      AND e.evento = 'cancelamento'), 0)::bigint AS tarifas_canceladas,
   COALESCE(SUM(e.amount_cents) FILTER (WHERE e.evento = 'registro'), 0)::bigint
     AS recebido_registrado,
   COALESCE(SUM(e.amount_cents) FILTER (WHERE e.evento = 'cancelamento'), 0)::bigint

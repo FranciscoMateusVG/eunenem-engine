@@ -1,3 +1,4 @@
+import { useCampanhaPublicOwnerSlugRota } from "@/lib/campanhas";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 
@@ -36,6 +37,7 @@ import {
   conviteFieldErrors,
   type ConviteFieldErrors,
 } from "./ConviteBody";
+import { ComPermissao } from "./ComPermissao";
 
 // aperture-zlrd2 — Mobile-specific convites wizard.
 //
@@ -109,7 +111,8 @@ interface StepProps {
 
 // ─── shell ──────────────────────────────────────────────────────────
 
-export function MobileConviteBody({ slug }: PainelSectionBodyProps) {
+function MobileConviteBodyConteudo({ slug }: PainelSectionBodyProps) {
+  const publicOwnerSlug = useCampanhaPublicOwnerSlugRota();
   // aperture-z6vks — keep the /c/:idCampanha context on the preview link.
   const idCampanha = useCampanhaRota();
   // aperture-zy4uo — EMPTY_STATE: never flash demo content as user content.
@@ -190,6 +193,7 @@ export function MobileConviteBody({ slug }: PainelSectionBodyProps) {
     }
   };
   const onSend = async () => {
+    if (!publicOwnerSlug) return;
     if (!guardComplete()) return;
     setIsSharing(true);
     try {
@@ -199,7 +203,7 @@ export function MobileConviteBody({ slug }: PainelSectionBodyProps) {
       // after.
       try {
         const result = await shareConvitePreview({
-          slug,
+          slug: publicOwnerSlug,
           // aperture-2v91z — share THIS campanha's convite, not the oldest's.
           idCampanha,
           title: `Convite de ${state.babyName || 'nosso evento'}`,
@@ -265,7 +269,7 @@ export function MobileConviteBody({ slug }: PainelSectionBodyProps) {
           {isSaving ? "salvando..." : "salvar"}
         </button>
         <a
-          href={painelConvitePreviewHref(slug, idCampanha)}
+          href={publicOwnerSlug ? painelConvitePreviewHref(publicOwnerSlug, idCampanha) : undefined}
           className="mcv-save"
           onClick={() => sendEvent("convite_ver_preview_click")}
         >
@@ -1525,3 +1529,12 @@ const MCV_CSS = `
   }
 }
 `;
+
+/** aperture-1z18g — gated by `convite:editar` for members of a shared campanha. */
+export function MobileConviteBody(props: PainelSectionBodyProps) {
+  return (
+    <ComPermissao acao="convite:editar" titulo="Convite">
+      <MobileConviteBodyConteudo {...props} />
+    </ComPermissao>
+  );
+}

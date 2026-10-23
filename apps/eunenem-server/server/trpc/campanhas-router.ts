@@ -1,3 +1,4 @@
+import { campaignPublicOwner, campaignPublicOwnerSlug, isCampaignPublicOwner } from './campaign-public-address.js';
 /**
  * Campanhas tRPC router (aperture-mebax — multicampanha migration bridge POC,
  * epic aperture-7hm2g, design spec §6).
@@ -48,6 +49,10 @@ import {
   resolverCampanhaAdministrada,
 } from './resolve-campanha-administrada.js';
 import {
+  PermissaoCampanhaNegadaError,
+  resolverCampanhaComPermissao,
+} from './exigir-permissao-campanha.js';
+import {
   resolverUsuarioAutenticado,
   SessaoNaoAutenticadaError,
 } from './session-resolver.js';
@@ -60,6 +65,8 @@ const CampanhaNovaDTOSchema = z.object({
   titulo: z.string(),
   /** The USER's painel slug — card navigates to `/painel/${slug}`. */
   slug: z.string(),
+  /** Canonical public identity; distinct from the viewer's private painel slug. */
+  publicOwnerSlug: z.string().nullable(),
   /**
    * Mimo count for the card — `null` in the POC (a real received-mimos count
    * needs a per-campanha contribuições aggregate; deliberately out of scope,
@@ -128,11 +135,13 @@ function toCardDTO(
   campanha: Campanha,
   slug: string,
   nomeBebe: string | null,
+  publicOwnerSlug: string | null = slug,
 ): z.infer<typeof CampanhaNovaDTOSchema> {
   return {
     id: campanha.id,
     titulo: campanha.titulo,
     slug,
+    publicOwnerSlug,
     quantidadeMimos: null,
     criadaEm: campanha.criadaEm.toISOString(),
     hasRecebedor: campanha.idRecebedor != null,
@@ -172,14 +181,13 @@ type CampanhaSlugCheck =
 
 /**
  * Shared validation for definirSlug/validarSlug: format → reserved →
- * per-conta uniqueness (the conta's OTHER campanhas; a DIFFERENT conta
- * holding the same slug is fine — uniqueness is per-conta only, matching
- * the non-unique DB index).
+ * canonical-owner namespace uniqueness. Invited lists and the acting member's
+ * own lists are NOT in that namespace; check only campaigns owned by the
+ * same public owner used for share links.
  */
 async function checkCampanhaSlug(
   ctx: TrpcContext,
-  idConta: string,
-  idCampanha: string,
+  idCampanha: IdCampanha,
   raw: string,
 ): Promise<CampanhaSlugCheck> {
   const slug = normalizeCampanhaSlug(raw);
@@ -189,8 +197,15 @@ async function checkCampanhaSlug(
   if (RESERVED_CAMPANHA_SLUGS.has(slug)) {
     return { ok: false, motivo: 'reservado' };
   }
-  const campanhas = await ctx.deps.campanhaRepository.findCampanhasByAdministrador(idConta);
-  const emUso = campanhas.some((c) => c.id !== idCampanha && c.slug === slug);
+  const owner = await campaignPublicOwner(ctx, idCampanha);
+  if (!owner) throw new CampanhaInexistenteError('Campanha sem proprietario publico');
+  const campanhas = await ctx.deps.campanhaRepository.findCampanhasByAdministrador(owner.idConta);
+  const conflicts = await Promise.all(
+    campanhas.filter((c) => c.id !== idCampanha && c.slug === slug).map((c) =>
+      isCampaignPublicOwner(ctx, c.id, owner.idConta),
+    ),
+  );
+  const emUso = conflicts.some(Boolean);
   if (emUso) {
     return { ok: false, motivo: 'em_uso' };
   }
@@ -210,11 +225,14 @@ function slugErrorMessage(motivo: 'formato' | 'reservado' | 'em_uso'): string {
 
 function toSlugTRPCError(err: unknown): TRPCError {
   if (err instanceof TRPCError) return err;
+  if (err instanceof PermissaoCampanhaNegadaError) {
+    return new TRPCError({ code: 'FORBIDDEN', message: err.message, cause: err });
+  }
   if (err instanceof CampanhaAcessoNegadoError) {
     return new TRPCError({ code: 'UNAUTHORIZED', message: err.message, cause: err });
   }
   if (err instanceof CampanhaInexistenteError) {
-    return new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: err.message, cause: err });
+    return new TRPCError({ code: 'NOT_FOUND', message: err.message, cause: err });
   }
   if (err instanceof CampanhaSlugJaAlteradoError) {
     return new TRPCError({ code: 'FORBIDDEN', message: 'slug_ja_alterado', cause: err });
@@ -261,11 +279,11 @@ export const campanhasRouter = t.router({
         const nomeBebePorCampanha = new Map(
           campanhas.map((campanha, i) => [campanha.id, perfis[i]?.conteudo.nomeBebe ?? null]),
         );
-        const novas = [...campanhas]
+        const novas = await Promise.all([...campanhas]
           .sort((a, b) => b.criadaEm.getTime() - a.criadaEm.getTime())
-          .map((campanha) =>
-            toCardDTO(campanha, usuario.slug, nomeBebePorCampanha.get(campanha.id) ?? null),
-          );
+          .map(async (campanha) =>
+            toCardDTO(campanha, usuario.slug, nomeBebePorCampanha.get(campanha.id) ?? null, await campaignPublicOwnerSlug(ctx, campanha.id)),
+          ));
 
         // Static-snapshot legacy detection (spec §4) — pure, in-memory match;
         // no legacy-system call at runtime.
@@ -414,13 +432,18 @@ export const campanhasRouter = t.router({
     .output(z.object({ slug: z.string() }))
     .mutation(async ({ ctx, input }) => {
       try {
-        const { usuario, campanha } = await resolverCampanhaAdministrada(ctx, input.idCampanha);
+        // aperture-1z18g: changing the public link is a configurable action.
+        const { campanha } = await resolverCampanhaComPermissao(
+          ctx,
+          input.idCampanha,
+          'link:editar',
+        );
 
         if (input.origem === 'perfil' && campanha.slugAlteradoEm !== null) {
           throw new CampanhaSlugJaAlteradoError(campanha.id);
         }
 
-        const check = await checkCampanhaSlug(ctx, usuario.idConta, campanha.id, input.slug);
+        const check = await checkCampanhaSlug(ctx, campanha.id, input.slug);
         if (!check.ok) {
           throw new TRPCError({ code: 'BAD_REQUEST', message: slugErrorMessage(check.motivo) });
         }
@@ -459,9 +482,9 @@ export const campanhasRouter = t.router({
     )
     .query(async ({ ctx, input }) => {
       try {
-        const { usuario, campanha } = await resolverCampanhaAdministrada(ctx, input.idCampanha);
+        const { campanha } = await resolverCampanhaAdministrada(ctx, input.idCampanha);
 
-        const check = await checkCampanhaSlug(ctx, usuario.idConta, campanha.id, input.slug);
+        const check = await checkCampanhaSlug(ctx, campanha.id, input.slug);
         return check.ok
           ? { disponivel: true, motivo: null }
           : { disponivel: false, motivo: check.motivo };

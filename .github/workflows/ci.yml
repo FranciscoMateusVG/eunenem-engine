@@ -305,7 +305,16 @@ jobs:
       # --with-deps pulls the OS libraries chromium needs on ubuntu-latest
       # (test:e2e:install alone omits them).
       - name: Install Playwright browser (chromium + OS deps)
-        run: pnpm exec playwright install --with-deps chromium
+        run: |
+          # The Azure Ubuntu mirror can stall while downloading browser fonts.
+          # Use Ubuntu's primary mirror for this runner's dependency install.
+          if [ -f /etc/apt/apt-mirrors.txt ]; then
+            echo 'https://archive.ubuntu.com/ubuntu/' | sudo tee /etc/apt/apt-mirrors.txt >/dev/null
+          fi
+          if [ -f /etc/apt/sources.list.d/ubuntu.sources ]; then
+            sudo sed -i 's|http://azure.archive.ubuntu.com|https://archive.ubuntu.com|g' /etc/apt/sources.list.d/ubuntu.sources
+          fi
+          pnpm exec playwright install --with-deps chromium
       # test:e2e builds the client bundle once, then Playwright spawns the
       # :3002 (fake-adapter) + :3003 (stripe-env) servers and runs the suite.
       - name: Run Playwright e2e

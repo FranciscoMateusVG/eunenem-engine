@@ -61,6 +61,7 @@
  * across the apps/eunenem-server ↔ root-tests module boundary (see the
  * resolver header in resolve-campanha-administrada.ts).
  */
+
 import { randomUUID } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
 import {
@@ -70,6 +71,8 @@ import {
 import type { ServerDeps } from '../../../apps/eunenem-server/server/auth/setup.js';
 import type { TrpcContext } from '../../../apps/eunenem-server/server/trpc/context.js';
 import { appRouter } from '../../../apps/eunenem-server/server/trpc/router.js';
+import { CampanhaMembrosRepositoryMemory } from '../../../src/adapters/arrecadacao/campanha-membros-repository.memory.js';
+import { CampanhaPrivacidadeRepositoryMemory } from '../../../src/adapters/arrecadacao/campanha-privacidade-repository.memory.js';
 import { CampanhaRepositoryMemory } from '../../../src/adapters/arrecadacao/campanha-repository.memory.js';
 import { ContribuicaoRepositoryMemory } from '../../../src/adapters/arrecadacao/contribuicao-repository.memory.js';
 import { PerfilCampanhaRepositoryMemory } from '../../../src/adapters/arrecadacao/perfil-campanha-repository.memory.js';
@@ -145,6 +148,8 @@ async function buildRig(): Promise<Rig> {
     perfilCampanhaRepository: new PerfilCampanhaRepositoryMemory(),
     plataformaRepository,
     campanhaRepository,
+    campanhaMembrosRepository: new CampanhaMembrosRepositoryMemory(campanhaRepository),
+    campanhaPrivacidadeRepository: new CampanhaPrivacidadeRepositoryMemory(),
     contribuicaoRepository: new ContribuicaoRepositoryMemory(),
     recebedorRepository,
     eventoRepository: new EventoRepositoryMemory(),
@@ -973,10 +978,11 @@ describe('g1wl4 — per-hop idCampanha, THROUGH the router (PR #344 + aperture-4
       const user = await rig.addUser(uniqueEmail('pagina'));
       const c2 = (await user.caller.campanhas.criar({ titulo: 'Segunda Lista' })).id;
 
-      await expect(rig.anonCaller.pagina.obterMural({ slug: user.slug })).resolves.toEqual([]);
+      const vazio = { exibir: true, recados: [] };
+      await expect(rig.anonCaller.pagina.obterMural({ slug: user.slug })).resolves.toEqual(vazio);
       await expect(
         rig.anonCaller.pagina.obterMural({ slug: user.slug, idCampanha: c2 }),
-      ).resolves.toEqual([]);
+      ).resolves.toEqual(vazio);
     });
 
     it('iniciarPagamentoContribuicao: bare pins the OLDEST — a c2 gift via bare fails the saga; via idCampanha=c2 it checks out', async () => {

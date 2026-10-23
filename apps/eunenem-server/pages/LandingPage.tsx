@@ -27,9 +27,8 @@ import { WhatsAppFab } from '@/components/eunenem/landing/WhatsAppFab';
 //     ChaRifa (aperture-397x0, §09 — pure-CSS raffle-ticket teaser)
 //   - REWRITTEN in sibling PRs: Hero (aperture-ospu7, §01), HowItWorks
 //     (aperture-b8yn3, §03), Differential (aperture-hsm41, §04)
-//   - Section order matches data-screen-label ordering in
-//     extracted/EuNenem Landing v2.html: Navbar → 01 Hero → 03 HowItWorks
-//     → 04 Differential → 05 Calculadora → 06 Taxas → 07 Invites
+//   - Current section order (simulator immediately follows the Hero): Navbar → 01 Hero → 05 Calculadora → 03 HowItWorks
+//     → 04 Differential → 06 Taxas → 07 Invites
 //     → 08 Testimonials → 09 ChaRifa → 10 CTAFinal → Footer
 //
 // The scroll-reveal IntersectionObserver runs after hydration and adds
@@ -72,9 +71,9 @@ export function LandingPage() {
     <>
       <Navbar />
       <Hero />
+      <Calculadora />
       <HowItWorks />
       <Differential />
-      <Calculadora />
       <Taxas />
       <Invites />
       <Testimonials />

@@ -322,34 +322,12 @@ describe('whxzg field map — every edit field has a unique focus target the pan
     expect(css).toMatch(/\.tweaks-btn\s*\{[^}]*min-height:\s*44px;/s);
   });
 
-  it('TweaksPanel renders an element with each inputId (focus targets exist)', () => {
-    const panel = src('pages/components/eunenem/TweaksPanel.tsx');
-    for (const f of Object.values(EDIT_FIELDS)) {
-      // Rendered via EDIT_FIELDS.<id>.inputId — the identifier must be referenced.
-      expect(panel, f.id).toContain(`EDIT_FIELDS.${f.id}.inputId`);
-    }
-    // Photo persistence is disclosed BEFORE the picker and Cancelar never
-    // claims to undo photos (GLaDOS/Izzy contract 2026-09-14).
-    const slot = src('pages/components/eunenem/PhotoSlot.tsx');
-    expect(slot).toContain('foto salva na hora do envio');
-    expect(panel).toMatch(/fotos enviadas já estão salvas/);
-    expect(panel).toMatch(/descarta só o texto e as cores não salvos/);
-  });
-
-  it('the photo persist payload echoes the STORED profile, never the draft', () => {
-    const panel = src('pages/components/eunenem/TweaksPanel.tsx');
-    const upload = panel.slice(
-      panel.indexOf('const uploadFoto'),
-      panel.indexOf('// The whole affordance'),
-    );
-    // Inside uploadFoto every content field comes from `atual.` (stored), and
-    // the draft accessors never appear.
-    expect(upload).toContain('nomeBebe: atual.nomeBebe');
-    expect(upload).toContain('historia: atual.historia');
-    expect(upload).toContain('corPrimaria: atual.corPrimaria');
-    expect(upload).not.toContain('tweaks.babyName');
-    expect(upload).not.toContain('tweaks.historia');
-    expect(upload).not.toContain('tweaks.primary');
-    expect(upload).not.toContain('markSaved(');
+  it('the public page links to the centralized editor instead of mounting a duplicate', () => {
+    const page = src('pages/PaginaPage.tsx');
+    expect(page).not.toContain('<TweaksPanel');
+    expect(page).toContain('"personalizar"');
+    const profile = src('pages/components/eunenem/painel/PerfilBody.tsx');
+    expect(profile).not.toContain('<PhotoSlot');
+    expect(profile).toContain('"personalizar"');
   });
 });

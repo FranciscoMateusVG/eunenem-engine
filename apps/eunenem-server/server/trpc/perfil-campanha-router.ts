@@ -47,18 +47,25 @@ import {
   CampanhaInexistenteError,
   resolverCampanhaAdministrada,
 } from './resolve-campanha-administrada.js';
+import {
+  PermissaoCampanhaNegadaError,
+  resolverCampanhaComPermissao,
+} from './exigir-permissao-campanha.js';
 
 const t = initTRPC.context<TrpcContext>().create();
 
 function toTRPCError(err: unknown): TRPCError {
   if (err instanceof TRPCError) return err;
+  if (err instanceof PermissaoCampanhaNegadaError) {
+    return new TRPCError({ code: 'FORBIDDEN', message: err.message, cause: err });
+  }
   // Non-leaking: session failure, not-owner, and not-found all collapse here.
   if (err instanceof CampanhaAcessoNegadoError) {
     return new TRPCError({ code: 'UNAUTHORIZED', message: err.message, cause: err });
   }
   // Absent-branch inconsistency (caller administers no campanha) — fail loud.
   if (err instanceof CampanhaInexistenteError) {
-    return new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: err.message, cause: err });
+    return new TRPCError({ code: 'NOT_FOUND', message: err.message, cause: err });
   }
   if (err instanceof ArrecadacaoInputInvalidoError) {
     return new TRPCError({ code: 'BAD_REQUEST', message: err.message, cause: err });
@@ -299,7 +306,11 @@ export const perfilCampanhaRouter = t.router({
     .mutation(async ({ ctx, input }) => {
       try {
         const { idCampanha, ...conteudoInput } = input;
-        const { usuario, campanha } = await resolverCampanhaAdministrada(ctx, idCampanha);
+        const { usuario, campanha } = await resolverCampanhaComPermissao(
+          ctx,
+          idCampanha,
+          'perfil:editar',
+        );
 
         const perfil = await upsertConteudoPerfilCampanha(
           {
@@ -383,7 +394,7 @@ export const perfilCampanhaRouter = t.router({
     .mutation(async ({ ctx, input }) => {
       try {
         const { idCampanha, ...uploadInput } = input;
-        const { campanha } = await resolverCampanhaAdministrada(ctx, idCampanha);
+        const { campanha } = await resolverCampanhaComPermissao(ctx, idCampanha, 'perfil:editar');
         return await emitirUrlUploadFotoCampanha(
           {
             objectStorage: ctx.deps.objectStorage,

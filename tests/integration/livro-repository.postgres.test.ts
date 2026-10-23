@@ -1,3 +1,4 @@
+import { RecebedorRepositoryPostgres } from '../../src/adapters/arrecadacao/recebedor-repository.postgres.js';
 /**
  * Postgres adapter integration tests for `LivroFinanceiroRepository`
  * (aperture-id3ay).
@@ -22,9 +23,14 @@
  */
 
 import { randomUUID } from 'node:crypto';
+import { once } from 'node:events';
+import { createServer } from 'node:http';
+import type { AddressInfo } from 'node:net';
+import { sql } from 'kysely';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { LivroFinanceiroRepositoryPostgres } from '../../src/adapters/pagamentos/financeiro/livro-repository.postgres.js';
 import { TransferenciaProviderFake } from '../../src/adapters/pagamentos/transferencia-provider.fake.js';
+import { TransferenciaProviderInter } from '../../src/adapters/pagamentos/transferencia-provider.inter.js';
 import type { IdCampanha } from '../../src/domain/arrecadacao/value-objects/ids.js';
 import type { LancamentoFinanceiro } from '../../src/domain/pagamentos/financeiro/entities/lancamento-financeiro.js';
 import type { RepasseRecebedor } from '../../src/domain/pagamentos/financeiro/entities/repasse-recebedor.js';
@@ -42,6 +48,10 @@ import {
   confirmarTransferenciaRepasse,
   MAX_TENTATIVAS_CONFIRMACAO,
 } from '../../src/use-cases/pagamentos/financeiro/confirmar-transferencia-repasse.js';
+import {
+  consultarRecuperacaoRepasse,
+  recuperarRepasse,
+} from '../../src/use-cases/pagamentos/financeiro/consultar-recuperacao-repasse.js';
 import { withLancamentoSeeding } from '../helpers/seed-lancamento-parents.js';
 import { createTestDatabase, type TestDatabase } from '../helpers/test-db.js';
 
@@ -818,6 +828,223 @@ describe('LivroFinanceiroRepositoryPostgres — manual resolution (aperture-477n
     return { idRepasse: repasse.id, idCampanha, idPagamento: lancamento.idPagamento };
   }
 
+  it('45h33 — concurrent recovery consumes one authorization and enqueues once; retry audit does not collide', async () => {
+    const { idRepasse } = await seedVerificando();
+    let enqueued = 0;
+    const input = {
+      idRepasse,
+      expectedTransferAttempts: 1,
+      audit: JSON.stringify({
+        kind: 'manual_attestation',
+        actor: 'admin@example.test',
+        reason: 'Extrato conferido sem pagamento',
+      }),
+      agora: new Date('2026-07-16T12:10:00Z'),
+    };
+    await Promise.all([
+      repo.recuperarRepasseTransaction(input, async () => {
+        enqueued += 1;
+      }),
+      repo.recuperarRepasseTransaction(input, async () => {
+        enqueued += 1;
+      }),
+    ]);
+    expect(enqueued).toBe(1);
+    expect((await repo.findRepasseById(idRepasse))?.status).toBe('aprovado');
+    const claims = await Promise.all([
+      repo.iniciarTransferenciaTransaction({
+        idRepasse,
+        requestSummary: 'retry',
+        agora: input.agora,
+      }),
+      repo.iniciarTransferenciaTransaction({
+        idRepasse,
+        requestSummary: 'retry',
+        agora: input.agora,
+      }),
+    ]);
+    expect(claims.filter((c) => c.acao === 'prosseguir')).toHaveLength(1);
+    expect(claims.find((c) => c.acao === 'reconciliar')?.attemptId).toBe(
+      claims.find((c) => c.acao === 'prosseguir')?.attemptId,
+    );
+    const history = await repo.findTransferAttemptsByRepasseId(idRepasse);
+    expect(new Set(history.map((a) => a.attemptNo)).size).toBe(history.length);
+    expect(history).toHaveLength(3);
+  });
+
+  it('45h33 — enqueue failure rolls recovery and audit back', async () => {
+    const { idRepasse } = await seedVerificando();
+    await expect(
+      repo.recuperarRepasseTransaction(
+        {
+          idRepasse,
+          expectedTransferAttempts: 1,
+          audit: 'synthetic evidence',
+          agora: new Date('2026-07-16T12:10:00Z'),
+        },
+        async () => {
+          throw new Error('queue unavailable');
+        },
+      ),
+    ).rejects.toThrow('queue unavailable');
+    expect((await repo.findRepasseById(idRepasse))?.status).toBe('verificando');
+    expect(await repo.findTransferAttemptsByRepasseId(idRepasse)).toHaveLength(1);
+  });
+
+  it.each([
+    'REALIZADO',
+    'NAO_REALIZADO',
+    'HTTP404',
+    'MATCH',
+    'OTHER',
+    'UNKNOWN_DEST',
+    'PIXP97',
+  ])('45h33 real PG + HTTP %s: no double payment; manual attestation required when inconclusive', async (status) => {
+    const { idRepasse, idCampanha } = await seedVerificando();
+    await sql`INSERT INTO recebedores (id, campanha_id, nome_titular, metodo, tipo_chave_pix, chave_pix, cpf_titular, is_active, criada_em)
+      VALUES (${randomUUID()}, ${idCampanha}, 'Ana Teste', 'pix', 'email', 'ana@example.test', '52998224725', TRUE, NOW())`.execute(
+      testDb.db,
+    );
+    repo = new LivroFinanceiroRepositoryPostgres(
+      testDb.db,
+      new RecebedorRepositoryPostgres(testDb.db),
+    );
+    const transacoes = ['MATCH', 'OTHER', 'UNKNOWN_DEST'].includes(status)
+      ? [
+          {
+            tipoOperacao: 'D',
+            tipoTransacao: 'PIX',
+            valor: '50.00',
+            detalhes: {
+              endToEndId: 'E_SYNTHETIC',
+              ...(status === 'MATCH'
+                ? { cpfCnpjRecebedor: '52998224725' }
+                : status === 'OTHER'
+                  ? { cpfCnpjRecebedor: '11144477735' }
+                  : {}),
+            },
+          },
+        ]
+      : [];
+
+    await sql`UPDATE repasses_recebedor SET inter_codigo_solicitacao = 'synthetic-bank-id' WHERE id = ${idRepasse}`.execute(
+      testDb.db,
+    );
+    const calls: string[] = [];
+    const server = createServer((req, res) => {
+      calls.push(`${req.method} ${req.url}`);
+      res.setHeader('content-type', 'application/json');
+      if (req.url === '/oauth/v2/token')
+        res.end(JSON.stringify({ access_token: 'synthetic', expires_in: 3600 }));
+      else if (req.url?.startsWith('/banking/v2/extrato'))
+        res.end(JSON.stringify({ ultimaPagina: true, transacoes }));
+      else if (status === 'HTTP404') {
+        res.statusCode = 404;
+        res.end('{}');
+      } else
+        res.end(
+          JSON.stringify({
+            transacaoPix: {
+              status:
+                status === 'PIXP97'
+                  ? 'FALHA'
+                  : ['MATCH', 'OTHER', 'UNKNOWN_DEST'].includes(status)
+                    ? 'NAO_REALIZADO'
+                    : status,
+              ...(status === 'PIXP97' ? { erros: [{ codigo: 'PIXP97' }] } : {}),
+            },
+          }),
+        );
+    });
+    server.listen(0, '127.0.0.1');
+    await once(server, 'listening');
+    const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    try {
+      const provider = new TransferenciaProviderInter(
+        {
+          baseUrl: 'https://inter.test',
+          clientId: 'test',
+          clientSecret: 'test',
+          scope: 'test',
+          certPem: '',
+          keyPem: '',
+        },
+        async (method, path, headers, body) => {
+          const response = await fetch(origin + path, {
+            method,
+            headers,
+            ...(body ? { body } : {}),
+          });
+          return { statusCode: response.status, body: await response.text() };
+        },
+      );
+      let enqueued = 0;
+      const deps = {
+        livroFinanceiroRepository: repo,
+        transferenciaProvider: provider,
+        clock: () => new Date('2026-07-16T12:10:00Z'),
+        repasseJobEnqueuer: {
+          enqueueExecutar: async () => {
+            enqueued++;
+          },
+          enqueueConfirmar: async () => {},
+        },
+      };
+      const preview = await consultarRecuperacaoRepasse(deps, idRepasse);
+      const input = {
+        idRepasse,
+        evidenceDigest: preview.evidenceDigest,
+        expectedTransferAttempts: 1,
+        motivo: 'Extrato sintético conferido',
+        attestation: {
+          evidence: 'Extrato sintético sem pagamento',
+          periodStart: preview.period.dataInicio,
+          periodEnd: preview.period.dataFim,
+          confirmedAmountCents: 5000,
+          dismissedE2Es: [] as string[],
+        },
+      };
+      if (['REALIZADO', 'MATCH', 'UNKNOWN_DEST'].includes(status)) {
+        await expect(recuperarRepasse(deps, input, 'admin@example.test')).rejects.toThrow(
+          'bloqueado',
+        );
+        expect(enqueued).toBe(0);
+      } else {
+        if (['HTTP404', 'PIXP97'].includes(status)) {
+          const { attestation: _, ...withoutAttestation } = input;
+          await expect(
+            recuperarRepasse(deps, withoutAttestation, 'admin@example.test'),
+          ).rejects.toThrow('Ateste');
+          expect(enqueued).toBe(0);
+          for (const attestation of [
+            { ...input.attestation, evidence: '' },
+            { ...input.attestation, confirmedAmountCents: 1 },
+            { ...input.attestation, periodStart: '2027-01-01' },
+            { ...input.attestation, periodEnd: '2020-01-01' },
+          ]) {
+            await expect(
+              recuperarRepasse(deps, { ...input, attestation }, 'admin@example.test'),
+            ).rejects.toThrow();
+          }
+          expect(enqueued).toBe(0);
+        }
+        if (status === 'OTHER') {
+          await expect(recuperarRepasse(deps, input, 'admin@example.test')).rejects.toThrow(
+            'Ateste',
+          );
+          input.attestation.dismissedE2Es.push('E_SYNTHETIC');
+        }
+        await recuperarRepasse(deps, input, 'admin@example.test');
+        expect(enqueued).toBe(1);
+        expect((await repo.findRepasseById(idRepasse))?.status).toBe('aprovado');
+      }
+      expect(calls.filter((c) => c.startsWith('POST /banking'))).toEqual([]);
+    } finally {
+      server.closeAllConnections();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
   const CANDIDATO = {
     codigoSolicitacao: 'inter_manual_codigo_xyz',
     valorCents: 5000,
@@ -887,19 +1114,18 @@ describe('LivroFinanceiroRepositoryPostgres — manual resolution (aperture-477n
     expect(manualRow?.requestSummary).toContain('resolucao_manual_pago_por:admin@eunenem.com');
   });
 
-  it('resolverManualPagoTransaction — idempotent no-op on a non-flagged repasse (never books an unflagged verificando)', async () => {
+  it('45h33 — manual paid resolves an unflagged verificando without another transfer', async () => {
     const { idRepasse, idPagamento } = await seedVerificando();
-    // NOT flagged. A manual-pago must not fire — the repasse is still under
-    // automated reconciliation, so booking here could double-pay.
+    // Polling is retired: unflagged verificando must also have a manual way out.
     const result = await repo.resolverManualPagoTransaction({
       idRepasse,
       interCodigoSolicitacao: CANDIDATO.codigoSolicitacao,
       resolvidoPor: 'admin@eunenem.com',
       agora: new Date('2026-07-16T12:10:00Z'),
     });
-    expect(result.repasse.status).toBe('verificando'); // unchanged
+    expect(result.repasse.status).toBe('pago');
     const [linked] = await repo.findLancamentosByIdPagamento(idPagamento);
-    expect(linked?.transferidoEm).toBeNull(); // no debit
+    expect(linked?.transferidoEm).not.toBeNull();
   });
 
   it('resolverManualFalhouTransaction — falhou, no debit, MAX+1 audit row, clears flag', async () => {
@@ -937,11 +1163,7 @@ describe('LivroFinanceiroRepositoryPostgres — manual resolution (aperture-477n
 
   it('CONCURRENT double resolverManualPago (two admins, same instant) → exactly ONE debit + ONE manual-pago audit row (FOR UPDATE serializes)', async () => {
     const { idRepasse, idPagamento } = await seedVerificando();
-    await repo.flagNeedsManualResolutionTransaction({
-      idRepasse,
-      candidatos: [CANDIDATO],
-      agora: new Date('2026-07-16T12:05:00Z'),
-    });
+    // No reconciliation flag: this is the stuck VERIFICANDO case.
 
     // Two admins click "Pago" simultaneously. FOR UPDATE must serialize: one
     // books pago, the other blocks, re-reads pago inside its txn → no-op.

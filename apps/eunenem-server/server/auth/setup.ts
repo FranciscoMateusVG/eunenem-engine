@@ -1,3 +1,16 @@
+import { InterFeeSync } from '../../../../src/use-cases/pagamentos/inter-fee-sync.js';
+import { InterProcessingFeeReader } from '../../../../src/adapters/pagamentos/inter-processing-fee-reader.js';
+import { ProviderFeeSync } from '../../../../src/use-cases/pagamentos/provider-fee-sync.js';
+import { StripeProcessingFeeReader } from '../../../../src/adapters/pagamentos/stripe-processing-fee-reader.js';
+import { LifecycleEmailService } from '../../../../src/use-cases/email/lifecycle-email.js';
+import { LifecycleEmailRepositoryPostgres } from '../../../../src/adapters/email/lifecycle-email.postgres.js';
+import { LifecycleEmailPreferencesPostgres } from '../../../../src/adapters/email/lifecycle-email-preferences.postgres.js';
+import type { CampanhaPrivacidadeRepository } from '../../../../src/adapters/arrecadacao/campanha-privacidade-repository.js';
+import { CampanhaPrivacidadeRepositoryPostgres } from '../../../../src/adapters/arrecadacao/campanha-privacidade-repository.postgres.js';
+import { createLifecycleEmailTokens, type LifecycleEmailTokens } from './lifecycle-email-tokens.js';
+import { renderLifecycleEmail } from './lifecycle-email.js';
+import { renderCampaignInviteEmail } from './campaign-invite-email.js';
+import { CampanhaCompartilhamentoPostgres } from '../../../../src/adapters/arrecadacao/campanha-compartilhamento.postgres.js';
 import { z } from 'zod';
 import {
   AuthServiceBetterAuth,
@@ -68,6 +81,9 @@ import {
   type PerfilCriadorRepository,
   PerfilCriadorRepositoryPostgres,
   type ResgatePendenteRepository,
+  type ArrecadacaoRepositoryContext,
+  type CampanhaMembrosRepository,
+  CampanhaMembrosRepositoryPostgres,
   ResgatePendenteRepositoryPostgres,
   PlataformaRepositoryMemory,
   type PlataformaRepository,
@@ -110,8 +126,25 @@ import {
  * what they need from the context object instead of standing up new
  * adapters per call.
  */
+export type RevogarConvitesPendentesDoMembro = (
+  input: { readonly idCampanha: string; readonly idConta: string; readonly idUsuarioAtor: string },
+  context: Required<ArrecadacaoRepositoryContext>,
+) => Promise<void>;
+
 export interface ServerDeps {
+  readonly lifecycleEmail?: LifecycleEmailService;
+  readonly lifecycleEmailTokens?: LifecycleEmailTokens;
+  readonly lifecycleEmailPreferences?: LifecycleEmailPreferencesPostgres;
+  readonly lifecyclePaymentFinalized?: ((pagamento: Pagamento) => Promise<void>) | undefined;
+  /** Owner alert when a guest's RSVP becomes "sim" (deduped per guest by the outbox). */
+  readonly lifecyclePresenceConfirmed?:
+    | ((idCampanha: string, idConvidado: string, nomeConvidado: string) => Promise<void>)
+    | undefined;
   readonly db: Database;
+  /** Optional only for isolated in-memory router fixtures. Production composition requires it. */
+  readonly contextoCompartilhamentoOnboarding?: (usuarioId: string, idConta: string, plataformaId: string) => Promise<{ idsProprias: string[]; idCompartilhada: string | null }>;
+  readonly consumirConvitesVerificados?: (usuarioId: string, plataformaId: string) => Promise<void>;
+  readonly enviarConviteCampanha: (email: string) => Promise<void>;
   readonly auth: Auth;
   readonly authService: AuthService;
   readonly usuarioRepository: UsuarioRepository;
@@ -157,6 +190,21 @@ export interface ServerDeps {
    * shared single instances built at boot — they hold no per-request state.
    */
   readonly campanhaRepository: CampanhaRepository;
+  /**
+   * Papéis + permissões por ação dos administradores de cada campanha
+   * (aperture-1z18g). Lido por `assertCampaignPermission` em toda rota
+   * que exige uma ação específica (recebedor, saque, presentes, membros).
+   */
+  readonly campanhaMembrosRepository: CampanhaMembrosRepository;
+  /** "Exibir recados publicamente" por campanha (aperture-851nu). */
+  readonly campanhaPrivacidadeRepository: CampanhaPrivacidadeRepository;
+  /**
+   * Hook called by `campanhaMembros.remover` INSIDE its transaction (campanha
+   * row already locked FOR UPDATE, before the membership rows are deleted) so
+   * the sharing flow revokes the removed member's pending invites atomically.
+   * Wired by the compartilhamento composition; required in production.
+   */
+  readonly revogarConvitesPendentesDoMembro?: RevogarConvitesPendentesDoMembro;
   readonly contribuicaoRepository: ContribuicaoRepository;
   readonly recebedorRepository: RecebedorRepository;
   /** Evento BC — event metadata + invite content for the painel convite flow. */
@@ -295,6 +343,14 @@ export interface ServerDeps {
    * singletons — no per-request state.
    */
   readonly boss: PgBoss;
+  readonly providerFeeSync: ProviderFeeSync;
+  readonly interFeeSync: InterFeeSync;
+  /**
+   * account_ref da conta Inter que o `interFeeSync` lê (o mesmo
+   * `InterProcessingFeeReader.accountRef`); null sem credenciais. A aba
+   * Despesas (aperture-5qoz0 PR3) só lê scans/eventos desta conta.
+   */
+  readonly interFeeAccountRef: string | null;
   readonly repasseJobEnqueuer: RepasseJobEnqueuer;
   readonly transferenciaProvider: TransferenciaProvider;
   /**
@@ -463,6 +519,7 @@ const ServerEnvSchema = z
       .string()
       .min(1, 'DATABASE_URL required (postgres connection string for the engine schema)'),
     NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
+    PROVIDER_FEES_ENABLED: z.enum(['true', 'false']).default('false'),
     /**
      * Stripe server-side keys (aperture-xaha2). REQUIRED in production
      * for the PagamentoProviderStripe DI gate. In development/test the
@@ -659,6 +716,10 @@ const ServerEnvSchema = z
      * SMTP transport for tenant-scoped magic-link authentication. The plugin
      * registers only when HOST/USER/PASS are all configured.
      */
+    LIFECYCLE_EMAIL_ENABLED: z.enum(['true', 'false']).default('false'),
+    LIFECYCLE_EMAIL_LAUNCH_AT: z.iso.datetime({ offset: true }).optional(),
+    LIFECYCLE_EMAIL_ALLOWED_RECIPIENTS: z.string().optional(),
+    LIFECYCLE_EMAIL_ALLOW_ALL_RECIPIENTS: z.enum(['true', 'false']).default('false'),
     SMTP_HOST: z.string().optional(),
     SMTP_PORT: z.coerce.number().int().positive().optional().default(587),
     SMTP_USER: z.string().optional(),
@@ -882,7 +943,17 @@ export function loadEnv(env: NodeJS.ProcessEnv = process.env): ServerEnv {
  *   (PagamentoProvider + CheckoutSessionProvider) so dev/test flows
  *   exercise the same code paths the prod adapter takes.
  */
-export function buildServerDeps(env: ServerEnv): ServerDeps {
+export function buildServerDeps(
+  env: ServerEnv,
+  testSmtpEndpoint?: { port: number; ca: string },
+): ServerDeps & {
+  lifecycleEmail: LifecycleEmailService;
+  lifecycleEmailTokens: LifecycleEmailTokens;
+  lifecycleEmailPreferences: LifecycleEmailPreferencesPostgres;
+  consumirConvitesVerificados: (usuarioId: string, plataformaId: string) => Promise<void>;
+  revogarConvitesPendentesDoMembro: RevogarConvitesPendentesDoMembro;
+  contextoCompartilhamentoOnboarding: NonNullable<ServerDeps['contextoCompartilhamentoOnboarding']>;
+} {
   const observability: Observability = {
     logger: new ConsoleLogger(),
     tracer: noopTracer(),
@@ -934,6 +1005,9 @@ export function buildServerDeps(env: ServerEnv): ServerDeps {
       : {}),
   };
 
+  if (testSmtpEndpoint && env.NODE_ENV !== 'test') {
+    throw new Error('SMTP test endpoint forbidden outside tests');
+  }
   const smtpConfigured =
     !!env.SMTP_HOST?.length && !!env.SMTP_USER?.length && !!env.SMTP_PASS?.length;
   const emailTransport: EmailTransport = smtpConfigured
@@ -944,8 +1018,11 @@ export function buildServerDeps(env: ServerEnv): ServerDeps {
         pass: env.SMTP_PASS as string,
         from: env.SMTP_FROM,
         secure: env.SMTP_SECURE,
-      })
+      }, testSmtpEndpoint)
     : new EmailTransportNoop(observability.logger);
+  if (env.LIFECYCLE_EMAIL_ENABLED === 'true' && (!smtpConfigured || env.SMTP_HOST?.toLowerCase() !== 'smtp.sendgrid.net')) {
+    throw new Error('Lifecycle emails require configured SendGrid SMTP; Noop is forbidden');
+  }
   const pixReceiptNotifier = async (pagamento: Pagamento): Promise<void> => {
     const message = renderPixPaymentReceiptEmail(pagamento);
     if (message !== null) await emailTransport.enviar(message);
@@ -1001,6 +1078,8 @@ export function buildServerDeps(env: ServerEnv): ServerDeps {
   // resolve the active recebedor.
   const recebedorRepository = new RecebedorRepositoryPostgres(db);
   const campanhaRepository = new CampanhaRepositoryPostgres(db, recebedorRepository);
+  const campanhaMembrosRepository = new CampanhaMembrosRepositoryPostgres(db);
+  const campanhaPrivacidadeRepository = new CampanhaPrivacidadeRepositoryPostgres(db);
   const contribuicaoRepository = new ContribuicaoRepositoryPostgres(db);
   const eventoRepository = new EventoRepositoryPostgres(db);
   const conviteRepository = new ConviteRepositoryPostgres(db);
@@ -1190,7 +1269,70 @@ export function buildServerDeps(env: ServerEnv): ServerDeps {
     pixCobrancaProvider = new PixCobrancaNaoConfigurado();
   }
 
+  const lifecycleEmailTokens = createLifecycleEmailTokens(env.BETTER_AUTH_SECRET);
+  const lifecycleEmailPreferences = new LifecycleEmailPreferencesPostgres(db);
+  const emailOrigin = new URL(env.BETTER_AUTH_URL).origin;
+  const emailAllowlist = env.LIFECYCLE_EMAIL_ALLOWED_RECIPIENTS?.split(',')
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean);
+  if (
+    env.LIFECYCLE_EMAIL_ENABLED === 'true' &&
+    new URL(emailOrigin).hostname !== 'eunenem.com' &&
+    !emailAllowlist?.length &&
+    env.LIFECYCLE_EMAIL_ALLOW_ALL_RECIPIENTS !== 'true'
+  ) {
+    throw new Error(
+      'Non-production lifecycle email rollout requires an explicit recipient allowlist or LIFECYCLE_EMAIL_ALLOW_ALL_RECIPIENTS=true',
+    );
+  }
+  const lifecycleEmail = new LifecycleEmailService(
+    {
+      repository: new LifecycleEmailRepositoryPostgres(db),
+      preferences: lifecycleEmailPreferences,
+      transport: emailTransport,
+      pagamentoRepository,
+      livroFinanceiroRepository,
+      clock: () => new Date(),
+      render: renderLifecycleEmail,
+      report: (event, data) => observability.logger.info(event, data),
+      links: (userId, tenantId, type, deliveryId) => ({
+        preferencesUrl: `${emailOrigin}/email/preferencias?token=${lifecycleEmailTokens.signPreferenceToken({ userId, tenantId })}`,
+        unsubscribeUrl: `${emailOrigin}/email/descadastrar?token=${lifecycleEmailTokens.signPreferenceToken({ userId, tenantId, type })}`,
+        feedbackUrl: `${emailOrigin}/avaliar-email?token=${lifecycleEmailTokens.signFeedbackToken(deliveryId)}`,
+      }),
+    },
+    {
+      enabled: env.LIFECYCLE_EMAIL_ENABLED === 'true',
+      launchAt: env.LIFECYCLE_EMAIL_LAUNCH_AT ? new Date(env.LIFECYCLE_EMAIL_LAUNCH_AT) : null,
+      origin: emailOrigin,
+      allowAllRecipients: env.LIFECYCLE_EMAIL_ALLOW_ALL_RECIPIENTS === 'true',
+      ...(emailAllowlist ? { recipientAllowlist: emailAllowlist } : {}),
+    },
+  );
+  const interFeeConfigured = !useFakeProviderSeam && [env.INTER_CLIENT_ID, env.INTER_CLIENT_SECRET,
+    env.INTER_CERT_BASE64, env.INTER_KEY_BASE64, env.INTER_CONTA_CORRENTE].every(value => value.trim().length > 0);
+  const interFeeReader = interFeeConfigured ? new InterProcessingFeeReader({
+    baseUrl: env.INTER_BASE_URL, clientId: env.INTER_CLIENT_ID, clientSecret: env.INTER_CLIENT_SECRET,
+    scope: 'extrato.read', contaCorrente: env.INTER_CONTA_CORRENTE,
+    certPem: Buffer.from(env.INTER_CERT_BASE64, 'base64').toString('utf8'),
+    keyPem: Buffer.from(env.INTER_KEY_BASE64, 'base64').toString('utf8'),
+  }) : null;
+  const interFeeSync = new InterFeeSync(db, interFeeReader, ID_PLATAFORMA_EUNENEM, () => new Date(), env.PROVIDER_FEES_ENABLED === 'true');
+  const providerFeeSync = new ProviderFeeSync(db,
+    env.STRIPE_SECRET_KEY.length > 0 && !useFakeProviderSeam
+      ? new StripeProcessingFeeReader(getStripe()) : null, ID_PLATAFORMA_EUNENEM, () => new Date(), env.PROVIDER_FEES_ENABLED === 'true');
+
   return {
+    providerFeeSync, interFeeSync, interFeeAccountRef: interFeeReader?.accountRef ?? null,
+    lifecycleEmail, lifecycleEmailTokens, lifecycleEmailPreferences,
+    lifecyclePaymentFinalized: (payment) => lifecycleEmail.paymentFinalized(payment),
+    lifecyclePresenceConfirmed: (idCampanha, idConvidado, nome) => lifecycleEmail.presenceConfirmed(idCampanha, idConvidado, nome),
+    contextoCompartilhamentoOnboarding: (usuarioId, idConta, plataformaId) => new CampanhaCompartilhamentoPostgres(db).contextoOnboarding(usuarioId, idConta, plataformaId),
+    revogarConvitesPendentesDoMembro: (input, { trx }) => new CampanhaCompartilhamentoPostgres(db).revogarPendentesDoMembro(input.idCampanha, input.idConta, input.idUsuarioAtor, trx),
+    consumirConvitesVerificados: (usuarioId, plataformaId) => new CampanhaCompartilhamentoPostgres(db).consumirVerificados(usuarioId, plataformaId),
+    enviarConviteCampanha: async (email: string) => {
+      await emailTransport.enviar(renderCampaignInviteEmail(email, env.BETTER_AUTH_URL));
+    },
     db,
     auth,
     authService,
@@ -1202,6 +1344,8 @@ export function buildServerDeps(env: ServerEnv): ServerDeps {
     resgatePendenteRepository,
     plataformaRepository,
     campanhaRepository,
+    campanhaMembrosRepository,
+    campanhaPrivacidadeRepository,
     contribuicaoRepository,
     recebedorRepository,
     eventoRepository,

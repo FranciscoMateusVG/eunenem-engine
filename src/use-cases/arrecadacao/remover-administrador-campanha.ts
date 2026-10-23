@@ -65,7 +65,7 @@ export async function removerAdministradorCampanha(
 
       const updated = campanhaSemAdministrador(existing, idConta);
 
-      await campanhaRepository.save(updated);
+      await campanhaRepository.removerAdministrador(idCampanha, idConta);
 
       logger.info('arrecadacao.campanha.administrador_removido', {
         idCampanha,

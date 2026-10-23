@@ -1,3 +1,4 @@
+import { compartilhamentoRouter } from './compartilhamento-router.js';
 /**
  * tRPC router for eunenem-server (aperture-kungg + aperture-ht7sq + aperture-d6atj).
  *
@@ -7,7 +8,9 @@
  *   - `auth.me`                 — returns the current Usuario or null
  *     Account entry is passwordless and handled by BetterAuth OAuth/magic-link
  *     endpoints. No tRPC route accepts or creates a password.
+ *   - `campanhaMembros.*`       — owner-managed per-action permissions (aperture-1z18g)
  *   - `catalogo.*`              — public database-backed catalogue projections
+ *   - `configuracoes.*`         — painel settings: e-mail prefs + recados privacy
  *   - `contribuicao.list`       — list caller's presentes (aperture-d6atj)
  *   - `contribuicao.create`     — batched create-by-qty
  *   - `contribuicao.update`     — single update with status + tenant guards
@@ -18,8 +21,10 @@
 import { initTRPC } from '@trpc/server';
 import { adminRouter } from './admin-router.js';
 import { authRouter } from './auth-router.js';
+import { campanhaMembrosRouter } from './campanha-membros-router.js';
 import { campanhasRouter } from './campanhas-router.js';
 import { catalogoRouter } from './catalogo-router.js';
+import { configuracoesRouter } from './configuracoes-router.js';
 import { contribuicaoRouter } from './contribuicao-router.js';
 import type { TrpcContext } from './context.js';
 import { landingRouter } from './landing-router.js';
@@ -44,8 +49,11 @@ export const appRouter = t.router({
   }),
   admin: adminRouter,
   auth: authRouter,
+  campanhaMembros: campanhaMembrosRouter,
   campanhas: campanhasRouter,
+  compartilhamento: compartilhamentoRouter,
   catalogo: catalogoRouter,
+  configuracoes: configuracoesRouter,
   contribuicao: contribuicaoRouter,
   eventoConvite: eventoConviteRouter,
   eventoListaDeConvidados: eventoListaDeConvidadosRouter,

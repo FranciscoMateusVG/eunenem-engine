@@ -2,6 +2,8 @@ export { CampanhaRepositoryPostgres } from './arrecadacao/campanha-repository.po
 export { ContribuicaoRepositoryPostgres } from './arrecadacao/contribuicao-repository.postgres.js';
 export { RecebedorRepositoryPostgres } from './arrecadacao/recebedor-repository.postgres.js';
 export { CatRepositoryPostgres } from './cat-repository.postgres.js';
+export { LifecycleEmailRepositoryPostgres } from './email/lifecycle-email.postgres.js';
+export { LifecycleEmailPreferencesPostgres } from './email/lifecycle-email-preferences.postgres.js';
 export { ConviteRepositoryPostgres } from './evento/convite-repository.postgres.js';
 export { EventoRepositoryPostgres } from './evento/evento-repository.postgres.js';
 export { ListaDeConvidadosRepositoryPostgres } from './evento/lista-de-convidados-repository.postgres.js';

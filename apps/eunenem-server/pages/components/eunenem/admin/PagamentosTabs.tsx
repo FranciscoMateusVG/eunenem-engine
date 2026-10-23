@@ -5,11 +5,12 @@
  * deep-link e SSR. `aria-current="page"` marca a aba ativa.
  */
 
-export type PagamentosTab = "pagamentos" | "receita" | "nota-fiscal";
+export type PagamentosTab = "pagamentos" | "receita" | "despesas" | "nota-fiscal";
 
 const TABS: ReadonlyArray<{ key: PagamentosTab; label: string; href: string }> = [
   { key: "pagamentos", label: "Pagamentos", href: "/admin/pagamentos" },
   { key: "receita", label: "Receita EuNeném", href: "/admin/pagamentos/receita" },
+  { key: "despesas", label: "Despesas", href: "/admin/pagamentos/despesas" },
   { key: "nota-fiscal", label: "Nota fiscal (prévia)", href: "/admin/pagamentos/nota-fiscal" },
 ];
 
