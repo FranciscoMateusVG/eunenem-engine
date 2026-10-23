@@ -211,13 +211,27 @@ export function PainelHeaderCard({
           </span>
         </div>
         <div className="painel-share-actions">
-          <button type="button" className="painel-share-small" disabled={!fullShareUrl} onClick={onCopy}>{copied ? 'Copiado ♡' : 'Copiar link'}</button>
+          <button type="button" className="painel-share-small" disabled={!fullShareUrl} onClick={onCopy}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
+              <rect x="9" y="9" width="11" height="11" rx="2" />
+              <path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1" />
+            </svg>
+            {copied ? 'Copiado ♡' : 'Copiar link'}
+          </button>
           <button type="button" className="painel-share-small" disabled={!fullShareUrl} onClick={async () => {
             if (!fullShareUrl) return;
             if (!navigator.share) { await onCopy(); return; }
             try { await navigator.share({ title: `Página de ${babyNameDisplay}`, url: fullShareUrl }); }
             catch (err) { if (!(err instanceof Error && err.name === 'AbortError')) await onCopy(); }
-          }}>Compartilhar</button>
+          }}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
+              <circle cx="18" cy="5" r="3" />
+              <circle cx="6" cy="12" r="3" />
+              <circle cx="18" cy="19" r="3" />
+              <path d="m8.6 10.5 6.8-4M8.6 13.5l6.8 4" />
+            </svg>
+            Compartilhar
+          </button>
         </div>
       </header>
 
