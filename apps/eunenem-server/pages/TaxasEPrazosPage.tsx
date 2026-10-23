@@ -36,7 +36,7 @@ export function TaxasEPrazosPage() {
             <div><dt>Você recebe</dt><dd>100% <span>do valor dos presentes</span></dd></div>
             <div><dt>Taxa de serviço</dt><dd>8,98% <span>paga pelo convidado</span></dd></div>
           </dl>
-          <p>Quando um convidado realiza o pagamento, ele verá o valor do presente e o valor total da contribuição antes de finalizar.</p>
+          <p>Quando um convidado escolhe um presente, a taxa de serviço da EuNeném já é acrescentada ao valor que ele paga.</p>
           <p>Para você, <strong>não há nenhum desconto sobre o valor do presente</strong>. A taxa é paga pelo convidado e representa apenas um pequeno acréscimo ao valor da contribuição.</p>
           <aside className="taxas-info-validade" aria-label="Validade das taxas">
             <strong>Importante ♡</strong>
