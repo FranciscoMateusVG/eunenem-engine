@@ -108,10 +108,16 @@ test('painel compacto e configurações ligadas ao backend', async ({
     await expect(
       page.getByRole('link', { name: 'Gerenciar acessos', exact: true }),
     ).toHaveAttribute('href', `${base}/compartilhar`);
-    // aperture-851nu: Presentes recebidos and recados privacy are live.
-    for (const name of ['Novos recados', 'Confirmações de presença']) {
-      await expect(page.getByRole('switch', { name, exact: true })).toBeDisabled();
+    // aperture-851nu: every e-mail switch and recados privacy are live.
+    const novosRecados = page.getByRole('switch', { name: 'Novos recados', exact: true });
+    const presencas = page.getByRole('switch', { name: 'Confirmações de presença', exact: true });
+    for (const toggle of [novosRecados, presencas]) {
+      await expect(toggle).toBeEnabled();
+      await expect(toggle).toBeChecked();
     }
+    await presencas.click();
+    await expect(presencas).not.toBeChecked();
+    await expect(presencas).toBeEnabled();
     const presentes = page.getByRole('switch', { name: 'Presentes recebidos', exact: true });
     const recados = page.getByRole('switch', { name: 'Exibir recados publicamente', exact: true });
     await expect(presentes).toBeEnabled();
@@ -127,6 +133,21 @@ test('painel compacto e configurações ligadas ao backend', async ({
     await page.reload();
     await expect(presentes).not.toBeChecked();
     await expect(recados).not.toBeChecked();
+    await expect(presencas).not.toBeChecked();
+    await expect(novosRecados).toBeChecked();
+    expect(
+      (
+        await sql<{
+          type: string;
+          enabled: boolean;
+        }>`SELECT type,enabled FROM lifecycle_email_preferences WHERE user_id=${seededData.session.userId} ORDER BY type`.execute(
+          db,
+        )
+      ).rows,
+    ).toEqual([
+      { type: 'payment_received', enabled: false },
+      { type: 'presence_confirmed', enabled: false },
+    ]);
     expect(
       (
         await sql<{

@@ -25,7 +25,7 @@ function props(over: Partial<ConfiguracoesViewProps> = {}): ConfiguracoesViewPro
     slug: 'helena',
     idCampanha: '10000000-0000-4000-8000-000000000001',
     pode: () => true,
-    config: { exibirRecados: true, emails: { presentes: true } },
+    config: { exibirRecados: true, emails: { presentes: true, recados: true, presencas: true } },
     carregando: false,
     erroAoCarregar: false,
     onRecarregar: noop,
@@ -52,7 +52,14 @@ function toggle(html: string, label: string): { input: string; bloco: string } {
 
 describe('ConfiguracoesView', () => {
   it('liga os toggles de Presentes recebidos e Exibir recados ao estado do servidor', () => {
-    const html = render(props({ config: { exibirRecados: false, emails: { presentes: true } } }));
+    const html = render(
+      props({
+        config: {
+          exibirRecados: false,
+          emails: { presentes: true, recados: true, presencas: true },
+        },
+      }),
+    );
     const presentes = toggle(html, 'Presentes recebidos');
     expect(presentes.input).not.toContain('disabled');
     expect(presentes.input).toContain('checked');
@@ -79,6 +86,34 @@ describe('ConfiguracoesView', () => {
 
     const salvando = render(props({ salvando: { presentes: true } }));
     expect(toggle(salvando, 'Presentes recebidos').input).toContain('disabled');
+  });
+
+  it('Novos recados e Confirmações de presença são toggles reais ligados ao estado do servidor', () => {
+    const html = render(
+      props({
+        config: {
+          exibirRecados: true,
+          emails: { presentes: true, recados: false, presencas: true },
+        },
+      }),
+    );
+    const recados = toggle(html, 'Novos recados');
+    expect(recados.input).not.toContain('disabled');
+    expect(recados.input).not.toContain('checked');
+    expect(recados.bloco).not.toContain('Indisponível');
+    const presencas = toggle(html, 'Confirmações de presença');
+    expect(presencas.input).not.toContain('disabled');
+    expect(presencas.input).toContain('checked');
+    expect(html).not.toContain('Indisponível');
+  });
+
+  it('salvar o e-mail de recados não trava a privacidade dos recados, e vice-versa', () => {
+    const email = render(props({ salvando: { recados: true } }));
+    expect(toggle(email, 'Novos recados').input).toContain('disabled');
+    expect(toggle(email, 'Exibir recados publicamente').input).not.toContain('disabled');
+    const privacidade = render(props({ salvando: { exibirRecados: true } }));
+    expect(toggle(privacidade, 'Exibir recados publicamente').input).toContain('disabled');
+    expect(toggle(privacidade, 'Novos recados').input).not.toContain('disabled');
   });
 
   it('falha ao carregar mostra erro com opção de tentar de novo', () => {
