@@ -534,6 +534,11 @@ describe('lifecycle real Postgres and loopback TLS SMTP', () => {
   function decoded() {
     return sink.messages.map((m) => m.replace(/=\r\n/g, '').replace(/=3D/g, '='));
   }
+  async function giftEmailsOff(...users: Awaited<ReturnType<typeof seed>>[]) {
+    const prefs = new LifecycleEmailPreferencesPostgres(test.db);
+    for (const u of users)
+      await prefs.setPreferences(u.userId, u.tenant, { payment_received: false });
+  }
   const guestLists = new Map<string, string>();
   async function guest(owner: Awaited<ReturnType<typeof seed>>, presenca = 'sim') {
     let lista = guestLists.get(owner.campaign);
@@ -562,6 +567,7 @@ describe('lifecycle real Postgres and loopback TLS SMTP', () => {
       role: 'membro',
       permissions: ['extrato:ver'],
     });
+    await giftEmailsOff(owner, coOwner);
     const contribution = await gift(owner);
     const payment = await approved(owner, contribution, true, 'Que venha com saúde <3');
     await Promise.all([service.paymentFinalized(payment), service.paymentFinalized(payment)]);
@@ -577,6 +583,29 @@ describe('lifecycle real Postgres and loopback TLS SMTP', () => {
     expect(messages[0]).toContain('Tia Synthetic');
     expect(messages[0]).toContain('Que venha com sa');
     expect(messages[0]).toContain('&lt;3');
+  });
+  it('one email per payment: with Presentes recebidos on, the recado rides in it and new_message is suppressed', async () => {
+    const owner = await seed();
+    const coOwner = await seed({ campaign: owner.campaign, tenant: owner.tenant, role: 'owner' });
+    await giftEmailsOff(coOwner);
+    const contribution = await gift(owner);
+    await service.paymentFinalized(await approved(owner, contribution, true, 'Recado único'));
+    await service.dispatch();
+    const alerts = await recipientsOf('new_message');
+    expect(alerts.find((r) => r.user_id === owner.userId)).toMatchObject({
+      state: 'suppressed',
+      reason: 'covered_by_payment_received',
+    });
+    expect(alerts.find((r) => r.user_id === coOwner.userId)?.state).toBe('sent');
+    const gifts = await recipientsOf('payment_received');
+    expect(gifts.find((r) => r.user_id === owner.userId)?.state).toBe('sent');
+    expect(gifts.find((r) => r.user_id === coOwner.userId)?.reason).toBe('opt_out');
+    // Each owner got exactly one email for this payment, and both carry the recado.
+    const mails = decoded();
+    expect(mails).toHaveLength(2);
+    expect(mails.filter((m) => m.includes(owner.email))).toHaveLength(1);
+    expect(mails.filter((m) => m.includes(coOwner.email))).toHaveLength(1);
+    expect(mails.every((m) => m.includes('Recado ') && m.includes('nico'))).toBe(true);
   });
   it('new_message is not admitted for a payment without a recado or a blank one', async () => {
     const owner = await seed();
@@ -630,6 +659,7 @@ describe('lifecycle real Postgres and loopback TLS SMTP', () => {
     expect(await states('new_message')).toEqual([]);
     now = new Date(now.getTime() + 11 * MINUTE);
     const coOwner = await seed({ campaign: owner.campaign, tenant: owner.tenant, role: 'owner' });
+    await giftEmailsOff(owner, coOwner);
     await service.scan();
     await service.scan();
     await service.dispatch();
@@ -652,6 +682,7 @@ describe('lifecycle real Postgres and loopback TLS SMTP', () => {
   it('new_message is suppressed when the payment is no longer approved at send time', async () => {
     const owner = await seed();
     const contribution = await gift(owner);
+    await giftEmailsOff(owner);
     const payment = await approved(owner, contribution, true, 'Oi');
     await service.paymentFinalized(payment);
     await test.db
@@ -1049,9 +1080,14 @@ describe('lifecycle real Postgres and loopback TLS SMTP', () => {
       expect(await states('new_message')).toEqual(['pending']);
       expect(await states('presence_confirmed')).toEqual(['pending']);
       await deps.lifecycleEmail.dispatch();
-      expect(await states('new_message')).toEqual(['sent']);
+      // Presentes recebidos is on by default, so the recado rides in that email.
+      expect(await recipientsOf('new_message')).toMatchObject([
+        { state: 'suppressed', reason: 'covered_by_payment_received' },
+      ]);
+      expect(await states('payment_received')).toEqual(['sent']);
       expect(await states('presence_confirmed')).toEqual(['sent']);
-      expect(sink.messages).toHaveLength(3);
+      expect(sink.messages).toHaveLength(2);
+      expect(decoded().some((m) => m.includes('Pelo composition root'))).toBe(true);
     } finally {
       await deps.db.destroy();
     }

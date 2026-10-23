@@ -163,7 +163,7 @@ export function ConfiguracoesView(props: ConfiguracoesViewProps) {
         />
         <SettingToggle
           label="Novos recados"
-          description="Notificar quando um convidado enviar uma mensagem."
+          description="Notificar quando um convidado enviar uma mensagem. Com Presentes recebidos ligado, o recado já vem nesse e-mail."
           {...emailToggle('recados')}
         />
         <SettingToggle

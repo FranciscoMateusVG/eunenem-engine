@@ -59,7 +59,8 @@ export const LIFECYCLE_EMAIL_TYPE_LABELS: Record<
   },
   new_message: {
     label: 'Novos recados',
-    description: 'quando alguém deixa um recadinho junto com o presente.',
+    description:
+      'quando alguém deixa um recadinho. com "Presente recebido" ligado, o recado já vem nesse e-mail.',
   },
   presence_confirmed: {
     label: 'Confirmações de presença',

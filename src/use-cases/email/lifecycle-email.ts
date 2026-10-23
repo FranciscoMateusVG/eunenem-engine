@@ -228,6 +228,13 @@ export class LifecycleEmailService {
       }
     });
   }
+  private async coveredByPaymentEmail(recipient: { user_id: string; tenant_id: string }) {
+    return (
+      this.active('payment_received') &&
+      (await this.deps.preferences.getPreferences(recipient.user_id, recipient.tenant_id))
+        .payment_received
+    );
+  }
   private finish(id: string, state: string, reason: string): Promise<void> {
     return this.deps.repository.finish(id, state, reason, this.deps.clock());
   }
@@ -263,6 +270,12 @@ export class LifecycleEmailService {
       ]
     ) {
       await suppress('opt_out');
+      return;
+    }
+    // One email per payment: while this recipient gets "presente recebido" (which
+    // already carries the recado), the separate recado alert stays silent.
+    if (delivery.type === 'new_message' && (await this.coveredByPaymentEmail(recipient))) {
+      await suppress('covered_by_payment_received');
       return;
     }
     if (delivery.type === 'payment_received' || delivery.type === 'new_message') {
@@ -365,6 +378,10 @@ export class LifecycleEmailService {
       ]
     ) {
       await suppress('recipient_changed');
+      return;
+    }
+    if (delivery.type === 'new_message' && (await this.coveredByPaymentEmail(recipient))) {
+      await suppress('covered_by_payment_received');
       return;
     }
     if (
