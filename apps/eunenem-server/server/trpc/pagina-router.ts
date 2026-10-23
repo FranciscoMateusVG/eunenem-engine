@@ -2,7 +2,6 @@ import { campanhaNoAr, isCampaignPublicOwner } from './campaign-public-address.j
 import { createHash, randomBytes } from 'node:crypto';
 import { initTRPC, TRPCError } from '@trpc/server';
 import { z } from 'zod/v4';
-import { CampanhaPrivacidadeRepositoryPostgres } from '../../../../src/adapters/arrecadacao/campanha-privacidade-repository.postgres.js';
 import {
   calcularValorTaxaPercentual,
   type Campanha,
@@ -558,8 +557,9 @@ export const paginaRouter = t.router({
 
       // aperture-851nu: "Exibir recados publicamente" desligado → mural
       // público vazio. O painel (painelMensagens) continua listando tudo.
-      const privacidade = new CampanhaPrivacidadeRepositoryPostgres(ctx.deps.db);
-      if (!(await privacidade.exibeRecadosPublicamente(campanha.id))) return [];
+      if (!(await ctx.deps.campanhaPrivacidadeRepository.exibeRecadosPublicamente(campanha.id))) {
+        return [];
+      }
 
       const recados = await ctx.deps.pagamentoRepository.findMensagensMuralByCampanha(
         campanha.id,

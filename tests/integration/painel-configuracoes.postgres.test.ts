@@ -204,6 +204,20 @@ describe('configuracoes.privacidade (Exibir recados publicamente)', () => {
     expect(await publico()).toHaveLength(1);
   });
 
+  it('a preferência não impede excluir a campanha (cascade)', async () => {
+    const owner = await login();
+    const extra = await owner.caller.campanhas.criar({ titulo: 'Campanha extra' });
+    await owner.caller.configuracoes.privacidade({ idCampanha: extra.id, exibirRecados: false });
+    await deps.campanhaRepository.delete(extra.id as never);
+    expect(
+      await deps.db
+        .selectFrom('campanha_privacidade')
+        .select('campanha_id')
+        .where('campanha_id', '=', extra.id)
+        .execute(),
+    ).toHaveLength(0);
+  });
+
   it('exige mensagens:gerenciar; membro sem a permissão recebe FORBIDDEN', async () => {
     const owner = await login();
     const membro = await login();
@@ -338,7 +352,10 @@ describe('usuario.desativarConta (soft delete)', () => {
     ).rejects.toMatchObject({ code: 'NOT_FOUND' });
     await expect(
       caller('').perfil.getPerfilPublicoBySlug({ slug: sozinho.user.slug }),
-    ).rejects.toBeTruthy();
+    ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    await expect(
+      caller('').eventoConvite.getPreview({ slug: sozinho.user.slug }),
+    ).rejects.toMatchObject({ code: 'NOT_FOUND' });
 
     const titular = await login();
     const coOwner = await login();

@@ -24,7 +24,7 @@ export function ConfiguracoesBody({ slug }: PainelSectionBodyProps) {
   const utils = trpc.useUtils();
   const idCampanha = id ?? '';
   const config = trpc.configuracoes.get.useQuery({ idCampanha }, { enabled: idCampanha !== '' });
-  const [salvando, setSalvando] = useState<Partial<Record<EmailToggleChave | 'recados', boolean>>>(
+  const [salvando, setSalvando] = useState<Partial<Record<EmailToggleChave | 'exibirRecados', boolean>>>(
     {},
   );
 
@@ -34,7 +34,11 @@ export function ConfiguracoesBody({ slug }: PainelSectionBodyProps) {
         atual ? { ...atual, emails: emailsSalvos } : atual,
       ),
     onError: () => toast.error('não consegui salvar a preferência — tenta de novo?'),
-    onSettled: () => setSalvando({}),
+    onSettled: (_data, _err, { idCampanha: _id, ...toggles }) =>
+      setSalvando((atual) => ({
+        ...atual,
+        ...Object.fromEntries(Object.keys(toggles).map((chave) => [chave, false])),
+      })),
   });
   const privacidade = trpc.configuracoes.privacidade.useMutation({
     onSuccess: ({ exibirRecados }) =>
@@ -42,7 +46,7 @@ export function ConfiguracoesBody({ slug }: PainelSectionBodyProps) {
         atual ? { ...atual, exibirRecados } : atual,
       ),
     onError: (err) => toast.error(err.message || 'não consegui salvar — tenta de novo?'),
-    onSettled: () => setSalvando({}),
+    onSettled: () => setSalvando((atual) => ({ ...atual, exibirRecados: false })),
   });
   const desativar = trpc.usuario.desativarConta.useMutation({
     onSuccess: () => {
@@ -62,11 +66,11 @@ export function ConfiguracoesBody({ slug }: PainelSectionBodyProps) {
       onRecarregar={() => void config.refetch()}
       salvando={salvando}
       onEmail={(chave, valor) => {
-        setSalvando({ [chave]: true });
+        setSalvando((atual) => ({ ...atual, [chave]: true }));
         emails.mutate({ idCampanha, [chave]: valor });
       }}
       onExibirRecados={(valor) => {
-        setSalvando({ recados: true });
+        setSalvando((atual) => ({ ...atual, exibirRecados: true }));
         privacidade.mutate({ idCampanha, exibirRecados: valor });
       }}
       desativacao={{
@@ -81,13 +85,13 @@ export function ConfiguracoesBody({ slug }: PainelSectionBodyProps) {
 
 export interface ConfiguracoesViewProps {
   slug: string;
-  idCampanha: string | null;
+  idCampanha: string | undefined;
   pode: (acao: AcaoCampanha) => boolean;
   config: ConfiguracoesDTO | undefined;
   carregando: boolean;
   erroAoCarregar: boolean;
   onRecarregar: () => void;
-  salvando: Partial<Record<EmailToggleChave | 'recados', boolean>>;
+  salvando: Partial<Record<EmailToggleChave | 'exibirRecados', boolean>>;
   onEmail: (chave: EmailToggleChave, valor: boolean) => void;
   onExibirRecados: (valor: boolean) => void;
   desativacao: Omit<DesativarContaDialogProps, 'onFechar'>;
@@ -139,7 +143,7 @@ export function ConfiguracoesView(props: ConfiguracoesViewProps) {
           label="Exibir recados publicamente"
           description="Mostra os recados dos convidados na página do chá. Desligado, eles ficam visíveis só aqui no painel."
           checked={config?.exibirRecados ?? true}
-          disabled={!config || carregando || !podeGerenciarMensagens || Boolean(salvando.recados)}
+          disabled={!config || carregando || !podeGerenciarMensagens || Boolean(salvando.exibirRecados)}
           onChange={props.onExibirRecados}
         />
         {!carregando && !podeGerenciarMensagens && (

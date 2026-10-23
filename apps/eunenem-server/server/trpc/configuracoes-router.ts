@@ -13,7 +13,6 @@
  */
 import { initTRPC, TRPCError } from '@trpc/server';
 import { z } from 'zod/v4';
-import { CampanhaPrivacidadeRepositoryPostgres } from '../../../../src/adapters/arrecadacao/campanha-privacidade-repository.postgres.js';
 import {
   type LifecycleEmailPreferences,
   LifecycleEmailPreferencesPostgres,
@@ -54,10 +53,6 @@ function preferencias(ctx: TrpcContext) {
   return ctx.deps.lifecycleEmailPreferences ?? new LifecycleEmailPreferencesPostgres(ctx.deps.db);
 }
 
-function privacidade(ctx: TrpcContext) {
-  return new CampanhaPrivacidadeRepositoryPostgres(ctx.deps.db);
-}
-
 function paraToggles(prefs: LifecycleEmailPreferences): EmailToggles {
   return Object.fromEntries(
     EMAIL_TOGGLE_KEYS.map((k) => [k, prefs[EMAIL_TOGGLES[k]]]),
@@ -92,7 +87,7 @@ export const configuracoesRouter = t.router({
     const { usuario, campanha } = await resolver(ctx, input.idCampanha);
     const [prefs, exibirRecados] = await Promise.all([
       preferencias(ctx).getPreferences(usuario.id, usuario.idPlataforma),
-      privacidade(ctx).exibeRecadosPublicamente(campanha.id),
+      ctx.deps.campanhaPrivacidadeRepository.exibeRecadosPublicamente(campanha.id),
     ]);
     return { exibirRecados, emails: paraToggles(prefs) };
   }),
@@ -113,7 +108,7 @@ export const configuracoesRouter = t.router({
     .input(campanhaInput.extend({ exibirRecados: z.boolean() }))
     .mutation(async ({ ctx, input }) => {
       const { campanha } = await resolver(ctx, input.idCampanha, true);
-      await privacidade(ctx).definirExibirRecados(campanha.id as IdCampanha, input.exibirRecados);
+      await ctx.deps.campanhaPrivacidadeRepository.definirExibirRecados(campanha.id as IdCampanha, input.exibirRecados);
       return { exibirRecados: input.exibirRecados };
     }),
 });

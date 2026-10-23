@@ -107,7 +107,7 @@ async function resolveCampanhaBySlug(
     throw new CampanhaSlugNaoEncontradaError('Usuario do slug nao administra nenhuma campanha');
   }
   if (!(await campanhaNoAr(ctx, campanha.id))) {
-    throw new CampanhaSlugNaoEncontradaError('Campanha fora do ar');
+    throw new CampanhaSlugNaoEncontradaError('Campanha nao encontrada ou nao autorizada');
   }
 
   return { campanha };
