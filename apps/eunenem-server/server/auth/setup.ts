@@ -502,6 +502,7 @@ const ServerEnvSchema = z
       .string()
       .min(1, 'DATABASE_URL required (postgres connection string for the engine schema)'),
     NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
+    PROVIDER_FEES_ENABLED: z.enum(['true', 'false']).default('false'),
     /**
      * Stripe server-side keys (aperture-xaha2). REQUIRED in production
      * for the PagamentoProviderStripe DI gate. In development/test the
@@ -1292,7 +1293,7 @@ export function buildServerDeps(
   );
   const providerFeeSync = new ProviderFeeSync(db,
     env.STRIPE_SECRET_KEY.length > 0 && !useFakeProviderSeam
-      ? new StripeProcessingFeeReader(getStripe()) : null, ID_PLATAFORMA_EUNENEM);
+      ? new StripeProcessingFeeReader(getStripe()) : null, ID_PLATAFORMA_EUNENEM, () => new Date(), env.PROVIDER_FEES_ENABLED === 'true');
 
   return {
     providerFeeSync,

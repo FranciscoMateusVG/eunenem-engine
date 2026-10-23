@@ -7,6 +7,7 @@ export async function registerProviderFeesJob(
   service: ProviderFeeSync,
   lifecycle: { assertAdmissionOpen: () => void; runJob: <T>(operation: () => Promise<T>) => Promise<T> },
 ): Promise<void> {
+  if (!service.enabled) return;
   lifecycle.assertAdmissionOpen();
   await boss.createQueue(PROVIDER_FEES_QUEUE);
   lifecycle.assertAdmissionOpen();

@@ -1,7 +1,11 @@
 import { randomUUID } from 'node:crypto';
 import { sql } from 'kysely';
 import type { Database } from '../../adapters/database.js';
-import type { ProcessingFeeReader } from '../../adapters/pagamentos/processing-fee-reader.js';
+import {
+  classifyFeeFailure,
+  ProcessingFeeReadError,
+  type ProcessingFeeReader,
+} from '../../adapters/pagamentos/processing-fee-reader.js';
 
 /** Sep/2026 launch in São Paulo. Never infer expense from the buyer surcharge. */
 export const PROVIDER_FEES_SINCE = new Date('2026-09-01T00:00:00-03:00');
@@ -12,6 +16,7 @@ interface Candidate {
   id: string;
   charge_ref: string | null;
   pi_ref: string | null;
+  attempts: number;
 }
 
 export class ProviderFeeSync {
@@ -20,8 +25,10 @@ export class ProviderFeeSync {
     private readonly reader: ProcessingFeeReader | null,
     private readonly platformId: string,
     private readonly clock: () => Date = () => new Date(),
+    readonly enabled = false,
   ) {}
   async run(options: { dryRun?: boolean } = {}) {
+    if (!options.dryRun && !this.enabled) return { eligible: 0, confirmed: 0, pending: 0 };
     const now = this.clock();
     const eligible = sql`${ELIGIBLE} AND EXISTS (SELECT 1 FROM campanhas c
       WHERE c.id=p.intencao_id_campanha AND c.id_plataforma=${this.platformId}::uuid)`;
@@ -44,25 +51,33 @@ export class ProviderFeeSync {
     ), claimed AS (
       UPDATE provider_fee_sync s SET claimed_until=${new Date(now.getTime() + 180_000)},
         claim_token=${token}::uuid, attempts=attempts+1, updated_at=${now}
-      FROM due WHERE s.payment_id=due.payment_id RETURNING s.payment_id
-    ) SELECT p.id, p.intencao_charge_external_ref AS charge_ref,
+      FROM due WHERE s.payment_id=due.payment_id RETURNING s.payment_id,s.attempts
+    ) SELECT p.id, c.attempts, p.intencao_charge_external_ref AS charge_ref,
       p.intencao_payment_intent_external_ref AS pi_ref
       FROM claimed c JOIN pagamentos p ON p.id=c.payment_id`.execute(this.db);
     for (const candidate of candidates.rows) {
-      let reason = 'not_available';
-      try {
-        const fee = await this.reader.read({
-          chargeRef: candidate.charge_ref,
-          paymentIntentRef: candidate.pi_ref,
-        });
-        if (fee) {
-          const confirmed = await this.db.transaction().execute(async (trx) => {
-            const owned = await sql`SELECT payment_id FROM provider_fee_sync
+      if (await this.processCandidate(candidate, token, now)) result.confirmed++;
+      else result.pending++;
+    }
+    return result;
+  }
+  private async processCandidate(candidate: Candidate, token: string, now: Date): Promise<boolean> {
+    let failure = { reason: 'not_available', permanent: false };
+    try {
+      if (!candidate.charge_ref && !candidate.pi_ref)
+        throw new ProcessingFeeReadError('missing_reference', true);
+      const fee = await this.reader?.read({
+        chargeRef: candidate.charge_ref,
+        paymentIntentRef: candidate.pi_ref,
+      });
+      if (fee) {
+        const confirmed = await this.db.transaction().execute(async (trx) => {
+          const owned = await sql`SELECT payment_id FROM provider_fee_sync
               WHERE payment_id=${candidate.id}::uuid AND claim_token=${token}::uuid FOR UPDATE`.execute(
-              trx,
-            );
-            if (!owned.rows.length) return false;
-            const inserted = await sql`INSERT INTO provider_fee_events
+            trx,
+          );
+          if (!owned.rows.length) return false;
+          const inserted = await sql`INSERT INTO provider_fee_events
               (provider,account_ref,environment,external_ref,payment_id,amount_cents,currency,occurred_at,observed_at,source)
               VALUES (${fee.provider},${fee.accountRef},${fee.environment},${fee.externalRef},${candidate.id}::uuid,
                 ${fee.amountCents},${fee.currency},${fee.occurredAt},${now},${fee.source})
@@ -72,24 +87,21 @@ export class ProviderFeeSync {
                   AND provider_fee_events.amount_cents=EXCLUDED.amount_cents
                   AND provider_fee_events.currency=EXCLUDED.currency
               RETURNING id`.execute(trx);
-            if (!inserted.rows.length) throw new Error('fee_identity_conflict');
-            await sql`UPDATE provider_fee_sync SET status='confirmed',last_reason=NULL,
+          if (!inserted.rows.length) throw new ProcessingFeeReadError('identity_conflict', true);
+          await sql`UPDATE provider_fee_sync SET status='confirmed',last_reason=NULL,
               claimed_until=NULL,claim_token=NULL,updated_at=${now}
               WHERE payment_id=${candidate.id}::uuid AND claim_token=${token}::uuid`.execute(trx);
-            return true;
-          });
-          if (confirmed) result.confirmed++;
-          continue;
-        }
-      } catch {
-        reason = 'provider_read_or_identity_error';
+          return true;
+        });
+        return confirmed;
       }
-      // No provider errors/bodies in logs; confirmation path is never touched.
-      await sql`UPDATE provider_fee_sync SET last_reason=${reason},claimed_until=NULL,claim_token=NULL,
-        next_attempt_at=${new Date(now.getTime() + 3_600_000)},updated_at=${now}
-        WHERE payment_id=${candidate.id}::uuid AND claim_token=${token}::uuid`.execute(this.db);
-      result.pending++;
+    } catch (error) {
+      failure = classifyFeeFailure(error);
     }
-    return result;
+    // No provider errors/bodies in logs; confirmation path is never touched.
+    await sql`UPDATE provider_fee_sync SET last_reason=${failure.reason},status=${failure.permanent || candidate.attempts >= 8 ? 'failed' : 'pending'},claimed_until=NULL,claim_token=NULL,
+        next_attempt_at=${new Date(now.getTime() + Math.min(86_400_000, 300_000 * 2 ** Math.min(candidate.attempts - 1, 8)))},updated_at=${now}
+        WHERE payment_id=${candidate.id}::uuid AND claim_token=${token}::uuid`.execute(this.db);
+    return false;
   }
 }
