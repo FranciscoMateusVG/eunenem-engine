@@ -88,6 +88,7 @@ import {
   RECEITA_CAMPANHAS_LIMIT,
 } from "../admin-receita.js";
 import { GRANULARIDADES, isLocalDate } from "../../pages/lib/receitaPeriodo.js";
+import { type CoberturaDespesas, loadDespesasPainel } from "../admin-despesas.js";
 import { carregarPreviaMensal, MesFuturoError } from "../nfse/previa-mensal.js";
 import {
   AdminPaymentAdministratorsSchema,
@@ -4619,6 +4620,101 @@ const notaFiscalRouter = t.router({
     }),
 });
 
+// ────────────────────────────────────────────────────────────────────
+//  despesas.* — aba Despesas (aperture-5qoz0 PR3). Tarifas OBSERVADAS no
+//  provedor, pela data de débito; pendente/falho aparecem como tal na
+//  cobertura, nunca como zero. Nenhuma chamada a provedor nesta leitura.
+// ────────────────────────────────────────────────────────────────────
+
+const DespesasValoresShape = {
+  stripeCents: z.number().int().nonnegative(),
+  interCents: z.number().int().nonnegative(),
+  totalCents: z.number().int().nonnegative(),
+  naoVinculadas: z.object({
+    count: z.number().int().nonnegative(),
+    cents: z.number().int().nonnegative(),
+  }),
+};
+
+const DespesasIntervaloSchema = z.object({
+  de: LocalDateSchema,
+  ate: LocalDateSchema,
+  ...DespesasValoresShape,
+});
+
+const ContagemCoberturaSchema = z.object({
+  confirmados: z.number().int().nonnegative(),
+  pendentes: z.number().int().nonnegative(),
+  falhos: z.number().int().nonnegative(),
+});
+
+const CoberturaDespesasSchema = z.discriminatedUnion("disponivel", [
+  z.object({
+    disponivel: z.literal(true),
+    mesAtual: ContagemCoberturaSchema,
+    semanaAtual: ContagemCoberturaSchema,
+    desdeInicio: ContagemCoberturaSchema,
+    desde: LocalDateSchema,
+    ultimaLeituraEm: z.string().datetime().nullable(),
+  }),
+  z.object({
+    disponivel: z.literal(false),
+    ultimaLeituraEm: z.string().datetime().nullable(),
+  }),
+]);
+
+const DespesasPainelSchema = z.object({
+  snapshotAt: z.string().datetime(),
+  timezone: z.literal("America/Sao_Paulo"),
+  hoje: LocalDateSchema,
+  janela: z.object({ de: LocalDateSchema, ate: LocalDateSchema }),
+  kpis: z.object({
+    mesAtual: DespesasIntervaloSchema,
+    mesAnterior: DespesasIntervaloSchema,
+    semanaAtual: DespesasIntervaloSchema,
+    semanaAnterior: DespesasIntervaloSchema,
+  }),
+  meses: z.array(DespesasIntervaloSchema.extend({ parcial: z.boolean() })).length(12),
+  semanas: z.array(
+    DespesasIntervaloSchema.extend({ estado: z.enum(["passada", "atual", "futura"]) }),
+  ),
+  cobertura: z.object({ stripe: CoberturaDespesasSchema, inter: CoberturaDespesasSchema }),
+  diferencaConciliacao: z.object({
+    stripeCents: z.number().int(),
+    interCents: z.number().int(),
+    naoVinculadasCents: z.number().int(),
+  }),
+});
+
+function toCoberturaDTO(
+  cobertura: CoberturaDespesas,
+): z.infer<typeof CoberturaDespesasSchema> {
+  return { ...cobertura, ultimaLeituraEm: cobertura.ultimaLeituraEm?.toISOString() ?? null };
+}
+
+const despesasRouter = t.router({
+  painel: adminProcedure.output(DespesasPainelSchema).query(async ({ ctx }) => {
+    const painel = await loadDespesasPainel(ctx.deps.db, {
+      platformId: ID_PLATAFORMA_EUNENEM,
+      now: ctx.deps.clock(),
+    });
+    return {
+      snapshotAt: painel.snapshotAt.toISOString(),
+      timezone: painel.timezone,
+      hoje: painel.hoje,
+      janela: painel.janela,
+      kpis: painel.kpis,
+      meses: [...painel.meses],
+      semanas: [...painel.semanas],
+      cobertura: {
+        stripe: toCoberturaDTO(painel.cobertura.stripe),
+        inter: toCoberturaDTO(painel.cobertura.inter),
+      },
+      diferencaConciliacao: painel.diferencaConciliacao,
+    };
+  }),
+});
+
 export const adminRouter = t.router({
   /** Nested sub-router for usuarios browse + paginated list. */
   usuarios: usuariosRouter,
@@ -4705,6 +4801,7 @@ export const adminRouter = t.router({
 
   /** Receita EuNeném — taxas da plataforma por evento (aperture-9bpre). */
   receita: receitaRouter,
+  despesas: despesasRouter,
 
   /** Prévia (dry run, sem envio) da NFS-e mensal da EuNeném (aperture-dh1k7). */
   notaFiscal: notaFiscalRouter,

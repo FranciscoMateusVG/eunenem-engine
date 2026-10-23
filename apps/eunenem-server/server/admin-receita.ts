@@ -511,7 +511,7 @@ async function inconsistenciasDoIntervalo(
  * Uma transação `REPEATABLE READ` + `READ ONLY`: toda leitura de `fn` vê o
  * mesmo snapshot. A primeira consulta fixa o snapshot e registra o instante.
  */
-async function emSnapshotDeLeitura<T>(
+export async function emSnapshotDeLeitura<T>(
   db: Database,
   fn: (trx: Database, snapshotAt: Date) => Promise<T>,
 ): Promise<T> {
