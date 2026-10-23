@@ -338,25 +338,24 @@ export interface LandingFaq {
 export const LANDING_FAQS: ReadonlyArray<LandingFaq> = [
   {
     q: 'A EuNeném cobra taxa?',
-    a: `Sim. As taxas da EuNeném são cobradas do convidado no momento da compra do presente. Isso significa que o valor que você adiciona à sua lista é exatamente o valor que você receberá. Por exemplo, se você cadastrar um presente de R$ 100, receberá integralmente os R$ 100.
+    a: `Sim, mas pode ficar tranquila! 💜 **Quem cria a lista não paga nenhuma taxa e recebe 100% do valor definido para cada presente.**
 
-Para viabilizar o funcionamento da plataforma, é cobrada uma taxa de serviço de 8,98% sobre cada presente, destinada a cobrir os custos de operação, manutenção da plataforma e processamento dos pagamentos.
+A EuNeném cobra uma taxa de serviço de **8,98%**, paga pelo convidado no momento da compra. Nos pagamentos com cartão de crédito, há também um acréscimo de 3,99% referente aos custos de processamento.
 
-Além disso, pagamentos por cartão incluem um acréscimo calculado para cobrir a tarifa de processamento de 3,9% sobre o total processado, mais R$ 0,39 por transação.
+Por exemplo, se você adicionar um presente de R$ 100 à sua lista, receberá exatamente R$ 100, sem nenhum desconto.
 
-Dessa forma, os futuros pais recebem o valor integral definido na lista, enquanto os custos da transação são pagos por quem realiza a compra do presente.`,
+A taxa é cobrada do convidado.`,
   },
   {
     q: 'Quando posso sacar o dinheiro?',
-    a: `Você pode solicitar o saque quando o pagamento estiver aprovado e o saldo liberado.
+    a: `O prazo para receber o valor dos presentes depende da forma de pagamento escolhida pelo convidado:
 
-Pagamentos via Pix: a liberação ocorre após a confirmação do pagamento.
+- **Pix:** o valor fica disponível para resgate em até 10 minutos após a confirmação do pagamento.
+- **Cartão de crédito:** o valor fica disponível para resgate em até 31 dias úteis após o pagamento.
 
-Pagamentos via cartão de crédito: a liberação segue a data informada pelo processador de pagamento. A previsão aparece no extrato; enquanto não houver confirmação da liberação, o valor permanece aguardando.
+Depois de solicitar o resgate, o dinheiro é transferido para sua conta bancária em até **3 dias úteis**.
 
-Depois que você solicitar o resgate, a transferência será realizada para a sua conta em até 3 dias úteis.
-
-Você pode acompanhar todos os presentes recebidos e os valores disponíveis diretamente em seu extrato na EuNeném.`,
+Você pode acompanhar todos os presentes recebidos e os valores disponíveis diretamente no seu extrato na EuNeném.`,
   },
   {
     q: 'Como os convidados compram os presentes?',
