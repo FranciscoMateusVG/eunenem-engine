@@ -170,7 +170,7 @@ test.describe('member permissions in the painel UI (aperture-1z18g)', () => {
     await expect(page.getByText('minha lista de presentes')).toBeVisible();
     for (const visivel of [
       'meu convite',
-      'Editar meu perfil',
+      'editar meu perfil',
       'lista de convidados',
       'mensagens recebidas',
     ]) {
@@ -180,7 +180,7 @@ test.describe('member permissions in the painel UI (aperture-1z18g)', () => {
       'recebido até agora',
       'resgatar valores',
       'presentes recebidos',
-      'Dados bancários',
+      'dados bancários',
     ]) {
       await expect(page.getByText(oculto, { exact: true }), `${oculto} must be hidden`).toHaveCount(
         0,
@@ -196,7 +196,7 @@ test.describe('member permissions in the painel UI (aperture-1z18g)', () => {
       'recebido até agora',
       'resgatar valores',
       'presentes recebidos',
-      'Dados bancários',
+      'dados bancários',
     ]) {
       await expect(
         page.getByText(visivel, { exact: true }),
@@ -205,7 +205,7 @@ test.describe('member permissions in the painel UI (aperture-1z18g)', () => {
     }
     for (const oculto of [
       'meu convite',
-      'Editar meu perfil',
+      'editar meu perfil',
       'lista de convidados',
       'mensagens recebidas',
     ]) {

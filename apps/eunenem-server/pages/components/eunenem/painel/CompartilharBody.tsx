@@ -310,7 +310,7 @@ function Shell({ children }: { children: ReactNode }) {
       <style>{CMP_CSS}</style>
       <header className="cmp-head">
         <h1>
-          <span className="hl">Compartilhar</span>
+          <span className="hl">Conceder acesso</span>
         </h1>
         <p className="cmp-lede">Convide quem vai te ajudar a cuidar da lista.</p>
         <p className="cmp-note">

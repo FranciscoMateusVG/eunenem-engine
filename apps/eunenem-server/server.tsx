@@ -1,4 +1,5 @@
 import './src/lib/glitchtip/instrument.js'; // MUST stay first — GlitchTip/Sentry init (aperture-sm4el)
+import { startOptionalFeeJob } from './server/jobs/provider-fees-startup.js';
 import { registerProviderFeesJob } from './server/jobs/provider-fees.pgboss.js';
 import { serve } from '@hono/node-server';
 import { serveStatic } from '@hono/node-server/serve-static';
@@ -125,7 +126,7 @@ try {
   }
 
   // Dry-run is an explicit operator read, never a boot dependency.
-  await lifecycle.startupStep(() => registerProviderFeesJob(deps.boss, deps.providerFeeSync, lifecycle));
+  await startOptionalFeeJob('stripe', () => registerProviderFeesJob(deps.boss, deps.providerFeeSync, lifecycle), deps.observability.logger);
 
   await lifecycle.startupStep(() => registerLifecycleEmailJob(deps.boss, deps.lifecycleEmail, lifecycle));
 

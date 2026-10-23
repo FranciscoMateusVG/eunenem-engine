@@ -1341,9 +1341,6 @@ h4 {
     color-mix(in srgb, var(--pink-soft) 40%, transparent) 100%
   );
 }
-.painel-row.featured .painel-row-label {
-  font-size: 21px;
-}
 
 /* Pill badges. */
 .painel-badge {
@@ -8286,7 +8283,8 @@ button.painel-topbar-link:hover {
 .painel-url-row { font-size: 11px; flex-wrap: wrap; gap: 5px; min-width: 0; }
 .painel-url-link { overflow-wrap: anywhere; min-width: 0; }
 .painel-share-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
-.painel-share-small { min-height: 44px; padding: 8px 14px; border: 1px solid var(--line); border-radius: 999px; background: var(--paper); color: var(--plum); font-size: 12px; font-weight: 600; cursor: pointer; }
+.painel-share-small { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 44px; padding: 8px 14px; border: 1px solid var(--line); border-radius: 999px; background: var(--paper); color: var(--plum); font-size: 12px; font-weight: 600; cursor: pointer; }
+.painel-share-small svg { flex-shrink: 0; }
 .painel-recebido-card { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 8px; padding: 14px; border-radius: 20px; }
 .painel-recebido-head { grid-column: 1; grid-row: 1; margin: 0; justify-content: flex-start; }
 .painel-recebido-lbl { font-size: 11px; }

@@ -16,7 +16,7 @@ test('owner shares by email and revokes through the real campaign screen', async
     `/painel/${seededData.slug}/c/${seededData.idCampanha}/compartilhar`,
   );
   expect(response?.status()).toBe(200);
-  await expect(page.getByRole('heading', { name: 'Compartilhar', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Conceder acesso', exact: true })).toBeVisible();
   const email = `sharing-${randomUUID()}@example.com`;
   await page.getByLabel('E-mail da pessoa').fill(email);
   await page.getByRole('button', { name: 'Convidar', exact: true }).click();

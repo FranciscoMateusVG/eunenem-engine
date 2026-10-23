@@ -47,16 +47,14 @@ describe('public Taxas e prazos page', () => {
     expect(main).toContain('href="/termos-de-uso"');
   });
 
-  it('links from the public footer and the account group without changing existing destinations', () => {
+  it('links from the public footer without a dashboard menu entry', () => {
     expect(LANDING_FOOTER_COLS.flatMap((col) => col.links)).toContainEqual([
       'Taxas e prazos',
       '/taxas-e-prazos',
     ]);
     const account = buildPainelMenu(PAINEL_DEMO).find((group) => group.id === 'conta');
-    expect(account?.items.find((item) => item.id === 'taxas-e-prazos')?.label).toBe(
-      'Taxas e prazos',
-    );
-    expect(menuItemHref('helena', 'taxas-e-prazos', 'campaign')).toBe('/taxas-e-prazos');
+    expect(account?.items.some((item) => item.id === 'taxas-e-prazos')).toBe(false);
+    expect(menuItemHref('helena', 'taxas-e-prazos', 'campaign')).toBeUndefined();
     expect(menuItemHref('helena', 'perfil')).toBe('/painel/helena/perfil');
     expect(menuItemHref('helena', 'suporte')).toBe(EUNENEM_SUPPORT_WHATSAPP_URL);
   });
