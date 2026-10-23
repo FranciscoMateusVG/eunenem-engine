@@ -1,5 +1,5 @@
 import { formatBRL } from "@/lib/formatBRL";
-import { barraDespesas } from "@/lib/despesasPainel";
+import { barraDespesas, type Completude, completude } from "@/lib/despesasPainel";
 import {
   faixaKpiMes,
   faixaKpiSemana,
@@ -27,30 +27,68 @@ import type { CoberturaDespesasData, DespesasPainelData } from "./types";
  *
  * Tarifas de processamento OBSERVADAS no provedor, pela data do débito.
  * Uma barra empilhada por período: a altura é o total (escala única) e a
- * fatia de baixo é a parte da Stripe; o resto é Inter. Pagamento sem tarifa
- * confirmada aparece como pendente/falho na cobertura — nunca como R$ 0.
+ * fatia de baixo é a parte da Stripe; o resto é Inter.
+ *
+ * Cada período exibido (KPI, comparação, barra) traz a própria cobertura.
+ * Período com tarifa pendente ou falha mostra só o subtotal observado,
+ * marcado como tal; sem nada observado, "— pendente" — nunca R$ 0.
  * Tudo vem de UMA resposta de `admin.despesas.painel`.
  */
 
-type Kpi = DespesasPainelData["kpis"]["mesAtual"];
-type Contagem = Extract<CoberturaDespesasData, { disponivel: true }>["mesAtual"];
+type Bucket = DespesasPainelData["kpis"]["mesAtual"];
+type Contagem = Bucket["cobertura"]["stripe"];
+type Serie = "stripe" | "inter" | "total";
 
-const COR_STRIPE = { forte: "bg-coral-pink", clara: "bg-pink-soft", texto: "text-[#b04a68]" };
-const COR_INTER = { forte: "bg-green-deep", clara: "bg-green", texto: "text-[#5c7224]" };
+const COR_STRIPE = { forte: "bg-coral-pink", clara: "bg-pink-soft" };
+const COR_INTER = { forte: "bg-green-deep", clara: "bg-green" };
 
 function plural(n: number, um: string, varios: string): string {
   return `${n} ${n === 1 ? um : varios}`;
 }
 
 /** "7 confirmadas · 3 pendentes · 1 falha". Pendente é escrito, nunca zero. */
-export function resumoCobertura(c: Contagem): string {
-  const elegiveis = c.confirmados + c.pendentes + c.falhos;
-  if (elegiveis === 0) return "nenhum pagamento com cartão no período";
+export function resumoCobertura(c: Contagem, meio: "cartão" | "PIX"): string {
+  if (c.confirmados + c.pendentes + c.falhos === 0) {
+    return `nenhum pagamento com ${meio} no período`;
+  }
   const partes = [plural(c.confirmados, "confirmada", "confirmadas")];
   if (c.pendentes > 0) partes.push(plural(c.pendentes, "pendente", "pendentes"));
   if (c.falhos > 0) partes.push(plural(c.falhos, "falha", "falhas"));
   if (c.pendentes === 0 && c.falhos === 0) partes.push("nenhuma pendente");
   return partes.join(" · ");
+}
+
+function completudeDe(b: Bucket, serie: Serie): Completude {
+  if (serie === "stripe") return completude(b.cobertura.stripe);
+  if (serie === "inter") return completude(b.cobertura.inter);
+  return completude(b.cobertura.stripe, b.cobertura.inter);
+}
+
+function centsDe(b: Bucket, serie: Serie): number {
+  if (serie === "stripe") return b.stripeCents;
+  if (serie === "inter") return b.interCents;
+  return b.totalCents;
+}
+
+/**
+ * Valor de uma série num período: "R$ X" (completo), "R$ X observados"
+ * (subtotal), "R$ X observados · incompleto" (total), ou "— pendente" /
+ * "— falha" quando nada foi observado.
+ */
+export function valorDoPeriodo(b: Bucket, serie: Serie): { valor: string; marca: string | null } {
+  const estado = completudeDe(b, serie);
+  const cents = centsDe(b, serie);
+  if (estado === "completo") return { valor: formatBRL(cents), marca: null };
+  if (cents === 0) return { valor: `— ${estado}`, marca: null };
+  return {
+    valor: formatBRL(cents),
+    marca: serie === "total" ? "observados · incompleto" : "observados",
+  };
+}
+
+function textoDoPeriodo(b: Bucket, serie: Serie): string {
+  const { valor, marca } = valorDoPeriodo(b, serie);
+  return marca ? `${valor} ${marca}` : valor;
 }
 
 function ultimaLeitura(iso: string | null): string {
@@ -75,70 +113,28 @@ export function DespesasCabecalho({ hoje }: { hoje: string | null }) {
   );
 }
 
-/**
- * Estado do valor de uma coluna. `completo`: tudo o que devia ser observado
- * foi. Caso contrário o número é só o subtotal observado — e, sem nada
- * observado, não há número: "— pendente", nunca R$ 0,00.
- */
-export type Completude =
-  | { readonly completo: true }
-  | { readonly completo: false; readonly semValor: string; readonly marca: string };
-
-const COMPLETO: Completude = { completo: true };
-
-function completudeStripe(c: Contagem | null): Completude {
-  if (!c) return { completo: false, semValor: "— não medido", marca: "observados" };
-  if (c.pendentes > 0) return { completo: false, semValor: "— pendente", marca: "observados" };
-  if (c.falhos > 0) return { completo: false, semValor: "— falha", marca: "observados" };
-  return COMPLETO;
-}
-
-function ValorKpi({ valor, completude }: { valor: number; completude: Completude }) {
-  const classe =
-    "whitespace-nowrap text-[26px] font-semibold leading-[1.1] tracking-[-0.02em] tabular-nums";
-  if (completude.completo) {
-    return (
-      <p data-testid="despesas-kpi-valor" data-completo="true" className={`${classe} text-ink`}>
-        {formatBRL(valor)}
-      </p>
-    );
-  }
-  if (valor === 0) {
-    return (
-      <p data-testid="despesas-kpi-valor" data-completo="false" className={`${classe} text-ink-mute`}>
-        {completude.semValor}
-      </p>
-    );
-  }
-  return (
-    <p data-testid="despesas-kpi-valor" data-completo="false" className={`${classe} text-ink`}>
-      {formatBRL(valor)}{" "}
-      <span className="text-[12px] font-normal tracking-normal text-ink-soft">
-        {completude.marca}
-      </span>
-    </p>
-  );
-}
-
 function ColunaKpi({
   serie,
   rotulo,
   cor,
-  valor,
-  completude,
-  comparacao,
+  atual,
+  anterior,
+  rotuloAnterior,
   detalhe,
   divisor = false,
 }: {
-  serie: "stripe" | "inter" | "total";
+  serie: Serie;
   rotulo: string;
   cor: string | null;
-  valor: number;
-  completude: Completude;
-  comparacao: string;
+  atual: Bucket;
+  anterior: Bucket;
+  rotuloAnterior: string;
   detalhe?: string;
   divisor?: boolean;
 }) {
+  const { valor, marca } = valorDoPeriodo(atual, serie);
+  const completo = completudeDe(atual, serie) === "completo";
+  const semValor = !completo && marca === null;
   return (
     <div
       data-testid={`despesas-kpi-${serie}`}
@@ -150,8 +146,23 @@ function ColunaKpi({
         {cor ? <Amostra cor={cor} /> : null}
         {rotulo}
       </span>
-      <ValorKpi valor={valor} completude={completude} />
-      <p className="text-[12px] text-ink-soft">{comparacao}</p>
+      <p
+        data-testid="despesas-kpi-valor"
+        data-completo={completo}
+        className={`whitespace-nowrap text-[26px] font-semibold leading-[1.1] tracking-[-0.02em] tabular-nums ${
+          semValor ? "text-ink-mute" : "text-ink"
+        }`}
+      >
+        {valor}
+        {marca ? (
+          <span className="ml-1.5 text-[12px] font-normal tracking-normal text-ink-soft">
+            {marca}
+          </span>
+        ) : null}
+      </p>
+      <p data-testid="despesas-kpi-comparacao" className="text-[12px] text-ink-soft">
+        {rotuloAnterior}: {textoDoPeriodo(anterior, serie)}
+      </p>
       {detalhe ? (
         <p data-testid={`despesas-kpi-${serie}-cobertura`} className="text-[11px] text-ink-mute">
           {detalhe}
@@ -168,31 +179,16 @@ function CartaoKpi({
   atual,
   anterior,
   rotuloAnterior,
-  coberturaStripe,
-  cobertura,
 }: {
   testId: string;
   titulo: string;
   faixa: string;
-  atual: Kpi;
-  anterior: Kpi;
+  atual: Bucket;
+  anterior: Bucket;
   rotuloAnterior: string;
-  coberturaStripe: Contagem | null;
-  cobertura: DespesasPainelData["cobertura"];
 }) {
   const nv = atual.naoVinculadas;
-  const stripe = completudeStripe(coberturaStripe);
-  const inter: Completude = cobertura.inter.disponivel
-    ? COMPLETO
-    : { completo: false, semValor: "— não medido", marca: "observados" };
-  const total: Completude =
-    stripe.completo && inter.completo
-      ? COMPLETO
-      : {
-          completo: false,
-          semValor: stripe.completo ? "— não medido" : stripe.semValor,
-          marca: "observados · incompleto",
-        };
+  const comum = { atual, anterior, rotuloAnterior };
   return (
     <article
       data-testid={testId}
@@ -210,30 +206,18 @@ function CartaoKpi({
           serie="stripe"
           rotulo="Stripe (cartão)"
           cor={COR_STRIPE.forte}
-          valor={atual.stripeCents}
-          completude={stripe}
-          comparacao={`${rotuloAnterior}: ${formatBRL(anterior.stripeCents)}`}
-          detalhe={coberturaStripe ? resumoCobertura(coberturaStripe) : "cobertura ainda não medida"}
+          detalhe={resumoCobertura(atual.cobertura.stripe, "cartão")}
+          {...comum}
         />
         <ColunaKpi
           serie="inter"
           rotulo="Inter (PIX)"
           cor={COR_INTER.forte}
-          valor={atual.interCents}
-          completude={inter}
-          comparacao={`${rotuloAnterior}: ${formatBRL(anterior.interCents)}`}
-          detalhe={cobertura.inter.disponivel ? undefined : "Inter: cobertura ainda não medida"}
+          detalhe={resumoCobertura(atual.cobertura.inter, "PIX")}
           divisor
+          {...comum}
         />
-        <ColunaKpi
-          serie="total"
-          rotulo="Total"
-          cor={null}
-          valor={atual.totalCents}
-          completude={total}
-          comparacao={`${rotuloAnterior}: ${formatBRL(anterior.totalCents)}`}
-          divisor
-        />
+        <ColunaKpi serie="total" rotulo="Total" cor={null} divisor {...comum} />
       </div>
       <p
         data-testid={`${testId}-nao-vinculadas`}
@@ -246,11 +230,7 @@ function CartaoKpi({
   );
 }
 
-export function DespesasKpis({
-  kpis,
-  cobertura,
-}: Pick<DespesasPainelData, "kpis" | "cobertura">) {
-  const stripe = cobertura.stripe.disponivel ? cobertura.stripe : null;
+export function DespesasKpis({ kpis }: Pick<DespesasPainelData, "kpis">) {
   return (
     <div className="grid gap-4 2xl:grid-cols-2">
       <CartaoKpi
@@ -260,8 +240,6 @@ export function DespesasKpis({
         atual={kpis.mesAtual}
         anterior={kpis.mesAnterior}
         rotuloAnterior={capitalizar(nomeMes(kpis.mesAnterior.de))}
-        coberturaStripe={stripe?.mesAtual ?? null}
-        cobertura={cobertura}
       />
       <CartaoKpi
         testId="despesas-kpi-semana"
@@ -270,8 +248,6 @@ export function DespesasKpis({
         atual={kpis.semanaAtual}
         anterior={kpis.semanaAnterior}
         rotuloAnterior="Semana anterior"
-        coberturaStripe={stripe?.semanaAtual ?? null}
-        cobertura={cobertura}
       />
     </div>
   );
@@ -280,7 +256,7 @@ export function DespesasKpis({
 function Legenda() {
   return (
     <div className="flex flex-wrap items-center justify-between gap-4">
-      <div className="flex items-center gap-4 text-[12px] text-ink-soft">
+      <div className="flex flex-wrap items-center gap-4 text-[12px] text-ink-soft">
         <span className="flex items-center gap-1.5">
           <Amostra cor={COR_STRIPE.forte} tamanho="size-2.5" />
           Stripe (cartão)
@@ -289,8 +265,15 @@ function Legenda() {
           <Amostra cor={COR_INTER.forte} tamanho="size-2.5" />
           Inter (PIX)
         </span>
+        <span className="flex items-center gap-1.5">
+          <span
+            aria-hidden
+            className="size-2.5 shrink-0 rounded-[2px] border border-dashed border-ink-mute"
+          />
+          incompleto (pendente ou falha)
+        </span>
       </div>
-      <span className={MONO}>altura da barra = total</span>
+      <span className={MONO}>altura da barra = total observado</span>
     </div>
   );
 }
@@ -298,17 +281,20 @@ function Legenda() {
 function Barra({
   barra,
   claro,
+  completo,
   largura,
   raio,
-  futura = false,
+  vazia = false,
 }: {
   barra: { total: number; stripe: number };
   claro: boolean;
+  completo: boolean;
   largura: string;
   raio: string;
-  futura?: boolean;
+  /** Sem barra: período futuro, ou incompleto sem nada observado. */
+  vazia?: boolean;
 }) {
-  if (futura) {
+  if (vazia) {
     return (
       <div
         aria-hidden
@@ -318,11 +304,13 @@ function Barra({
     );
   }
   const minimo = barra.total > 0 ? "min-h-[2px]" : "";
+  // Incompleto: mesma barra, esmaecida e com contorno tracejado.
+  const marca = completo ? "" : "opacity-55 outline outline-1 outline-dashed outline-ink-mute";
   return (
     <div
       aria-hidden
       data-testid="despesas-barra"
-      className={`flex w-full flex-col overflow-hidden ${largura} ${raio} ${minimo}`}
+      className={`flex w-full flex-col overflow-hidden ${largura} ${raio} ${minimo} ${marca}`}
       style={{ height: `${barra.total.toFixed(2)}%` }}
     >
       <div data-fatia="inter" className={`flex-1 ${claro ? COR_INTER.clara : COR_INTER.forte}`} />
@@ -335,10 +323,49 @@ function Barra({
   );
 }
 
-function detalheValores(v: DespesasPainelData["meses"][number] | DespesasPainelData["semanas"][number]) {
-  return `Stripe ${formatBRL(v.stripeCents)} · Inter ${formatBRL(v.interCents)} · total ${formatBRL(
-    v.totalCents,
-  )}`;
+/** Rótulo de acessibilidade de um bucket, com a pendência por extenso. */
+function detalheValores(b: Bucket): string {
+  const base = `Stripe ${formatBRL(b.stripeCents)} · Inter ${formatBRL(
+    b.interCents,
+  )} · total ${formatBRL(b.totalCents)}`;
+  const pendentes = b.cobertura.stripe.pendentes + b.cobertura.inter.pendentes;
+  const falhos = b.cobertura.stripe.falhos + b.cobertura.inter.falhos;
+  if (pendentes + falhos === 0) return base;
+  const partes = [];
+  if (pendentes > 0) partes.push(plural(pendentes, "pendente", "pendentes"));
+  if (falhos > 0) partes.push(plural(falhos, "falha", "falhas"));
+  return `${base} · incompleto: ${partes.join(", ")}`;
+}
+
+/** Rótulo sobre a barra: valor (curto ou cheio) e, se incompleto, o estado. */
+function RotuloBarra({
+  b,
+  curto,
+  destaque,
+}: {
+  b: Bucket;
+  curto: boolean;
+  destaque: boolean;
+}) {
+  const estado = completudeDe(b, "total");
+  const peso = destaque ? "font-semibold" : "font-normal";
+  if (estado !== "completo" && b.totalCents === 0) {
+    return (
+      <span className={`whitespace-nowrap font-mono text-[10px] text-ink-mute ${peso}`}>
+        — {estado}
+      </span>
+    );
+  }
+  return (
+    <span className="flex flex-col items-center gap-px">
+      <span className={`whitespace-nowrap font-mono text-[10px] text-ink ${peso}`}>
+        {curto ? formatCompacto(b.totalCents) : formatBRL(b.totalCents)}
+      </span>
+      {estado !== "completo" ? (
+        <span className="whitespace-nowrap font-mono text-[9px] text-ink-mute">{estado}</span>
+      ) : null}
+    </span>
+  );
 }
 
 export function DespesasPorMes({ meses }: Pick<DespesasPainelData, "meses">) {
@@ -350,33 +377,31 @@ export function DespesasPorMes({ meses }: Pick<DespesasPainelData, "meses">) {
   return (
     <Grafico titulo="Por mês" legenda={legenda} corrente='[data-parcial="true"]'>
       <div className="flex min-w-[860px] flex-col px-2 lg:min-w-0 lg:px-0">
-        <ol className="flex h-[200px] items-stretch gap-3">
+        <ol className="flex h-[210px] items-stretch gap-3">
           {meses.map((m) => {
             const titulo = `${nomeMes(m.de)} ${m.de.slice(0, 4)}${
               m.parcial ? " (parcial)" : ""
             } · ${detalheValores(m)}`;
+            const completo = completudeDe(m, "total") === "completo";
             return (
               <li
                 key={m.de}
                 data-testid="despesas-mes"
                 data-mes={m.de}
                 data-parcial={m.parcial}
+                data-completo={completo}
                 title={titulo}
                 aria-label={titulo}
                 className="flex min-w-0 flex-1 flex-col items-center justify-end gap-1.5"
               >
-                <span
-                  className={`whitespace-nowrap font-mono text-[10px] text-ink ${
-                    m.parcial ? "font-semibold" : "font-normal"
-                  }`}
-                >
-                  {formatCompacto(m.totalCents)}
-                </span>
+                <RotuloBarra b={m} curto destaque={m.parcial} />
                 <Barra
-                  barra={barraDespesas(m.stripeCents, m.totalCents, maxT, 84)}
+                  barra={barraDespesas(m.stripeCents, m.totalCents, maxT, 80)}
                   claro={m.parcial}
+                  completo={completo}
                   largura="max-w-[60px]"
                   raio="rounded-t-[3px]"
+                  vazia={!completo && m.totalCents === 0}
                 />
               </li>
             );
@@ -416,6 +441,7 @@ export function DespesasSemanasDoMes({
           {semanas.map((s) => {
             const futura = s.estado === "futura";
             const atual = s.estado === "atual";
+            const completo = completudeDe(s, "total") === "completo";
             const rotulo = rotuloSemana(s);
             return (
               <li
@@ -423,6 +449,7 @@ export function DespesasSemanasDoMes({
                 data-testid="despesas-semana"
                 data-de={s.de}
                 data-estado={s.estado}
+                data-completo={completo}
                 aria-label={
                   futura
                     ? `${rotulo}: ainda não começou`
@@ -430,21 +457,18 @@ export function DespesasSemanasDoMes({
                 }
                 className="flex min-w-0 flex-1 flex-col items-center justify-end gap-1.5"
               >
-                <div className="flex flex-col items-center gap-px font-mono text-[11px]">
-                  <span
-                    className={`whitespace-nowrap ${futura ? "text-ink-mute" : "text-ink"} ${
-                      atual ? "font-semibold" : "font-normal"
-                    }`}
-                  >
-                    {futura ? "—" : formatBRL(s.totalCents)}
-                  </span>
-                </div>
+                {futura ? (
+                  <span className="font-mono text-[11px] text-ink-mute">—</span>
+                ) : (
+                  <RotuloBarra b={s} curto={false} destaque={atual} />
+                )}
                 <Barra
-                  barra={barraDespesas(s.stripeCents, s.totalCents, maxT, 76)}
+                  barra={barraDespesas(s.stripeCents, s.totalCents, maxT, 72)}
                   claro={atual}
+                  completo={completo}
                   largura="max-w-[112px]"
                   raio="rounded-t-[4px]"
-                  futura={futura}
+                  vazia={futura || (!completo && s.totalCents === 0)}
                 />
               </li>
             );
@@ -472,11 +496,13 @@ export function DespesasSemanasDoMes({
 function LinhaCobertura({
   provedor,
   rotulo,
+  meio,
   cor,
   cobertura,
 }: {
   provedor: "stripe" | "inter";
   rotulo: string;
+  meio: "cartão" | "PIX";
   cor: string;
   cobertura: CoberturaDespesasData;
 }) {
@@ -488,14 +514,10 @@ function LinhaCobertura({
       <span className="flex items-center gap-1.5 text-[13px] text-ink">
         <Amostra cor={cor} />
         {rotulo}
-        {cobertura.disponivel ? (
-          <span className={MONO}>desde {formatLocalDate(cobertura.desde)}</span>
-        ) : null}
+        <span className={MONO}>desde {formatLocalDate(cobertura.desde)}</span>
       </span>
       <span className="text-[13px] text-ink-soft">
-        {cobertura.disponivel
-          ? resumoCobertura(cobertura.desdeInicio)
-          : "cobertura ainda não medida"}
+        {resumoCobertura(cobertura.desdeInicio, meio)}
       </span>
       <span className={MONO}>{ultimaLeitura(cobertura.ultimaLeituraEm)}</span>
     </li>
@@ -516,12 +538,14 @@ export function DespesasCobertura({ cobertura }: Pick<DespesasPainelData, "cober
         <LinhaCobertura
           provedor="stripe"
           rotulo="Stripe (cartão)"
+          meio="cartão"
           cor={COR_STRIPE.forte}
           cobertura={cobertura.stripe}
         />
         <LinhaCobertura
           provedor="inter"
           rotulo="Inter (PIX)"
+          meio="PIX"
           cor={COR_INTER.forte}
           cobertura={cobertura.inter}
         />
@@ -565,8 +589,14 @@ export function DespesasNotas() {
     <div className="flex flex-col gap-1 text-[12px] text-ink-mute">
       <p>
         <span className="text-ink-soft">Despesas:</span> tarifa de processamento observada no
-        extrato do provedor, na data em que o provedor debitou. Nada é estimado: pagamento sem
-        tarifa confirmada aparece como pendente ou falha na cobertura, não como zero.
+        extrato do provedor, na data em que o provedor debitou. Nada é estimado: período com
+        tarifa pendente ou falha mostra só o que foi observado, marcado como incompleto, nunca
+        como zero.
+      </p>
+      <p>
+        <span className="text-ink-soft">Cobertura:</span> pagamentos do período, pela data do
+        pagamento. Stripe: leitura da tarifa por pagamento. Inter: confirmada só quando a tarifa
+        do extrato é vinculada ao pagamento; extrato sem tarifa não confirma zero.
       </p>
       <p>
         <span className="text-ink-soft">Não vinculadas:</span> tarifas que o provedor cobrou sem
@@ -581,7 +611,7 @@ export function DespesasPainel({ data }: { data: DespesasPainelData }) {
   return (
     <>
       <DespesasAviso diferencaConciliacao={data.diferencaConciliacao} />
-      <DespesasKpis kpis={data.kpis} cobertura={data.cobertura} />
+      <DespesasKpis kpis={data.kpis} />
       <div className="flex flex-col gap-4">
         <Legenda />
         <DespesasPorMes meses={data.meses} />

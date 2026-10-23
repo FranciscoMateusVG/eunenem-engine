@@ -28,12 +28,34 @@ export interface NaoVinculadas {
   readonly cents: number;
 }
 
+export type StatusTarifa = "confirmed" | "pending" | "failed";
+export type ProvedorDespesa = "stripe" | "inter";
+
+/**
+ * Pagamentos elegíveis de um dia local de SP (data do PAGAMENTO), por
+ * provedor e status da tarifa.
+ */
+export interface DiaCobertura {
+  readonly dia: string;
+  readonly provedor: ProvedorDespesa;
+  readonly status: StatusTarifa;
+  readonly pagamentos: number;
+}
+
+export interface ContagemCobertura {
+  readonly confirmados: number;
+  readonly pendentes: number;
+  readonly falhos: number;
+}
+
 export interface ValoresDespesas {
   readonly stripeCents: number;
   readonly interCents: number;
   /** Stripe + Inter vinculados. Não inclui as não vinculadas. */
   readonly totalCents: number;
   readonly naoVinculadas: NaoVinculadas;
+  /** Pagamentos do período (por data do pagamento) com tarifa confirmada/pendente/falha. */
+  readonly cobertura: { readonly stripe: ContagemCobertura; readonly inter: ContagemCobertura };
 }
 
 export interface DespesasAgregado {
@@ -55,6 +77,7 @@ function dentro(dia: string, intervalo: Intervalo): boolean {
 function valoresDe<T extends Intervalo>(
   intervalo: T,
   dias: readonly DiaDespesas[],
+  cobertura: readonly DiaCobertura[],
 ): T & ValoresDespesas {
   let stripeCents = 0;
   let interCents = 0;
@@ -73,12 +96,17 @@ function valoresDe<T extends Intervalo>(
     interCents,
     totalCents: stripeCents + interCents,
     naoVinculadas: { count, cents },
+    cobertura: {
+      stripe: contarCobertura(cobertura, "stripe", intervalo),
+      inter: contarCobertura(cobertura, "inter", intervalo),
+    },
   };
 }
 
 export function agregarDespesas(
   grade: GradePainel,
   dias: readonly DiaDespesas[],
+  cobertura: readonly DiaCobertura[] = [],
 ): DespesasAgregado {
   let stripeCents = 0;
   let interCents = 0;
@@ -92,13 +120,13 @@ export function agregarDespesas(
   }
   return {
     kpis: {
-      mesAtual: valoresDe(grade.kpis.mesAtual, dias),
-      mesAnterior: valoresDe(grade.kpis.mesAnterior, dias),
-      semanaAtual: valoresDe(grade.kpis.semanaAtual, dias),
-      semanaAnterior: valoresDe(grade.kpis.semanaAnterior, dias),
+      mesAtual: valoresDe(grade.kpis.mesAtual, dias, cobertura),
+      mesAnterior: valoresDe(grade.kpis.mesAnterior, dias, cobertura),
+      semanaAtual: valoresDe(grade.kpis.semanaAtual, dias, cobertura),
+      semanaAnterior: valoresDe(grade.kpis.semanaAnterior, dias, cobertura),
     },
-    meses: grade.meses.map((m) => valoresDe(m, dias)),
-    semanas: grade.semanas.map((s) => valoresDe(s, dias)),
+    meses: grade.meses.map((m) => valoresDe(m, dias, cobertura)),
+    semanas: grade.semanas.map((s) => valoresDe(s, dias, cobertura)),
     somaDosDias: { stripeCents, interCents, naoVinculadasCents },
   };
 }
@@ -107,35 +135,35 @@ export function agregarDespesas(
 //  Cobertura
 // ────────────────────────────────────────────────────────────────────
 
-export type StatusTarifa = "confirmed" | "pending" | "failed";
-
-/** Pagamentos elegíveis de um dia local de SP (data do pagamento), por status. */
-export interface DiaCobertura {
-  readonly dia: string;
-  readonly status: StatusTarifa;
-  readonly pagamentos: number;
-}
-
-export interface ContagemCobertura {
-  readonly confirmados: number;
-  readonly pendentes: number;
-  readonly falhos: number;
-}
-
+/** Sem `intervalo`: todos os dias recebidos (desde o início da coleta). */
 export function contarCobertura(
   dias: readonly DiaCobertura[],
+  provedor: ProvedorDespesa,
   intervalo?: Intervalo,
 ): ContagemCobertura {
   let confirmados = 0;
   let pendentes = 0;
   let falhos = 0;
   for (const d of dias) {
+    if (d.provedor !== provedor) continue;
     if (intervalo && !dentro(d.dia, intervalo)) continue;
     if (d.status === "confirmed") confirmados += d.pagamentos;
     else if (d.status === "failed") falhos += d.pagamentos;
     else pendentes += d.pagamentos;
   }
   return { confirmados, pendentes, falhos };
+}
+
+/**
+ * "completo": toda tarifa esperada foi observada. Caso contrário o valor do
+ * período é só um subtotal observado; sem nada observado, não há valor.
+ */
+export type Completude = "completo" | "pendente" | "falha";
+
+export function completude(...contagens: readonly ContagemCobertura[]): Completude {
+  if (contagens.some((c) => c.pendentes > 0)) return "pendente";
+  if (contagens.some((c) => c.falhos > 0)) return "falha";
+  return "completo";
 }
 
 // ────────────────────────────────────────────────────────────────────

@@ -226,9 +226,20 @@ test('5qoz0: Despesas — KPIs por provedor, cobertura pendente e não vinculada
           /1 tarifa · R\$[\s ]1,50 \(fora do total\)/,
         );
         await expect(page.getByTestId('despesas-mes')).toHaveCount(12);
+        // Inter: os PIX desde 01/09/2026 (setembro e o mês atual) têm tarifa vinculada.
         await expect(page.getByTestId('despesas-cobertura-inter')).toContainText(
-          'cobertura ainda não medida',
+          '2 confirmadas · nenhuma pendente',
         );
+        // Stripe tem pendência no mês: subtotal marcado, total incompleto.
+        await expect(
+          kpiMes.getByTestId('despesas-kpi-stripe').getByTestId('despesas-kpi-valor'),
+        ).toContainText('observados');
+        await expect(
+          kpiMes.getByTestId('despesas-kpi-total').getByTestId('despesas-kpi-valor'),
+        ).toContainText('observados · incompleto');
+        await expect(
+          page.locator('[data-testid="despesas-mes"][data-parcial="true"]'),
+        ).toHaveAttribute('data-completo', 'false');
         expect(hoje >= mes.de).toBe(true);
 
         await page.screenshot({ path: testInfo.outputPath(`despesas-${tag}.png`), fullPage: true });

@@ -36,6 +36,7 @@ let seed: ReceitaLedgerSeed;
 async function limparTarifas() {
   await sql`DELETE FROM provider_fee_events`.execute(testDb.db);
   await sql`DELETE FROM provider_fee_sync`.execute(testDb.db);
+  await sql`DELETE FROM provider_fee_inter_scans`.execute(testDb.db);
 }
 
 beforeAll(async () => {
@@ -93,6 +94,17 @@ async function sync(paymentId: string, status: 'pending' | 'confirmed' | 'failed
   await sql`
     INSERT INTO provider_fee_sync (payment_id, status, attempts, next_attempt_at, updated_at)
     VALUES (${paymentId}::uuid, ${status}, 1, ${at}, ${at})
+  `.execute(testDb.db);
+}
+
+async function scan(
+  dia: string,
+  o: { conta?: string; sucesso?: Date; tentativas?: number; motivo?: string },
+) {
+  await sql`
+    INSERT INTO provider_fee_inter_scans (account_ref, day, last_success_at, last_reason, attempts)
+    VALUES (${o.conta ?? 'acct_fixture'}, ${dia}::date, ${o.sucesso ?? null},
+      ${o.motivo ?? null}, ${o.tentativas ?? 0})
   `.execute(testDb.db);
 }
 
@@ -275,9 +287,21 @@ describe('Despesas — cobertura: pendente é pendente, nunca zero', () => {
 
     const d = await caller().admin.despesas.painel();
     const stripe = d.cobertura.stripe;
-    if (!stripe.disponivel) throw new Error('cobertura Stripe deveria estar disponível');
-    expect(stripe.semanaAtual).toEqual({ confirmados: 1, pendentes: 1, falhos: 0 });
-    expect(stripe.mesAtual).toEqual({ confirmados: 2, pendentes: 2, falhos: 0 });
+    const k = (b: { cobertura: { stripe: unknown } }) => b.cobertura.stripe;
+    expect(k(d.kpis.semanaAtual)).toEqual({ confirmados: 1, pendentes: 1, falhos: 0 });
+    expect(k(d.kpis.mesAtual)).toEqual({ confirmados: 2, pendentes: 2, falhos: 0 });
+    // Comparações e barras recebem a própria cobertura: setembro tem uma falha.
+    expect(k(d.kpis.mesAnterior)).toEqual({ confirmados: 0, pendentes: 0, falhos: 1 });
+    expect(k(d.kpis.semanaAnterior)).toEqual({ confirmados: 1, pendentes: 1, falhos: 0 });
+    expect(k(d.meses.at(-2) as (typeof d.meses)[number])).toEqual(k(d.kpis.mesAnterior));
+    expect(k(d.meses.at(-1) as (typeof d.meses)[number])).toEqual(k(d.kpis.mesAtual));
+    expect(d.semanas.map((s) => k(s))).toEqual([
+      { confirmados: 1, pendentes: 1, falhos: 0 },
+      { confirmados: 1, pendentes: 1, falhos: 0 },
+      { confirmados: 0, pendentes: 0, falhos: 0 },
+      { confirmados: 0, pendentes: 0, falhos: 0 },
+      { confirmados: 0, pendentes: 0, falhos: 0 },
+    ]);
     expect(stripe.desdeInicio).toEqual({ confirmados: 2, pendentes: 2, falhos: 1 });
     expect(stripe.ultimaLeituraEm).toBe(sp('2037-10-05T11:00:00').toISOString());
 
@@ -294,26 +318,66 @@ describe('Despesas — cobertura: pendente é pendente, nunca zero', () => {
     await cartao(campanha, sp('2037-10-05T09:00:00'));
     const d = await caller().admin.despesas.painel();
     expect(d.kpis.mesAtual.totalCents).toBe(0);
-    const stripe = d.cobertura.stripe;
-    if (!stripe.disponivel) throw new Error('cobertura Stripe deveria estar disponível');
-    expect(stripe.mesAtual).toEqual({ confirmados: 0, pendentes: 1, falhos: 0 });
-    expect(stripe.ultimaLeituraEm).toBeNull();
+    expect(d.kpis.mesAtual.cobertura.stripe).toEqual({ confirmados: 0, pendentes: 1, falhos: 0 });
+    expect(d.cobertura.stripe.ultimaLeituraEm).toBeNull();
   });
 
-  it('Inter: cobertura ainda não medida (contrato do PR2), com a última leitura observada', async () => {
+  it('Inter: confirmado só com tarifa vinculada; scan vazio NÃO confirma zero; dia esgotado é falha', async () => {
     const campanha = await seed.campanha();
-    const p = await pix(campanha, sp('2037-10-05T09:00:00'));
+    // Confirmado: tarifa Inter vinculada ao pagamento.
+    const confirmado = await pix(campanha, sp('2037-10-05T09:00:00'));
     await tarifa({
       provider: 'inter',
       amountCents: 99,
       occurredAt: sp('2037-10-05T09:00:00'),
-      paymentId: p,
+      paymentId: confirmado,
+      observedAt: sp('2037-10-05T11:00:00'),
     });
+    // Dia escaneado com sucesso, sem tarifa para este pagamento: pendente.
+    await pix(campanha, sp('2037-10-05T08:00:00'));
+    await scan('2037-10-05', { sucesso: sp('2037-10-05T11:30:00') });
+    // Dia sem scan nenhum: pendente.
+    await pix(campanha, sp('2037-10-02T10:00:00'));
+    // Dia esgotado (8 tentativas com erro, sem sucesso): falha.
+    await pix(campanha, sp('2037-09-15T10:00:00'));
+    await scan('2037-09-15', { tentativas: 8, motivo: 'unavailable' });
+    // Esgotado numa conta mas com sucesso noutra: não é falha.
+    await pix(campanha, sp('2037-09-16T10:00:00'));
+    await scan('2037-09-16', { tentativas: 8, motivo: 'unavailable' });
+    await scan('2037-09-16', { conta: 'outra-conta', sucesso: sp('2037-09-17T10:00:00') });
+    // Tarifa sem vínculo não confirma pagamento nenhum.
+    await tarifa({
+      provider: 'inter',
+      amountCents: 99,
+      occurredAt: sp('2037-10-02T10:00:00'),
+      paymentId: null,
+      observedAt: sp('2037-10-05T10:00:00'),
+    });
+    // Não elegíveis: PIX pendente, cartão, outra plataforma.
+    await seed.pagamento({
+      campaignId: campanha,
+      taxaCents: 1,
+      criadoEm: sp('2037-10-05T09:00:00'),
+      status: 'pendente',
+      semLancamento: true,
+      provedor: 'inter',
+    });
+    await cartao(campanha, sp('2037-10-05T09:00:00'));
+    await pix(await seed.campanha(OTHER_PLATFORM), sp('2037-10-05T09:00:00'));
+
     const d = await caller().admin.despesas.painel();
-    expect(d.cobertura.inter).toEqual({
-      disponivel: false,
-      ultimaLeituraEm: NOW.toISOString(),
+    const inter = d.cobertura.inter;
+    expect(d.kpis.semanaAtual.cobertura.inter).toEqual({ confirmados: 1, pendentes: 1, falhos: 0 });
+    expect(d.kpis.mesAtual.cobertura.inter).toEqual({ confirmados: 1, pendentes: 2, falhos: 0 });
+    expect(d.kpis.mesAnterior.cobertura.inter).toEqual({ confirmados: 0, pendentes: 1, falhos: 1 });
+    expect(d.kpis.semanaAnterior.cobertura.inter).toEqual({
+      confirmados: 0,
+      pendentes: 1,
+      falhos: 0,
     });
+    expect(inter.desdeInicio).toEqual({ confirmados: 1, pendentes: 3, falhos: 1 });
+    expect(inter.desde).toBe('2026-09-01');
+    expect(inter.ultimaLeituraEm).toBe(sp('2037-10-05T11:30:00').toISOString());
   });
 });
 

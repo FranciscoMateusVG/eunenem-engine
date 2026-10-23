@@ -8,6 +8,7 @@ import {
   type DespesasAgregado,
   type DiaCobertura,
   type DiaDespesas,
+  type ProvedorDespesa,
   type StatusTarifa,
 } from "../pages/lib/despesasPainel.js";
 import { gradePainel } from "../pages/lib/receitaPainel.js";
@@ -30,8 +31,16 @@ import { emSnapshotDeLeitura } from "./admin-receita.js";
  * (`naoVinculadas`) para nada ficar invisível; a plataforma dele não é
  * provável.
  *
- * SNAPSHOT ÚNICO: as três consultas (dias, total independente, cobertura)
- * rodam na mesma transação REPEATABLE READ + READ ONLY.
+ * COBERTURA (por pagamento elegível, datado pelo dia do PAGAMENTO):
+ *   Stripe — status do `provider_fee_sync`; sem linha de sync = pendente.
+ *   Inter  — confirmado SÓ com tarifa Inter vinculada ao pagamento. Dia do
+ *            pagamento só com scans esgotados (≥ 8 tentativas com erro, nenhum
+ *            sucesso) = falha. Todo o resto é pendente — inclusive dia
+ *            escaneado com sucesso sem tarifa: extrato vazio NÃO confirma zero.
+ * Cada bucket exibido (KPIs, meses, semanas) recebe a sua contagem.
+ *
+ * SNAPSHOT ÚNICO: as quatro consultas (dias, total independente, cobertura,
+ * últimas leituras) rodam na mesma transação REPEATABLE READ + READ ONLY.
  */
 
 /** Data local (SP) a partir da qual o sync coleta tarifas. */
@@ -46,6 +55,18 @@ function stripeElegivel(platformId: string) {
     AND p.status IN ('aprovado', 'estornado')
     AND p.criado_em >= ${PROVIDER_FEES_SINCE}
     AND p.transacao_externa ->> 'provedor' = 'stripe'
+    AND EXISTS (
+      SELECT 1 FROM campanhas c
+      WHERE c.id = p.intencao_id_campanha AND c.id_plataforma = ${platformId}::uuid
+    )`;
+}
+
+/** Pagamentos PIX recebidos pelo Inter, no universo do `InterFeeSync` (PR2). */
+function interElegivel(platformId: string) {
+  return sql`p.intencao_metodo = 'pix'
+    AND p.status IN ('aprovado', 'estornado')
+    AND p.criado_em >= ${PROVIDER_FEES_SINCE}
+    AND p.transacao_externa ->> 'provedor' = 'inter'
     AND EXISTS (
       SELECT 1 FROM campanhas c
       WHERE c.id = p.intencao_id_campanha AND c.id_plataforma = ${platformId}::uuid
@@ -109,27 +130,23 @@ function toDia(row: SomasRow & { dia: string }): DiaDespesas {
   };
 }
 
+function toProvedor(value: string): ProvedorDespesa {
+  if (value === "stripe" || value === "inter") return value;
+  throw new Error("admin_despesas_provedor_invalido");
+}
+
 function toStatus(value: string): StatusTarifa {
   if (value === "confirmed" || value === "failed") return value;
   return "pending";
 }
 
-export type CoberturaDespesas =
-  | {
-      readonly disponivel: true;
-      readonly mesAtual: ContagemCobertura;
-      readonly semanaAtual: ContagemCobertura;
-      /** Todos os elegíveis desde `desde`. */
-      readonly desdeInicio: ContagemCobertura;
-      readonly desde: string;
-      /** Última tentativa de leitura ou observação gravada. */
-      readonly ultimaLeituraEm: Date | null;
-    }
-  | {
-      /** Contrato de cobertura do provedor ainda não existe: não medida, não zero. */
-      readonly disponivel: false;
-      readonly ultimaLeituraEm: Date | null;
-    };
+export interface CoberturaDespesas {
+  /** Todos os elegíveis desde `desde` (a coleta começa aí). */
+  readonly desdeInicio: ContagemCobertura;
+  readonly desde: string;
+  /** Última tentativa/scan bem-sucedido ou observação gravada. */
+  readonly ultimaLeituraEm: Date | null;
+}
 
 export interface DespesasPainel extends DespesasAgregado {
   readonly snapshotAt: Date;
@@ -172,7 +189,7 @@ export async function loadDespesasPainel(
       GROUP BY 1
       ORDER BY 1
     `.execute(trx);
-    const agregado = agregarDespesas(grade, diasRes.rows.map(toDia));
+    const dias = diasRes.rows.map(toDia);
 
     const totalRes = await sql<SomasRow>`
       SELECT ${SOMAS} FROM ${eventosDaJanela(platformId, janela.de, janela.ate)} e
@@ -180,60 +197,79 @@ export async function loadDespesasPainel(
     const total = totalRes.rows[0];
     if (!total) throw new Error("admin_despesas_total_sem_linha");
 
-    // Cobertura Stripe por dia do pagamento × status; sem linha de sync é
-    // pendente (ainda não admitido pelo worker). Última leitura de cada
-    // provedor na mesma consulta.
     const coberturaRes = await sql<{
-      dia: string | null;
-      status: string | null;
+      provedor: string;
+      dia: string;
+      status: string;
       pagamentos: string | number;
-      stripe_sync_em: Date | null;
-      stripe_observado_em: Date | null;
-      inter_observado_em: Date | null;
     }>`
-      WITH elegiveis AS (
+      WITH stripe AS (
         SELECT
           to_char(p.criado_em AT TIME ZONE ${sql.lit(RECEITA_TIMEZONE)}, 'YYYY-MM-DD') AS dia,
-          COALESCE(s.status, 'pending') AS status,
-          s.updated_at
+          COALESCE(s.status, 'pending') AS status
         FROM pagamentos p
         LEFT JOIN provider_fee_sync s ON s.payment_id = p.id
         WHERE ${stripeElegivel(platformId)}
       ),
-      observado AS (
+      inter AS (
         SELECT
-          MAX(e.observed_at) FILTER (WHERE e.provider = 'stripe') AS stripe,
-          MAX(e.observed_at) FILTER (WHERE e.provider = 'inter') AS inter
-        FROM provider_fee_events e
-        LEFT JOIN pagamentos p ON p.id = e.payment_id
-        LEFT JOIN campanhas c
-          ON c.id = p.intencao_id_campanha
-         AND c.id_plataforma = ${platformId}
-        WHERE e.payment_id IS NULL OR c.id IS NOT NULL
-      ),
-      contagens AS (
-        SELECT dia, status, COUNT(*) AS pagamentos FROM elegiveis GROUP BY dia, status
+          to_char(p.criado_em AT TIME ZONE ${sql.lit(RECEITA_TIMEZONE)}, 'YYYY-MM-DD') AS dia,
+          CASE
+            WHEN EXISTS (
+              SELECT 1 FROM provider_fee_events e
+              WHERE e.payment_id = p.id AND e.provider = 'inter'
+            ) THEN 'confirmed'
+            WHEN EXISTS (
+              SELECT 1 FROM provider_fee_inter_scans x
+              WHERE x.day = (p.criado_em AT TIME ZONE ${sql.lit(RECEITA_TIMEZONE)})::date
+                AND x.attempts >= 8 AND x.last_reason IS NOT NULL
+            ) AND NOT EXISTS (
+              SELECT 1 FROM provider_fee_inter_scans x
+              WHERE x.day = (p.criado_em AT TIME ZONE ${sql.lit(RECEITA_TIMEZONE)})::date
+                AND x.last_success_at IS NOT NULL AND x.last_reason IS NULL
+            ) THEN 'failed'
+            ELSE 'pending'
+          END AS status
+        FROM pagamentos p
+        WHERE ${interElegivel(platformId)}
       )
-      SELECT
-        k.dia,
-        k.status,
-        COALESCE(k.pagamentos, 0) AS pagamentos,
-        (SELECT MAX(updated_at) FROM elegiveis) AS stripe_sync_em,
-        o.stripe AS stripe_observado_em,
-        o.inter AS inter_observado_em
-      FROM observado o
-      LEFT JOIN contagens k ON true
+      SELECT 'stripe' AS provedor, dia, status, COUNT(*) AS pagamentos
+      FROM stripe GROUP BY dia, status
+      UNION ALL
+      SELECT 'inter' AS provedor, dia, status, COUNT(*) AS pagamentos
+      FROM inter GROUP BY dia, status
     `.execute(trx);
-    const diasCobertura: DiaCobertura[] = [];
-    for (const row of coberturaRes.rows) {
-      if (row.dia === null || row.status === null) continue;
-      diasCobertura.push({
-        dia: row.dia,
-        status: toStatus(row.status),
-        pagamentos: naoNegativo(row.pagamentos, "cobertura.pagamentos"),
-      });
-    }
-    const leituras = coberturaRes.rows[0];
+    const diasCobertura: DiaCobertura[] = coberturaRes.rows.map((row) => ({
+      dia: row.dia,
+      provedor: toProvedor(row.provedor),
+      status: toStatus(row.status),
+      pagamentos: naoNegativo(row.pagamentos, "cobertura.pagamentos"),
+    }));
+    const agregado = agregarDespesas(grade, dias, diasCobertura);
+
+    const leiturasRes = await sql<{
+      stripe_sync_em: Date | null;
+      stripe_observado_em: Date | null;
+      inter_scan_em: Date | null;
+      inter_observado_em: Date | null;
+    }>`
+      SELECT
+        (SELECT MAX(s.updated_at) FROM provider_fee_sync s
+          JOIN pagamentos p ON p.id = s.payment_id
+          WHERE ${stripeElegivel(platformId)}) AS stripe_sync_em,
+        (SELECT MAX(e.observed_at) FROM provider_fee_events e
+          JOIN pagamentos p ON p.id = e.payment_id
+          JOIN campanhas c ON c.id = p.intencao_id_campanha AND c.id_plataforma = ${platformId}
+          WHERE e.provider = 'stripe') AS stripe_observado_em,
+        (SELECT MAX(x.last_success_at) FROM provider_fee_inter_scans x) AS inter_scan_em,
+        (SELECT MAX(e.observed_at) FROM provider_fee_events e
+          LEFT JOIN pagamentos p ON p.id = e.payment_id
+          LEFT JOIN campanhas c
+            ON c.id = p.intencao_id_campanha AND c.id_plataforma = ${platformId}
+          WHERE e.provider = 'inter' AND (e.payment_id IS NULL OR c.id IS NOT NULL))
+          AS inter_observado_em
+    `.execute(trx);
+    const leituras = leiturasRes.rows[0];
 
     return {
       ...agregado,
@@ -243,16 +279,14 @@ export async function loadDespesasPainel(
       janela,
       cobertura: {
         stripe: {
-          disponivel: true,
-          mesAtual: contarCobertura(diasCobertura, grade.kpis.mesAtual),
-          semanaAtual: contarCobertura(diasCobertura, grade.kpis.semanaAtual),
-          desdeInicio: contarCobertura(diasCobertura),
+          desdeInicio: contarCobertura(diasCobertura, "stripe"),
           desde: DESPESAS_DESDE,
           ultimaLeituraEm: maisRecente(leituras?.stripe_sync_em, leituras?.stripe_observado_em),
         },
         inter: {
-          disponivel: false,
-          ultimaLeituraEm: maisRecente(leituras?.inter_observado_em),
+          desdeInicio: contarCobertura(diasCobertura, "inter"),
+          desde: DESPESAS_DESDE,
+          ultimaLeituraEm: maisRecente(leituras?.inter_scan_em, leituras?.inter_observado_em),
         },
       },
       diferencaConciliacao: {

@@ -4626,6 +4626,12 @@ const notaFiscalRouter = t.router({
 //  cobertura, nunca como zero. Nenhuma chamada a provedor nesta leitura.
 // ────────────────────────────────────────────────────────────────────
 
+const ContagemCoberturaSchema = z.object({
+  confirmados: z.number().int().nonnegative(),
+  pendentes: z.number().int().nonnegative(),
+  falhos: z.number().int().nonnegative(),
+});
+
 const DespesasValoresShape = {
   stripeCents: z.number().int().nonnegative(),
   interCents: z.number().int().nonnegative(),
@@ -4634,6 +4640,8 @@ const DespesasValoresShape = {
     count: z.number().int().nonnegative(),
     cents: z.number().int().nonnegative(),
   }),
+  /** Pagamentos do período (data do pagamento): confirmados/pendentes/falhos. */
+  cobertura: z.object({ stripe: ContagemCoberturaSchema, inter: ContagemCoberturaSchema }),
 };
 
 const DespesasIntervaloSchema = z.object({
@@ -4642,26 +4650,11 @@ const DespesasIntervaloSchema = z.object({
   ...DespesasValoresShape,
 });
 
-const ContagemCoberturaSchema = z.object({
-  confirmados: z.number().int().nonnegative(),
-  pendentes: z.number().int().nonnegative(),
-  falhos: z.number().int().nonnegative(),
+const CoberturaDespesasSchema = z.object({
+  desdeInicio: ContagemCoberturaSchema,
+  desde: LocalDateSchema,
+  ultimaLeituraEm: z.string().datetime().nullable(),
 });
-
-const CoberturaDespesasSchema = z.discriminatedUnion("disponivel", [
-  z.object({
-    disponivel: z.literal(true),
-    mesAtual: ContagemCoberturaSchema,
-    semanaAtual: ContagemCoberturaSchema,
-    desdeInicio: ContagemCoberturaSchema,
-    desde: LocalDateSchema,
-    ultimaLeituraEm: z.string().datetime().nullable(),
-  }),
-  z.object({
-    disponivel: z.literal(false),
-    ultimaLeituraEm: z.string().datetime().nullable(),
-  }),
-]);
 
 const DespesasPainelSchema = z.object({
   snapshotAt: z.string().datetime(),
