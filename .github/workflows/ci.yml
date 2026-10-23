@@ -308,8 +308,11 @@ jobs:
         run: |
           # The Azure Ubuntu mirror can stall while downloading browser fonts.
           # Use Ubuntu's primary mirror for this runner's dependency install.
+          if [ -f /etc/apt/apt-mirrors.txt ]; then
+            echo 'https://archive.ubuntu.com/ubuntu/' | sudo tee /etc/apt/apt-mirrors.txt >/dev/null
+          fi
           if [ -f /etc/apt/sources.list.d/ubuntu.sources ]; then
-            sudo sed -i 's|azure.archive.ubuntu.com|archive.ubuntu.com|g' /etc/apt/sources.list.d/ubuntu.sources
+            sudo sed -i 's|http://azure.archive.ubuntu.com|https://archive.ubuntu.com|g' /etc/apt/sources.list.d/ubuntu.sources
           fi
           pnpm exec playwright install --with-deps chromium
       # test:e2e builds the client bundle once, then Playwright spawns the
