@@ -34,8 +34,8 @@ import { emSnapshotDeLeitura } from "./admin-receita.js";
  * COBERTURA (por pagamento elegível, datado pelo dia do PAGAMENTO):
  *   Stripe — status do `provider_fee_sync`; sem linha de sync = pendente.
  *   Inter  — confirmado SÓ com tarifa Inter vinculada ao pagamento. Dia do
- *            pagamento só com scans esgotados (≥ 8 tentativas com erro, nenhum
- *            sucesso) = falha. Todo o resto é pendente — inclusive dia
+ *            pagamento com scan esgotado (≥ 8 tentativas com erro, sem sucesso)
+ *            NA CONTA DO SYNC = falha; scans de outra conta não contam. Todo o resto é pendente — inclusive dia
  *            escaneado com sucesso sem tarifa: extrato vazio NÃO confirma zero.
  * Cada bucket exibido (KPIs, meses, semanas) recebe a sua contagem.
  *
@@ -174,9 +174,20 @@ function maisRecente(...datas: readonly (Date | string | null | undefined)[]): D
 
 export async function loadDespesasPainel(
   db: Database,
-  input: { readonly platformId: string; readonly now: Date },
+  input: {
+    readonly platformId: string;
+    readonly now: Date;
+    /**
+     * Conta Inter que o sync lê (`deps.interFeeAccountRef`). Scans e leituras
+     * de outra conta não entram na cobertura; null (sem credenciais) ⇒ nenhum
+     * scan conta: nada vira falha nem leitura, o não confirmado é pendente.
+     */
+    readonly interAccountRef: string | null;
+  },
 ): Promise<DespesasPainel> {
   const { platformId } = input;
+  // NULL nunca é igual a nada em SQL: sem conta, nenhum scan casa.
+  const interConta = input.interAccountRef;
   const grade = gradePainel(localDateInSaoPaulo(input.now));
   const { janela } = grade;
 
@@ -221,12 +232,9 @@ export async function loadDespesasPainel(
             ) THEN 'confirmed'
             WHEN EXISTS (
               SELECT 1 FROM provider_fee_inter_scans x
-              WHERE x.day = (p.criado_em AT TIME ZONE ${sql.lit(RECEITA_TIMEZONE)})::date
+              WHERE x.account_ref = ${interConta}
+                AND x.day = (p.criado_em AT TIME ZONE ${sql.lit(RECEITA_TIMEZONE)})::date
                 AND x.attempts >= 8 AND x.last_reason IS NOT NULL
-            ) AND NOT EXISTS (
-              SELECT 1 FROM provider_fee_inter_scans x
-              WHERE x.day = (p.criado_em AT TIME ZONE ${sql.lit(RECEITA_TIMEZONE)})::date
-                AND x.last_success_at IS NOT NULL AND x.last_reason IS NULL
             ) THEN 'failed'
             ELSE 'pending'
           END AS status
@@ -261,13 +269,10 @@ export async function loadDespesasPainel(
           JOIN pagamentos p ON p.id = e.payment_id
           JOIN campanhas c ON c.id = p.intencao_id_campanha AND c.id_plataforma = ${platformId}
           WHERE e.provider = 'stripe') AS stripe_observado_em,
-        (SELECT MAX(x.last_success_at) FROM provider_fee_inter_scans x) AS inter_scan_em,
+        (SELECT MAX(x.last_success_at) FROM provider_fee_inter_scans x
+          WHERE x.account_ref = ${interConta}) AS inter_scan_em,
         (SELECT MAX(e.observed_at) FROM provider_fee_events e
-          LEFT JOIN pagamentos p ON p.id = e.payment_id
-          LEFT JOIN campanhas c
-            ON c.id = p.intencao_id_campanha AND c.id_plataforma = ${platformId}
-          WHERE e.provider = 'inter' AND (e.payment_id IS NULL OR c.id IS NOT NULL))
-          AS inter_observado_em
+          WHERE e.provider = 'inter' AND e.account_ref = ${interConta}) AS inter_observado_em
     `.execute(trx);
     const leituras = leiturasRes.rows[0];
 

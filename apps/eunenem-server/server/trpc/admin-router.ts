@@ -4690,6 +4690,7 @@ const despesasRouter = t.router({
     const painel = await loadDespesasPainel(ctx.deps.db, {
       platformId: ID_PLATAFORMA_EUNENEM,
       now: ctx.deps.clock(),
+      interAccountRef: ctx.deps.interFeeAccountRef,
     });
     return {
       snapshotAt: painel.snapshotAt.toISOString(),

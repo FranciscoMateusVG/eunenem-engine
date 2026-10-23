@@ -63,6 +63,7 @@ function caller(opts: { sessao?: boolean; allowlist?: string[] } = {}) {
     db: testDb.db,
     clock: () => NOW,
     logPiiHashSalt: 'despesas-integration-salt',
+    interFeeAccountRef: 'acct_fixture',
   } as unknown as ServerDeps;
   const ctx: TrpcContext = {
     deps,
@@ -341,10 +342,23 @@ describe('Despesas — cobertura: pendente é pendente, nunca zero', () => {
     // Dia esgotado (8 tentativas com erro, sem sucesso): falha.
     await pix(campanha, sp('2037-09-15T10:00:00'));
     await scan('2037-09-15', { tentativas: 8, motivo: 'unavailable' });
-    // Esgotado numa conta mas com sucesso noutra: não é falha.
+    // Só a conta Inter ativa (a do sync) conta. Sucesso em outra conta não
+    // resgata a falha da conta ativa...
     await pix(campanha, sp('2037-09-16T10:00:00'));
     await scan('2037-09-16', { tentativas: 8, motivo: 'unavailable' });
     await scan('2037-09-16', { conta: 'outra-conta', sucesso: sp('2037-09-17T10:00:00') });
+    // ...e esgotamento em outra conta não falha a conta ativa.
+    await pix(campanha, sp('2037-08-17T10:00:00'));
+    await scan('2037-08-17', { conta: 'outra-conta', tentativas: 8, motivo: 'unavailable' });
+    // Leituras de outra conta também não contam como "última leitura".
+    await scan('2037-10-04', { conta: 'outra-conta', sucesso: sp('2037-10-05T11:50:00') });
+    await sql`
+      INSERT INTO provider_fee_events
+        (provider, account_ref, environment, external_ref, payment_id, amount_cents,
+         currency, occurred_at, observed_at, source)
+      VALUES ('inter', 'outra-conta', 'live', ${`ref-${randomUUID()}`}, NULL, 99, 'brl',
+        ${sp('2037-10-04T10:00:00')}, ${sp('2037-10-05T11:55:00')}, 'fixture')
+    `.execute(testDb.db);
     // Tarifa sem vínculo não confirma pagamento nenhum.
     await tarifa({
       provider: 'inter',
@@ -369,13 +383,16 @@ describe('Despesas — cobertura: pendente é pendente, nunca zero', () => {
     const inter = d.cobertura.inter;
     expect(d.kpis.semanaAtual.cobertura.inter).toEqual({ confirmados: 1, pendentes: 1, falhos: 0 });
     expect(d.kpis.mesAtual.cobertura.inter).toEqual({ confirmados: 1, pendentes: 2, falhos: 0 });
-    expect(d.kpis.mesAnterior.cobertura.inter).toEqual({ confirmados: 0, pendentes: 1, falhos: 1 });
+    // Setembro: 15/09 e 16/09 esgotados na conta ativa = 2 falhas (sucesso em B não resgata).
+    expect(d.kpis.mesAnterior.cobertura.inter).toEqual({ confirmados: 0, pendentes: 0, falhos: 2 });
+    // Agosto: esgotado só em B = pendente, não falha.
+    expect(d.meses.at(-3)?.cobertura.inter).toEqual({ confirmados: 0, pendentes: 1, falhos: 0 });
     expect(d.kpis.semanaAnterior.cobertura.inter).toEqual({
       confirmados: 0,
       pendentes: 1,
       falhos: 0,
     });
-    expect(inter.desdeInicio).toEqual({ confirmados: 1, pendentes: 3, falhos: 1 });
+    expect(inter.desdeInicio).toEqual({ confirmados: 1, pendentes: 3, falhos: 2 });
     expect(inter.desde).toBe('2026-09-01');
     expect(inter.ultimaLeituraEm).toBe(sp('2037-10-05T11:30:00').toISOString());
   });
