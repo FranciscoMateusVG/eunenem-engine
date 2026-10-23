@@ -43,12 +43,14 @@ function all() {
 }
 
 describe('lifecycle emails — shared email-safe contract', () => {
-  it('exposes exactly the four agreed types', () => {
+  it('exposes the four journey types plus the two owner alerts', () => {
     expect([...LIFECYCLE_EMAIL_TYPES]).toEqual([
       'welcome',
       'list_ready',
       'event_reminder',
       'payment_received',
+      'new_message',
+      'presence_confirmed',
     ]);
   });
 
@@ -306,6 +308,81 @@ describe('payment_received (presente recebido)', () => {
   it('owner name falls back to the recipient name', () => {
     expect(payment({ ownerName: undefined, recipientName: 'Ana' }).html).toContain(
       'Ana, aconteceu uma coisa bonita hoje.',
+    );
+  });
+});
+
+const painel = 'https://staging.eunenem.com/painel/helena/c/0b6c2d1e-0000-4000-8000-000000000001';
+function recado(overrides: Record<string, unknown> = {}) {
+  return renderLifecycleEmail('new_message', {
+    ...common,
+    dashboardUrl: painel,
+    guestName: 'Tia Rosa',
+    guestMessage: 'Que venha com saúde!\nbeijos <3',
+    ...overrides,
+  });
+}
+function presenca(overrides: Record<string, unknown> = {}) {
+  return renderLifecycleEmail('presence_confirmed', {
+    ...common,
+    dashboardUrl: painel,
+    guestName: 'Vovó Lúcia',
+    ...overrides,
+  });
+}
+
+describe('owner alerts (new_message, presence_confirmed)', () => {
+  it.each([
+    ['new_message', recado()],
+    ['presence_confirmed', presenca()],
+  ] as const)('%s keeps the email-safe contract, with opt-out links and no feedback block', (_t, m) => {
+    expect(m.html).toMatch(/^<!doctype html>/i);
+    expect(m.html).toContain('role="presentation"');
+    expect(m.html).not.toMatch(/<script|<form|<input|display:\s*(flex|grid)|var\(--/i);
+    expect(m.html).toMatch(
+      /bgcolor="#[0-9a-f]{6}"[^>]*background-color:#[0-9a-f]{6};background-image:linear-gradient/,
+    );
+    expect(m.html).toContain('href="https://staging.eunenem.com/email/descadastrar?token=UNSUB"');
+    expect(m.html).toContain('href="https://staging.eunenem.com/email/preferencias?token=PREF"');
+    expect(m.text).toContain(
+      'descadastrar: https://staging.eunenem.com/email/descadastrar?token=UNSUB',
+    );
+    expect(m.text).toContain(
+      'preferências de e-mail: https://staging.eunenem.com/email/preferencias?token=PREF',
+    );
+    // Frequent alerts never carry the onboarding survey.
+    expect(m.html).not.toContain('avaliar-email');
+    expect(m.text).not.toContain('avalie sua experiência');
+    expect(m.text).not.toMatch(/<[a-z]/i);
+    expect(m.html).not.toContain('fonts.googleapis.com');
+  });
+
+  it('new_message shows the escaped recado and links to the campaign mensagens page', () => {
+    const m = recado();
+    expect(m.subject).toBe('Tia Rosa deixou um recadinho pro seu bebê ♡');
+    expect(m.html).toContain('Helena, chegou um recadinho novo.');
+    expect(m.html).toContain('“Que venha com saúde!<br>beijos &lt;3”');
+    expect(m.html).not.toContain('<3');
+    expect(m.html).toContain(`href="${painel}/mensagens"`);
+    expect(m.text).toContain('“Que venha com saúde!\nbeijos <3”');
+    expect(m.text).toContain(`Ver recados: ${painel}/mensagens`);
+  });
+
+  it('new_message without a guest name or text stays neutral', () => {
+    const m = recado({ guestName: '  ', guestMessage: null });
+    expect(m.subject).toBe('alguém deixou um recadinho pro seu bebê ♡');
+    expect(m.html).not.toContain('recadinho de');
+  });
+
+  it('presence_confirmed names the guest, escapes it, and links to convidados', () => {
+    const m = presenca({ guestName: 'Lu <b>' });
+    expect(m.subject).toBe('Lu <b> confirmou presença no seu chá ♡');
+    expect(m.html).toContain('<title>Lu &lt;b&gt; confirmou presença no seu chá ♡</title>');
+    expect(m.html).toContain('<strong style="color:#6b3c5e">Lu &lt;b&gt;</strong>');
+    expect(m.html).toContain(`href="${painel}/convidados"`);
+    expect(m.text).toContain(`Ver convidados: ${painel}/convidados`);
+    expect(presenca({ guestName: null }).subject).toBe(
+      'um convidado confirmou presença no seu chá ♡',
     );
   });
 });

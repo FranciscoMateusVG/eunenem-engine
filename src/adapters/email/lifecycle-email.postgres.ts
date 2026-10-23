@@ -188,7 +188,7 @@ export class LifecycleEmailRepositoryPostgres implements LifecycleEmailRepositor
       return this.db.transaction().execute(async (trx) => {
         // Durable keyset cursors let ineligible/corrupt rows remain recoverable
         // without permanently blocking later eligible accounts or payments.
-        await sql`INSERT INTO lifecycle_email_scan_cursors(type) VALUES ('welcome'),('list_ready'),('event_reminder'),('payment_received') ON CONFLICT DO NOTHING`.execute(
+        await sql`INSERT INTO lifecycle_email_scan_cursors(type) VALUES ('welcome'),('list_ready'),('event_reminder'),('payment_received'),('new_message') ON CONFLICT DO NOTHING`.execute(
           trx,
         );
         const cursors = await sql<{
@@ -240,6 +240,14 @@ export class LifecycleEmailRepositoryPostgres implements LifecycleEmailRepositor
         AND p.atualizado_em<=${new Date(now.getTime() - 10 * 60_000)}
         AND NOT EXISTS(SELECT 1 FROM lifecycle_email_events e WHERE e.type='payment_received' AND e.subject_id=p.id)
         ORDER BY p.id LIMIT 100`.execute(trx);
+        const messages = await sql<{
+          id: string;
+        }>`SELECT p.id FROM pagamentos p JOIN campanhas c ON c.id=p.intencao_id_campanha
+        WHERE ${eligibleOwner} AND p.status='aprovado' AND p.criado_em>=${launchAt} AND c.criada_em>=${launchAt} AND p.id>${cursor('new_message')}::uuid
+        AND p.atualizado_em<=${new Date(now.getTime() - 10 * 60_000)}
+        AND trim(COALESCE(p.intencao_contribuinte_mensagem,''))<>''
+        AND NOT EXISTS(SELECT 1 FROM lifecycle_email_events e WHERE e.type='new_message' AND e.subject_id=p.id)
+        ORDER BY p.id LIMIT 100`.execute(trx);
         const advance = async (type: LifecycleEmailType, ids: string[]) => {
           await sql`UPDATE lifecycle_email_scan_cursors SET last_id=${ids.length === 100 ? (ids.at(-1) ?? '00000000-0000-0000-0000-000000000000') : '00000000-0000-0000-0000-000000000000'}::uuid WHERE type=${type}`.execute(
             trx,
@@ -261,11 +269,16 @@ export class LifecycleEmailRepositoryPostgres implements LifecycleEmailRepositor
           'payment_received',
           payments.rows.map((r) => r.id),
         );
+        await advance(
+          'new_message',
+          messages.rows.map((r) => r.id),
+        );
         return {
           welcomes: welcomes.rows,
           gifts: gifts.rows,
           reminders: reminders.rows,
           payments: payments.rows,
+          messages: messages.rows,
         };
       });
     });
@@ -303,6 +316,15 @@ export class LifecycleEmailRepositoryPostgres implements LifecycleEmailRepositor
       AND (${now}::timestamptz AT TIME ZONE 'America/Sao_Paulo')::time>='09:00'::time`.execute(
         this.db,
       );
+      return rows.length > 0;
+    });
+  }
+  async presenceStillConfirmed(campaignId: string | null, guestId: string): Promise<boolean> {
+    return lifecycleSpan('db.lifecycle_email.presenceStillConfirmed', async () => {
+      if (!campaignId) return false;
+      const { rows } = await sql`SELECT 1 FROM convidados g
+      JOIN listas_de_convidados l ON l.id=g.lista_id JOIN eventos v ON v.id=l.id_evento
+      WHERE g.id=${guestId} AND v.id_campanha=${campaignId} AND g.presenca='sim'`.execute(this.db);
       return rows.length > 0;
     });
   }

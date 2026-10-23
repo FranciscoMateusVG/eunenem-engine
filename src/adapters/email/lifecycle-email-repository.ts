@@ -61,6 +61,8 @@ export interface LifecycleCandidates {
   gifts: { campaign_id: string; occurred_at: Date }[];
   reminders: { id_campanha: string; event_date: string }[];
   payments: { id: string }[];
+  /** Approved payments carrying a recado whose owner alert was never admitted. */
+  messages: { id: string }[];
 }
 export interface LifecycleEmailRepository {
   initialize(launchAt: Date, now: Date): Promise<void>;
@@ -95,6 +97,8 @@ export interface LifecycleEmailRepository {
   claim(now: Date): Promise<Delivery | undefined>;
   finish(id: string, state: string, reason: string, now: Date): Promise<void>;
   reminderStillDue(campaignId: string | null, eventDate: string, now: Date): Promise<boolean>;
+  /** The guest belongs to the campaign's guest list and still answers "sim". */
+  presenceStillConfirmed(campaignId: string | null, guestId: string): Promise<boolean>;
   giftCount(campaignId: string | null): Promise<number | null>;
   ownerName(campaignId: string | null): Promise<string | null>;
   reserveEmail(eventId: string, deliveryId: string, emailKey: string): Promise<boolean>;

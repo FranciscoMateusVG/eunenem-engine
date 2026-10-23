@@ -200,10 +200,35 @@ describe('/email/descadastrar', () => {
       list_ready: true,
       event_reminder: true,
       payment_received: false,
+      new_message: true,
+      presence_confirmed: true,
     });
 
     await post('/email/descadastrar', { token, acao: 'reativar' });
     expect((await preferences.getPreferences(userId, tenantId)).payment_received).toBe(true);
+  });
+
+  it('owner alert unsubscribe links turn off only their own type', async () => {
+    const userId = randomUUID();
+    const tenantId = randomUUID();
+    for (const [type, label] of [
+      ['new_message', 'Novos recados'],
+      ['presence_confirmed', 'Confirmações de presença'],
+    ] as const) {
+      const token = tokens.signPreferenceToken({ userId, tenantId, type });
+      const page = await app.request(`/email/descadastrar?token=${token}`);
+      expect(page.status).toBe(200);
+      expect(await page.text()).toContain(label);
+      expect((await post('/email/descadastrar', { token, acao: 'desativar' })).status).toBe(200);
+    }
+    expect(await preferences.getPreferences(userId, tenantId)).toEqual({
+      welcome: true,
+      list_ready: true,
+      event_reminder: true,
+      payment_received: true,
+      new_message: false,
+      presence_confirmed: false,
+    });
   });
 
   it('an untyped token is sent to the preferences page', async () => {
@@ -231,7 +256,7 @@ describe('/email/descadastrar', () => {
 });
 
 describe('/email/preferencias', () => {
-  it('GET lists the four types with current state; POST saves the toggles', async () => {
+  it('GET lists every type with current state; POST saves the toggles', async () => {
     const userId = randomUUID();
     const tenantId = randomUUID();
     await preferences.setPreferences(userId, tenantId, { event_reminder: false });
@@ -242,10 +267,14 @@ describe('/email/preferencias', () => {
       'Lista pronta para compartilhar',
       'Lembrete do chá (5 dias antes)',
       'Presente recebido',
+      'Novos recados',
+      'Confirmações de presença',
     ]) {
       expect(html).toContain(label);
     }
     expect(html).toMatch(/value="welcome" checked/);
+    expect(html).toMatch(/value="new_message" checked/);
+    expect(html).toMatch(/value="presence_confirmed" checked/);
     expect(html).not.toMatch(/value="event_reminder" checked/);
     expect(html).toContain('Salvar preferências');
 
@@ -260,6 +289,8 @@ describe('/email/preferencias', () => {
       list_ready: false,
       event_reminder: true,
       payment_received: true,
+      new_message: false,
+      presence_confirmed: false,
     });
   });
 
@@ -309,6 +340,8 @@ describe('/email/preferencias', () => {
       list_ready: true,
       event_reminder: true,
       payment_received: true,
+      new_message: true,
+      presence_confirmed: true,
     });
   });
 });

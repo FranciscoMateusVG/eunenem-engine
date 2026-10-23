@@ -502,6 +502,19 @@ export const eventoListaDeConvidadosRouter = t.router({
           throw new ConvidadoNaoEncontradoError(input.idConvidado as IdConvidado, updated.id);
         }
 
+        // aperture-851nu — owner alert on a transition INTO "sim". The outbox
+        // dedupes per guest, so sim→nao→sim never alerts twice; admission can
+        // never fail the guest's answer.
+        if (antes.presenca !== 'sim' && convidado.presenca === 'sim') {
+          try {
+            await ctx.deps.lifecyclePresenceConfirmed?.(idCampanha, convidado.id, convidado.nome);
+          } catch {
+            ctx.deps.observability.logger.info('lifecycle_email.presence_admission_failed', {
+              idCampanha,
+            });
+          }
+        }
+
         // aperture-ppuay / aperture-4yse9 — server-truth RSVP, THE single
         // emitter (the client no longer tracks it). Guest action, no session:
         // distinct_id is the opaque `convidado:<id>` — stable per guest, never

@@ -134,6 +134,10 @@ export interface ServerDeps {
   readonly lifecycleEmailTokens?: LifecycleEmailTokens;
   readonly lifecycleEmailPreferences?: LifecycleEmailPreferencesPostgres;
   readonly lifecyclePaymentFinalized?: ((pagamento: Pagamento) => Promise<void>) | undefined;
+  /** Owner alert when a guest's RSVP becomes "sim" (deduped per guest by the outbox). */
+  readonly lifecyclePresenceConfirmed?:
+    | ((idCampanha: string, idConvidado: string, nomeConvidado: string) => Promise<void>)
+    | undefined;
   readonly db: Database;
   /** Optional only for isolated in-memory router fixtures. Production composition requires it. */
   readonly contextoCompartilhamentoOnboarding?: (usuarioId: string, idConta: string, plataformaId: string) => Promise<{ idsProprias: string[]; idCompartilhada: string | null }>;
@@ -1304,6 +1308,7 @@ export function buildServerDeps(
     providerFeeSync,
     lifecycleEmail, lifecycleEmailTokens, lifecycleEmailPreferences,
     lifecyclePaymentFinalized: (payment) => lifecycleEmail.paymentFinalized(payment),
+    lifecyclePresenceConfirmed: (idCampanha, idConvidado, nome) => lifecycleEmail.presenceConfirmed(idCampanha, idConvidado, nome),
     contextoCompartilhamentoOnboarding: (usuarioId, idConta, plataformaId) => new CampanhaCompartilhamentoPostgres(db).contextoOnboarding(usuarioId, idConta, plataformaId),
     revogarConvitesPendentesDoMembro: (input, { trx }) => new CampanhaCompartilhamentoPostgres(db).revogarPendentesDoMembro(input.idCampanha, input.idConta, input.idUsuarioAtor, trx),
     consumirConvitesVerificados: (usuarioId, plataformaId) => new CampanhaCompartilhamentoPostgres(db).consumirVerificados(usuarioId, plataformaId),
