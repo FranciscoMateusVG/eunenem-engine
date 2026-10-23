@@ -39,10 +39,17 @@ test('painel compacto e configurações sem novas dependências de banco', async
       });
     });
     await page.goto(base);
-    await expect(page.getByRole('link', { name: /Configurações/ })).toBeVisible();
+    await expect(page.getByRole('link', { name: /configurações/i })).toBeVisible();
     await expect(page.locator('.painel-top-strip-line')).toContainText('dias');
     await expect(page.locator('.painel-url-date')).not.toBeEmpty();
     await expect(page.locator('#painel-group-conta').getByRole('link')).toHaveCount(5);
+    await expect(page.locator('#painel-group-conta .painel-row-label')).toHaveText([
+      'editar meu perfil',
+      'personalizar página',
+      'configurações',
+      'dados bancários',
+      'fale com a gente',
+    ]);
     await expect(
       page.locator('#painel-group-conta').getByRole('link', { name: /^compartilhar/i }),
     ).toHaveCount(0);
@@ -54,6 +61,18 @@ test('painel compacto e configurações sem novas dependências de banco', async
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
         true,
       );
+      const fontSizes = await page.locator('.painel-menu-compact').evaluate((menu) => {
+        const giftLabel = menu.querySelector(
+          '[data-tutorial-target="presentes"] .painel-row-label',
+        );
+        const listLabel = menu.querySelector('[data-tutorial-target="lista"] .painel-row-label');
+        return [
+          giftLabel && getComputedStyle(giftLabel).fontSize,
+          listLabel && getComputedStyle(listLabel).fontSize,
+        ];
+      });
+      expect(fontSizes[0]).toBeTruthy();
+      expect(fontSizes[0]).toBe(fontSizes[1]);
       await page.screenshot({
         path: `test-results/configuracoes-width-${width}-${page.url().includes('configuracoes') ? 'settings' : 'dashboard'}.png`,
         fullPage: true,
@@ -84,7 +103,7 @@ test('painel compacto e configurações sem novas dependências de banco', async
     await expect
       .poll(() => page.evaluate(() => (window as unknown as { copied: string }).copied))
       .toContain(`/pagina/${seededData.slug}`);
-    await page.getByRole('link', { name: /Configurações/ }).click();
+    await page.getByRole('link', { name: /configurações/i }).click();
     await expect(page.getByRole('heading', { name: 'Configurações', exact: true })).toBeVisible();
     await expect(
       page.getByRole('link', { name: 'Gerenciar acessos', exact: true }),

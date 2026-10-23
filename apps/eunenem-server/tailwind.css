@@ -1341,9 +1341,6 @@ h4 {
     color-mix(in srgb, var(--pink-soft) 40%, transparent) 100%
   );
 }
-.painel-row.featured .painel-row-label {
-  font-size: 21px;
-}
 
 /* Pill badges. */
 .painel-badge {
