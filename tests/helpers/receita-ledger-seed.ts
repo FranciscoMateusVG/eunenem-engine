@@ -33,7 +33,7 @@ export interface PagamentoSeed {
   readonly metodo?: 'pix' | 'credit_card';
   /** `null` ⇒ pagamento sem transacao_externa (provedor não registrado). */
   readonly provedor?: 'stripe' | 'inter' | null;
-  /** Adicional de cartão (item + lançamento próprios; nunca é receita). */
+  /** Adicional de cartão (item + lançamento próprios; incluído em Tarifas do painel). */
   readonly adicionalCents?: number;
   /** Sem linha de taxa no ledger (ex.: pagamento pendente/rejeitado). */
   readonly semLancamento?: boolean;

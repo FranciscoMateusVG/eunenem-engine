@@ -48,7 +48,7 @@ export function ReceitaCabecalho({ hoje }: { hoje: string | null }) {
     <header className="flex flex-wrap items-end justify-between gap-4">
       <div className="flex flex-col gap-1.5">
         <h1 className="text-[30px] font-semibold tracking-[-0.02em]! text-ink">Receita EuNeném</h1>
-        <p className="text-[14px] text-ink-soft">Taxas da plataforma menos cancelamentos.</p>
+        <p className="text-[14px] text-ink-soft">Taxas da plataforma e adicional do cartão, menos cancelamentos.</p>
       </div>
       {hoje ? (
         <p className="font-mono text-[11px] tracking-[0.05em] text-ink-mute">
@@ -495,7 +495,7 @@ export function ReceitaNotas() {
   return (
     <div className="flex flex-col gap-1 text-[12px] text-ink-mute">
       <p>
-        <span className="text-ink-soft">Tarifas EuNeném:</span> taxas registradas na data do
+        <span className="text-ink-soft">Tarifas EuNeném:</span> taxas da plataforma e adicional do cartão registrados na data do
         pagamento aprovado, menos cancelamentos na data em que ocorreram.
       </p>
       <p>

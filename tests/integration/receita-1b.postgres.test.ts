@@ -306,6 +306,32 @@ function metrica(registradoCents: number, canceladoCents: number) {
 }
 
 describe('admin.receita.painel — Recebido no banco e Tarifas (Postgres real)', () => {
+  it('fceqo: cartão inclui adicional nas tarifas do mês/semana e desconta no cancelamento', async () => {
+    const campaignId = await seed.campanha();
+    await seed.pagamento({
+      campaignId,
+      taxaCents: 500,
+      adicionalCents: 467,
+      contribuicaoCents: 10000,
+      provedor: 'stripe',
+      criadoEm: sp('2037-10-05T09:00:00'),
+    });
+    await seed.pagamento({
+      campaignId,
+      taxaCents: 200,
+      adicionalCents: 150,
+      provedor: 'stripe',
+      criadoEm: sp('2037-09-15T09:00:00'),
+      canceladoEm: sp('2037-10-05T10:00:00'),
+      status: 'estornado',
+    });
+    const p = await caller().admin.receita.painel();
+    expect(p.kpis.mesAtual.tarifas).toEqual(metrica(967, 350));
+    expect(p.kpis.semanaAtual.tarifas).toEqual(metrica(967, 350));
+    expect(p.kpis.mesAnterior.tarifas).toEqual(metrica(350, 0));
+    expect(p.diferencaConciliacao.tarifas).toEqual({ registradoCents: 0, canceladoCents: 0 });
+  });
+
   it('valores exatos de meses, semanas e KPIs no cenário de outubro', async () => {
     const s = await seedPainel();
     const p = await caller().admin.receita.painel();
@@ -336,7 +362,7 @@ describe('admin.receita.painel — Recebido no banco e Tarifas (Postgres real)',
     });
     // Cancelamentos contam no mês em que ocorreram, não no do pagamento.
     expect(porMes.get('2037-10-01')).toMatchObject({
-      tarifas: metrica(300 + 200 + 50 + 450 + 100, 1_000 + 400),
+      tarifas: metrica(300 + 200 + 50 + 450 + 100 + 380, 1_000 + 400),
       recebido: metrica(recOutReg, recOutCanc),
     });
     for (const m of p.meses.slice(0, 9)) {
@@ -354,7 +380,7 @@ describe('admin.receita.painel — Recebido no banco e Tarifas (Postgres real)',
     ]);
     // 01–04/10 não inclui 30/09 23:59 (é a mesma semana ISO, mas outro mês).
     expect(p.semanas[0]).toMatchObject({
-      tarifas: metrica(300 + 200 + 450 + 100, 1_400),
+      tarifas: metrica(300 + 200 + 450 + 100 + 380, 1_400),
       recebido: metrica(3_300 + 2_200 + 9_830 + 1_100, recOutCanc),
     });
     expect(p.semanas[1]).toMatchObject({ tarifas: metrica(50, 0), recebido: metrica(550, 0) });
@@ -367,7 +393,7 @@ describe('admin.receita.painel — Recebido no banco e Tarifas (Postgres real)',
     expect(p.kpis.mesAtual).toMatchObject({
       de: '2037-10-01',
       ate: '2037-10-06',
-      tarifas: metrica(1_100, 1_400),
+      tarifas: metrica(1_480, 1_400),
       recebido: metrica(recOutReg, recOutCanc),
     });
     expect(p.kpis.mesAnterior).toMatchObject({
@@ -386,7 +412,7 @@ describe('admin.receita.painel — Recebido no banco e Tarifas (Postgres real)',
     expect(p.kpis.semanaAnterior).toMatchObject({
       de: '2037-09-28',
       ate: '2037-10-05',
-      tarifas: metrica(700 + 400 + 1_050, 1_400),
+      tarifas: metrica(700 + 400 + 1_050 + 380, 1_400),
       recebido: metrica(7_700 + 8_400 + 16_430, recOutCanc),
     });
 
@@ -400,7 +426,7 @@ describe('admin.receita.painel — Recebido no banco e Tarifas (Postgres real)',
     });
   });
 
-  it('Tarifas do painel = resultado de taxas do dashboard existente em cada mês e semana', async () => {
+  it('Tarifas do painel = taxas + adicional do dashboard em cada mês e semana', async () => {
     await seedPainel();
     const c = caller();
     const p = await c.admin.receita.painel();
@@ -415,9 +441,14 @@ describe('admin.receita.painel — Recebido no banco e Tarifas (Postgres real)',
     for (const i of intervalos) {
       const d = await c.admin.receita.dashboard({ de: i.de, ate: i.ate, granularidade: 'mes' });
       expect(i.tarifas, `${i.de}→${i.ate}`).toEqual({
-        registradoCents: d.cards.periodo.taxasRegistradasCents,
-        canceladoCents: d.cards.periodo.cancelamentosCents,
-        resultadoCents: d.cards.periodo.resultadoDeTaxasCents,
+        registradoCents:
+          d.cards.periodo.taxasRegistradasCents + d.cards.periodo.adicionalCartao.registradoCents,
+        canceladoCents:
+          d.cards.periodo.cancelamentosCents + d.cards.periodo.adicionalCartao.canceladoCents,
+        resultadoCents:
+          d.cards.periodo.resultadoDeTaxasCents +
+          d.cards.periodo.adicionalCartao.registradoCents -
+          d.cards.periodo.adicionalCartao.canceladoCents,
       });
     }
   });
