@@ -22,6 +22,8 @@ describe('lifecycle email durable boundaries', () => {
       list_ready: true,
       event_reminder: true,
       payment_received: true,
+      new_message: true,
+      presence_confirmed: true,
     });
     await preferences.setPreferences(user, tenant, { payment_received: false });
     expect((await preferences.getPreferences(user, tenant)).payment_received).toBe(false);

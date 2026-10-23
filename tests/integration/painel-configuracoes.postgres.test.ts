@@ -161,6 +161,31 @@ describe('configuracoes.get / emails (Presentes recebidos)', () => {
     ).toBe(false);
   });
 
+  it('Novos recados e Confirmações de presença: ligados por padrão, gravados por usuário', async () => {
+    const owner = await login();
+    const coOwner = await login();
+    await adicionarCoOwner(owner.idCampanha, coOwner.user.id_conta);
+    const atual = await owner.caller.configuracoes.get({ idCampanha: owner.idCampanha });
+    expect(atual.emails).toEqual({ presentes: true, recados: true, presencas: true });
+
+    const salvo = await owner.caller.configuracoes.emails({
+      idCampanha: owner.idCampanha,
+      recados: false,
+      presencas: false,
+    });
+    expect(salvo).toEqual({ presentes: true, recados: false, presencas: false });
+    expect(
+      await new LifecycleEmailPreferencesPostgres(deps.db).getPreferences(
+        owner.user.id,
+        owner.user.id_plataforma,
+      ),
+    ).toMatchObject({ payment_received: true, new_message: false, presence_confirmed: false });
+    // The co-owner's own preference is untouched.
+    expect(
+      (await coOwner.caller.configuracoes.get({ idCampanha: owner.idCampanha })).emails,
+    ).toEqual({ presentes: true, recados: true, presencas: true });
+  });
+
   it('nega anônimo e campanha alheia', async () => {
     const owner = await login();
     const estranho = await login();

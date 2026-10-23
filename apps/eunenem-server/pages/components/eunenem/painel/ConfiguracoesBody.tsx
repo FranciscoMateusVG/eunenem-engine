@@ -161,13 +161,15 @@ export function ConfiguracoesView(props: ConfiguracoesViewProps) {
           description="Notificar quando alguém escolher ou enviar um presente."
           {...emailToggle('presentes')}
         />
-        <UnavailableToggle
+        <SettingToggle
           label="Novos recados"
-          description="Notificar quando um convidado enviar uma mensagem."
+          description="Notificar quando um convidado enviar uma mensagem. Com Presentes recebidos ligado, o recado já vem nesse e-mail."
+          {...emailToggle('recados')}
         />
-        <UnavailableToggle
+        <SettingToggle
           label="Confirmações de presença"
           description="Notificar quando um convidado confirmar presença."
+          {...emailToggle('presencas')}
         />
       </section>
       <section className="config-card config-danger">
@@ -304,19 +306,6 @@ function SettingToggle({
         disabled={disabled}
         onChange={(e) => onChange(e.target.checked)}
       />
-    </label>
-  );
-}
-
-function UnavailableToggle({ label, description }: { label: string; description: string }) {
-  return (
-    <label className="config-toggle">
-      <span>
-        <strong>{label}</strong>
-        <small>{description}</small>
-        <small>Indisponível</small>
-      </span>
-      <input type="checkbox" role="switch" aria-label={label} disabled />
     </label>
   );
 }

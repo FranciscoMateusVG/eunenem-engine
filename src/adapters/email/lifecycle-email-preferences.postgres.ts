@@ -25,6 +25,8 @@ export class LifecycleEmailPreferencesPostgres implements LifecycleEmailPreferen
         list_ready: true,
         event_reminder: true,
         payment_received: true,
+        new_message: true,
+        presence_confirmed: true,
       };
       const { rows } = await sql<{ type: LifecycleEmailType; enabled: boolean }>`
       SELECT type, enabled FROM lifecycle_email_preferences WHERE user_id=${userId} AND tenant_id=${tenantId}

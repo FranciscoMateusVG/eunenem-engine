@@ -484,6 +484,29 @@ describe('Migration round-trip', () => {
     //    this sequence must start at the LATEST migration and walk earlier.
     //    Adding a new migration on top REQUIRES prepending its down-step here.
 
+    // 066 owner alert lifecycle emails widen the three type CHECKs; down
+    // refuses while any new-type row exists, then narrows them back.
+    for (const table of [
+      'lifecycle_email_preferences',
+      'lifecycle_email_events',
+      'lifecycle_email_deliveries',
+    ]) {
+      const check = await getConstraintDefinition(db, `${table}_type_check`);
+      expect(check).toContain('new_message');
+      expect(check).toContain('presence_confirmed');
+    }
+    const alertUser = '30000000-0000-4000-8000-000000000066';
+    await sql`INSERT INTO lifecycle_email_preferences(tenant_id,user_id,type,enabled)
+      VALUES(${alertUser},${alertUser},'presence_confirmed',false)`.execute(db);
+    const refusedAlerts = await migrator.migrateDown();
+    expect(refusedAlerts.error).toBeDefined();
+    await sql`DELETE FROM lifecycle_email_preferences WHERE user_id=${alertUser}`.execute(db);
+    const downAlerts = await migrator.migrateDown();
+    expect(downAlerts.error).toBeUndefined();
+    expect(
+      await getConstraintDefinition(db, 'lifecycle_email_deliveries_type_check'),
+    ).not.toContain('new_message');
+
     // 065 campanha_privacidade (aperture-851nu): "Exibir recados publicamente".
     expect(await getColumn(db, 'campanha_privacidade', 'exibir_recados')).toMatchObject({
       is_nullable: 'NO',

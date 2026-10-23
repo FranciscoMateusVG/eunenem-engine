@@ -57,6 +57,15 @@ export const LIFECYCLE_EMAIL_TYPE_LABELS: Record<
     label: 'Presente recebido',
     description: 'cada vez que alguém presenteia pela sua lista.',
   },
+  new_message: {
+    label: 'Novos recados',
+    description:
+      'quando alguém deixa um recadinho. com "Presente recebido" ligado, o recado já vem nesse e-mail.',
+  },
+  presence_confirmed: {
+    label: 'Confirmações de presença',
+    description: 'quando um convidado confirma presença no seu chá.',
+  },
 };
 
 const C = {

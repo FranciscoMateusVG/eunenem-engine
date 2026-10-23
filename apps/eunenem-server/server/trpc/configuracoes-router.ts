@@ -36,6 +36,8 @@ const t = initTRPC.context<TrpcContext>().create();
 /** Toggle da tela → tipo de e-mail. Novos tipos entram só aqui. */
 const EMAIL_TOGGLES = {
   presentes: 'payment_received',
+  recados: 'new_message',
+  presencas: 'presence_confirmed',
 } as const satisfies Record<string, LifecycleEmailType>;
 type EmailToggle = keyof typeof EMAIL_TOGGLES;
 type EmailToggles = Record<EmailToggle, boolean>;

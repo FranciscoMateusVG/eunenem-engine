@@ -482,12 +482,22 @@ describe('lifecycle real Postgres and loopback TLS SMTP', () => {
     owner: Awaited<ReturnType<typeof seed>>,
     contribution: string,
     valid = true,
+    message?: string,
   ) {
     const payment = makePagamento({
       idCampanha: owner.campaign,
       idContribuicao: contribution,
       status: 'aprovado',
       criadoEm: now,
+      ...(message !== undefined
+        ? {
+            contribuinte: {
+              nome: 'Tia Synthetic',
+              email: 'guest@example.invalid',
+              mensagem: message,
+            },
+          }
+        : {}),
     });
     await payments.save(payment);
     if (valid)
@@ -510,6 +520,293 @@ describe('lifecycle real Postgres and loopback TLS SMTP', () => {
       );
     return payment;
   }
+  async function recipientsOf(type: string) {
+    return (
+      await sql<{
+        user_id: string;
+        state: string;
+        reason: string | null;
+      }>`SELECT user_id,state,reason FROM lifecycle_email_deliveries WHERE type=${type} ORDER BY user_id`.execute(
+        test.db,
+      )
+    ).rows;
+  }
+  function decoded() {
+    return sink.messages.map((m) => m.replace(/=\r\n/g, '').replace(/=3D/g, '='));
+  }
+  async function giftEmailsOff(...users: Awaited<ReturnType<typeof seed>>[]) {
+    const prefs = new LifecycleEmailPreferencesPostgres(test.db);
+    for (const u of users)
+      await prefs.setPreferences(u.userId, u.tenant, { payment_received: false });
+  }
+  /** A deferred recado alert waits a minute for its payment email; drain both rounds. */
+  async function dispatchUntilSettled(target: { dispatch(): Promise<void> } = service) {
+    await target.dispatch();
+    now = new Date(now.getTime() + 2 * MINUTE);
+    await target.dispatch();
+  }
+  const guestLists = new Map<string, string>();
+  async function guest(owner: Awaited<ReturnType<typeof seed>>, presenca = 'sim') {
+    let lista = guestLists.get(owner.campaign);
+    if (!lista) {
+      const evento = randomUUID();
+      lista = randomUUID();
+      await sql`INSERT INTO eventos(id,id_campanha,data_hora)
+        VALUES(${evento},${owner.campaign},${new Date('2026-12-01T15:00:00Z')})`.execute(test.db);
+      await sql`INSERT INTO listas_de_convidados(id,id_evento,formato_mensagem_convite)
+        VALUES(${lista},${evento},'texto')`.execute(test.db);
+      guestLists.set(owner.campaign, lista);
+    }
+    const convidado = randomUUID();
+    await sql`INSERT INTO convidados(id,lista_id,nome,numero_celular,presenca)
+      VALUES(${convidado},${lista},'Vovó Synthetic','+55 11 90000-0000',${presenca})`.execute(
+      test.db,
+    );
+    return convidado;
+  }
+  it('new_message goes to every owner and co-owner (never plain members), once per recipient, with the recado', async () => {
+    const owner = await seed();
+    const coOwner = await seed({ campaign: owner.campaign, tenant: owner.tenant, role: 'owner' });
+    await seed({
+      campaign: owner.campaign,
+      tenant: owner.tenant,
+      role: 'membro',
+      permissions: ['extrato:ver'],
+    });
+    await giftEmailsOff(owner, coOwner);
+    const contribution = await gift(owner);
+    const payment = await approved(owner, contribution, true, 'Que venha com saúde <3');
+    await Promise.all([service.paymentFinalized(payment), service.paymentFinalized(payment)]);
+    await service.paymentFinalized(payment);
+    await Promise.all([service.dispatch(), service.dispatch()]);
+    await dispatchUntilSettled();
+    const rows = await recipientsOf('new_message');
+    expect(rows.map((r) => r.user_id).sort()).toEqual([owner.userId, coOwner.userId].sort());
+    expect(rows.map((r) => r.state)).toEqual(['sent', 'sent']);
+    const messages = decoded().filter((m) => m.includes('/mensagens'));
+    expect(messages).toHaveLength(2);
+    expect(messages.some((m) => m.includes(owner.email))).toBe(true);
+    expect(messages.some((m) => m.includes(coOwner.email))).toBe(true);
+    expect(messages[0]).toContain('Tia Synthetic');
+    expect(messages[0]).toContain('Que venha com sa');
+    expect(messages[0]).toContain('&lt;3');
+  });
+  it('one email per payment: with Presentes recebidos on, the recado rides in it and new_message is suppressed', async () => {
+    const owner = await seed();
+    const coOwner = await seed({ campaign: owner.campaign, tenant: owner.tenant, role: 'owner' });
+    await giftEmailsOff(coOwner);
+    const contribution = await gift(owner);
+    await service.paymentFinalized(await approved(owner, contribution, true, 'Recado único'));
+    await dispatchUntilSettled();
+    const alerts = await recipientsOf('new_message');
+    expect(alerts.find((r) => r.user_id === owner.userId)).toMatchObject({
+      state: 'suppressed',
+      reason: 'covered_by_payment_received',
+    });
+    expect(alerts.find((r) => r.user_id === coOwner.userId)?.state).toBe('sent');
+    const gifts = await recipientsOf('payment_received');
+    expect(gifts.find((r) => r.user_id === owner.userId)?.state).toBe('sent');
+    expect(gifts.find((r) => r.user_id === coOwner.userId)?.reason).toBe('opt_out');
+    // Each owner got exactly one email for this payment, and both carry the recado.
+    const mails = decoded();
+    expect(mails).toHaveLength(2);
+    expect(mails.filter((m) => m.includes(owner.email))).toHaveLength(1);
+    expect(mails.filter((m) => m.includes(coOwner.email))).toHaveLength(1);
+    expect(mails.every((m) => m.includes('Recado ') && m.includes('nico'))).toBe(true);
+  });
+  it('a suppressed payment email never silences the recado alert, even if Presentes recebidos is turned back on', async () => {
+    const owner = await seed();
+    const contribution = await gift(owner);
+    const payment = await approved(owner, contribution, true, 'Não pode sumir');
+    await giftEmailsOff(owner);
+    await build({ enabledTypes: ['payment_received'] }).paymentFinalized(payment);
+    await service.dispatch();
+    expect(await recipientsOf('payment_received')).toMatchObject([
+      { state: 'suppressed', reason: 'opt_out' },
+    ]);
+    // Turned back on before the recado alert goes out: the payment email is
+    // already gone, so the alert is the only email left for this payment.
+    await new LifecycleEmailPreferencesPostgres(test.db).setPreferences(
+      owner.userId,
+      owner.tenant,
+      {
+        payment_received: true,
+      },
+    );
+    now = new Date(now.getTime() + 11 * MINUTE);
+    await service.scan();
+    await service.dispatch();
+    expect(await recipientsOf('new_message')).toMatchObject([{ state: 'sent' }]);
+    expect(decoded().filter((m) => m.includes('/mensagens'))).toHaveLength(1);
+  });
+  it('a recado alert claimed before its pending payment email waits for it instead of guessing', async () => {
+    const owner = await seed();
+    const contribution = await gift(owner);
+    await service.paymentFinalized(await approved(owner, contribution, true, 'Ordem'));
+    await sql`UPDATE lifecycle_email_deliveries SET next_attempt_at=${new Date(now.getTime() + MINUTE)}
+      WHERE type='payment_received'`.execute(test.db);
+    await service.dispatch();
+    expect(await recipientsOf('new_message')).toMatchObject([{ state: 'pending' }]);
+    expect(sink.messages).toHaveLength(0);
+    now = new Date(now.getTime() + 2 * MINUTE);
+    await service.dispatch();
+    expect(await states('payment_received')).toEqual(['sent']);
+    now = new Date(now.getTime() + 2 * MINUTE);
+    await service.dispatch();
+    expect(await recipientsOf('new_message')).toMatchObject([
+      { state: 'suppressed', reason: 'covered_by_payment_received' },
+    ]);
+    expect(sink.messages).toHaveLength(1);
+  });
+  it('new_message is not admitted for a payment without a recado or a blank one', async () => {
+    const owner = await seed();
+    const contribution = await gift(owner);
+    await service.paymentFinalized(await approved(owner, contribution));
+    await service.paymentFinalized(await approved(owner, contribution, true, '   '));
+    expect(await states('new_message')).toEqual([]);
+    expect(await states('payment_received')).toEqual(['pending', 'pending']);
+  });
+  it('new_message respects each recipient preference independently of payment_received', async () => {
+    const owner = await seed();
+    const coOwner = await seed({ campaign: owner.campaign, tenant: owner.tenant, role: 'owner' });
+    const prefs = new LifecycleEmailPreferencesPostgres(test.db);
+    await prefs.setPreferences(coOwner.userId, coOwner.tenant, { new_message: false });
+    await prefs.setPreferences(owner.userId, owner.tenant, { payment_received: false });
+    const contribution = await gift(owner);
+    await service.paymentFinalized(await approved(owner, contribution, true, 'Um beijo'));
+    await dispatchUntilSettled();
+    const rows = await recipientsOf('new_message');
+    expect(rows.find((r) => r.user_id === owner.userId)?.state).toBe('sent');
+    expect(rows.find((r) => r.user_id === coOwner.userId)).toMatchObject({
+      state: 'suppressed',
+      reason: 'opt_out',
+    });
+    const gifts = await recipientsOf('payment_received');
+    expect(gifts.find((r) => r.user_id === owner.userId)?.reason).toBe('opt_out');
+    expect(gifts.find((r) => r.user_id === coOwner.userId)?.state).toBe('sent');
+  });
+  it('new_message honours the master switch, launch cohort and allowlist gates', async () => {
+    const owner = await seed();
+    const contribution = await gift(owner);
+    const payment = await approved(owner, contribution, true, 'Oi');
+    await build({ enabled: false, launchAt: null }).paymentFinalized(payment);
+    expect(await states('new_message')).toEqual([]);
+    await build({ recipientAllowlist: ['someone-else@example.invalid'] }).paymentFinalized(payment);
+    await build({ recipientAllowlist: ['someone-else@example.invalid'] }).dispatch();
+    expect(await recipientsOf('new_message')).toMatchObject([
+      { state: 'suppressed', reason: 'not_allowlisted' },
+    ]);
+    const old = await seed({ oldCampaign: true });
+    const oldContribution = await gift(old);
+    await service.paymentFinalized(await approved(old, oldContribution, true, 'Oi'));
+    expect(await recipientsOf('new_message')).toHaveLength(1);
+    expect(sink.messages).toHaveLength(0);
+  });
+  it('the scanner recovers a missed new_message after the grace period, owners only', async () => {
+    const owner = await seed();
+    const contribution = await gift(owner);
+    await approved(owner, contribution, true, 'Chegou atrasado');
+    await service.scan();
+    expect(await states('new_message')).toEqual([]);
+    now = new Date(now.getTime() + 11 * MINUTE);
+    const coOwner = await seed({ campaign: owner.campaign, tenant: owner.tenant, role: 'owner' });
+    await giftEmailsOff(owner, coOwner);
+    await service.scan();
+    await service.scan();
+    await dispatchUntilSettled();
+    const rows = await recipientsOf('new_message');
+    expect(rows.map((r) => r.user_id).sort()).toEqual([owner.userId, coOwner.userId].sort());
+    expect(rows.every((r) => r.state === 'sent')).toBe(true);
+  });
+  it('the scanner backfills new_message when only payment_received was admitted', async () => {
+    const owner = await seed();
+    const contribution = await gift(owner);
+    const payment = await approved(owner, contribution, true, 'Só o recado faltou');
+    await build({ enabledTypes: ['payment_received'] }).paymentFinalized(payment);
+    expect(await states('payment_received')).toEqual(['pending']);
+    expect(await states('new_message')).toEqual([]);
+    now = new Date(now.getTime() + 11 * MINUTE);
+    await service.scan();
+    expect(await states('new_message')).toEqual(['pending']);
+    expect(await states('payment_received')).toEqual(['pending']);
+  });
+  it('new_message is suppressed when the payment is no longer approved at send time', async () => {
+    const owner = await seed();
+    const contribution = await gift(owner);
+    await giftEmailsOff(owner);
+    const payment = await approved(owner, contribution, true, 'Oi');
+    await service.paymentFinalized(payment);
+    await test.db
+      .updateTable('pagamentos')
+      .set({ status: 'estornado' })
+      .where('id', '=', payment.id)
+      .execute();
+    await dispatchUntilSettled();
+    expect(await recipientsOf('new_message')).toMatchObject([
+      { state: 'suppressed', reason: 'payment_not_approved' },
+    ]);
+  });
+  it('presence_confirmed goes to owners and co-owners once per guest, even across sim→nao→sim', async () => {
+    const owner = await seed();
+    const coOwner = await seed({ campaign: owner.campaign, tenant: owner.tenant, role: 'owner' });
+    await seed({
+      campaign: owner.campaign,
+      tenant: owner.tenant,
+      role: 'membro',
+      permissions: ['convidados:ver', 'extrato:ver'],
+    });
+    const convidado = await guest(owner);
+    await Promise.all([
+      service.presenceConfirmed(owner.campaign, convidado, 'Vovó Synthetic'),
+      service.presenceConfirmed(owner.campaign, convidado, 'Vovó Synthetic'),
+    ]);
+    await service.dispatch();
+    await service.presenceConfirmed(owner.campaign, convidado, 'Vovó Synthetic');
+    await service.dispatch();
+    const rows = await recipientsOf('presence_confirmed');
+    expect(rows.map((r) => r.user_id).sort()).toEqual([owner.userId, coOwner.userId].sort());
+    expect(rows.map((r) => r.state)).toEqual(['sent', 'sent']);
+    const messages = decoded().filter((m) => m.includes('/convidados'));
+    expect(messages).toHaveLength(2);
+    expect(messages[0]).toContain('Vov');
+    expect(sink.messages).toHaveLength(2);
+  });
+  it('presence_confirmed respects per-recipient opt-out and a guest who changed their answer', async () => {
+    const owner = await seed();
+    const coOwner = await seed({ campaign: owner.campaign, tenant: owner.tenant, role: 'owner' });
+    await new LifecycleEmailPreferencesPostgres(test.db).setPreferences(
+      coOwner.userId,
+      coOwner.tenant,
+      { presence_confirmed: false },
+    );
+    const convidado = await guest(owner);
+    await service.presenceConfirmed(owner.campaign, convidado, 'Vovó Synthetic');
+    await service.dispatch();
+    let rows = await recipientsOf('presence_confirmed');
+    expect(rows.find((r) => r.user_id === owner.userId)?.state).toBe('sent');
+    expect(rows.find((r) => r.user_id === coOwner.userId)?.reason).toBe('opt_out');
+    const changed = await guest(owner);
+    await service.presenceConfirmed(owner.campaign, changed, 'Vovó Synthetic');
+    await sql`UPDATE convidados SET presenca='nao' WHERE id=${changed}`.execute(test.db);
+    await service.dispatch();
+    rows = await recipientsOf('presence_confirmed');
+    expect(rows.filter((r) => r.reason === 'presence_changed')).toHaveLength(1);
+    expect(sink.messages).toHaveLength(1);
+  });
+  it('presence_confirmed ignores a guest of another campaign and pre-launch campaigns', async () => {
+    const owner = await seed();
+    const other = await seed();
+    const foreign = await guest(other);
+    await service.presenceConfirmed(owner.campaign, foreign, 'Intrusa');
+    await service.dispatch();
+    expect(await recipientsOf('presence_confirmed')).toMatchObject([
+      { state: 'suppressed', reason: 'presence_changed' },
+    ]);
+    const old = await seed({ oldCampaign: true });
+    await service.presenceConfirmed(old.campaign, await guest(old), 'Vovó');
+    expect(await recipientsOf('presence_confirmed')).toHaveLength(1);
+    expect(sink.messages).toHaveLength(0);
+  });
   it('quarantines abandoned sending claims on restart', async () => {
     await seed();
     await service.scan();
@@ -800,6 +1097,48 @@ describe('lifecycle real Postgres and loopback TLS SMTP', () => {
       await deps.lifecycleEmail.dispatch();
       expect(await states('payment_received')).toEqual(['sent']);
       expect(sink.messages).toHaveLength(1);
+    } finally {
+      await deps.db.destroy();
+    }
+  });
+  it('production wiring admits owner alerts for a recado and an RSVP through the composition root', async () => {
+    const owner = await seed();
+    const contribution = await gift(owner);
+    const payment = await approved(owner, contribution, true, 'Pelo composition root');
+    const convidado = await guest(owner);
+    const origin = 'https://staging.example.invalid';
+    const deps = buildServerDeps(
+      loadEnv({
+        NODE_ENV: 'test',
+        DATABASE_URL: test.connectionUri,
+        BETTER_AUTH_SECRET: 'synthetic-long-test-secret-32-characters',
+        BETTER_AUTH_URL: origin,
+        TRUSTED_ORIGINS: origin,
+        LIFECYCLE_EMAIL_ENABLED: 'true',
+        LIFECYCLE_EMAIL_LAUNCH_AT: launch.toISOString(),
+        LIFECYCLE_EMAIL_ALLOWED_RECIPIENTS: owner.email,
+        SMTP_HOST: 'smtp.sendgrid.net',
+        SMTP_PORT: String(sink.port),
+        SMTP_SECURE: 'true',
+        SMTP_USER: smtpAuth.user,
+        SMTP_PASS: smtpAuth.pass,
+      }),
+      { port: sink.port, ca: sink.ca },
+    );
+    try {
+      await finalizarPagamentoAprovado(deps, { idPagamento: payment.id });
+      await deps.lifecyclePresenceConfirmed?.(owner.campaign, convidado, 'Vovó Synthetic');
+      expect(await states('new_message')).toEqual(['pending']);
+      expect(await states('presence_confirmed')).toEqual(['pending']);
+      await dispatchUntilSettled(deps.lifecycleEmail);
+      // Presentes recebidos is on by default, so the recado rides in that email.
+      expect(await recipientsOf('new_message')).toMatchObject([
+        { state: 'suppressed', reason: 'covered_by_payment_received' },
+      ]);
+      expect(await states('payment_received')).toEqual(['sent']);
+      expect(await states('presence_confirmed')).toEqual(['sent']);
+      expect(sink.messages).toHaveLength(2);
+      expect(decoded().some((m) => m.includes('Pelo composition root'))).toBe(true);
     } finally {
       await deps.db.destroy();
     }

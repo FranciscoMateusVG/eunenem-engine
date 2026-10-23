@@ -365,6 +365,40 @@ describe('public RSVP convidado-first resolution (aperture-rvhlt)', () => {
     expect(JSON.stringify(eventos)).not.toContain('Convidada Analytics');
   });
 
+  it('F. lifecycle (aperture-851nu): presence_confirmed is admitted on every transition INTO sim, never for other answers, and a failing hook never fails the RSVP', async () => {
+    const rig = await buildRig();
+    const user = await rig.addUser(`rvhlt-presence-${randomUUID()}@example.com`);
+    const nova = await user.caller.campanhas.criar({ titulo: 'Lista Presença' });
+    const convidado = makeConvidado('Convidada Presença');
+    await rig.seedListaParaCampanha(nova.id, [convidado]);
+    const admitted: [string, string, string][] = [];
+    let fail = false;
+    (
+      rig.deps as { lifecyclePresenceConfirmed?: ServerDeps['lifecyclePresenceConfirmed'] }
+    ).lifecyclePresenceConfirmed = async (idCampanha, idConvidado, nome) => {
+      admitted.push([idCampanha, idConvidado, nome]);
+      if (fail) throw new Error('outbox down');
+    };
+    const rsvp = (presenca: 'sim' | 'talvez' | 'nao') =>
+      rig.anonCaller.eventoListaDeConvidados.confirmarPresenca({
+        slug: user.slug,
+        idConvidado: convidado.id,
+        presenca,
+      });
+
+    await rsvp('talvez');
+    expect(admitted).toEqual([]);
+    await rsvp('sim');
+    await rsvp('sim'); // same answer again: no new transition
+    expect(admitted).toEqual([[nova.id, convidado.id, 'Convidada Presença']]);
+    await rsvp('nao');
+    fail = true;
+    // Re-entering sim reaches the hook (the outbox dedupes per guest) and its
+    // failure is swallowed: the guest's answer is still saved.
+    await expect(rsvp('sim')).resolves.toMatchObject({ presenca: 'sim' });
+    expect(admitted).toHaveLength(2);
+  });
+
   it('D. unknown convidado → NOT_FOUND', async () => {
     const rig = await buildRig();
     const user = await rig.addUser(`rvhlt-unk-${randomUUID()}@example.com`);

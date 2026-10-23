@@ -110,7 +110,7 @@ export class LifecycleEmailService {
   async paymentFinalized(payment: Pagamento, recovered = false): Promise<void> {
     return lifecycleSpan('lifecycleEmail.paymentFinalized', async () => {
       if (
-        !this.active('payment_received') ||
+        (!this.active('payment_received') && !this.active('new_message')) ||
         payment.status !== 'aprovado' ||
         payment.criadoEm < this.launchAt()
       )
@@ -127,15 +127,43 @@ export class LifecycleEmailService {
         payment.intencao.idCampanha,
         payment.criadoEm,
         {
-          guestName: (payment.intencao.contribuinte?.nome || 'Uma pessoa querida').slice(0, 200),
-          ...(payment.intencao.contribuinte?.mensagem
-            ? { guestMessage: payment.intencao.contribuinte.mensagem.slice(0, 2000) }
-            : {}),
+          ...guestSnapshot(payment),
           gifts: rows
             .slice(0, 100)
             .map((r) => ({ name: r.name.slice(0, 200), quantity: r.quantity })),
         },
         recovered,
+      );
+      // A failed recado alert never blocks the gift email; the scanner backfills it.
+      try {
+        await this.messageReceived(payment);
+      } catch {
+        this.deps.report('lifecycle_email.message_admission_failed', {});
+      }
+    });
+  }
+  /** Owner alert for a recado; the caller already validated status and ledger. */
+  private async messageReceived(payment: Pagamento): Promise<void> {
+    if (!payment.intencao.contribuinte?.mensagem?.trim()) return;
+    await this.admit(
+      'new_message',
+      payment.id,
+      payment.intencao.idCampanha,
+      payment.criadoEm,
+      guestSnapshot(payment),
+      true,
+    );
+  }
+  /** Owner alert for a guest's RSVP "sim"; once per guest, whatever they answer later. */
+  async presenceConfirmed(campaignId: string, guestId: string, guestName: string): Promise<void> {
+    return lifecycleSpan('lifecycleEmail.presenceConfirmed', async () => {
+      await this.admit(
+        'presence_confirmed',
+        guestId,
+        campaignId,
+        this.deps.clock(),
+        { guestName: guestName.trim().slice(0, 200) || 'Um convidado' },
+        true,
       );
     });
   }
@@ -173,6 +201,21 @@ export class LifecycleEmailService {
           /* Corrupt ledger: no admission; cursor still advances. */
         }
       }
+      for (const row of candidates.messages) {
+        if (!this.active('new_message')) break;
+        const payment = await this.deps.pagamentoRepository.findById(row.id);
+        if (!payment || payment.status !== 'aprovado' || payment.criadoEm < this.launchAt())
+          continue;
+        try {
+          assertLancamentosConformamPagamento(
+            payment,
+            await this.deps.livroFinanceiroRepository.findLancamentosByIdPagamento(payment.id),
+          );
+          await this.messageReceived(payment);
+        } catch {
+          /* Corrupt ledger: no admission; cursor still advances. */
+        }
+      }
     });
   }
   async dispatch(limit = 100): Promise<void> {
@@ -184,6 +227,38 @@ export class LifecycleEmailService {
         await this.send(delivery);
       }
     });
+  }
+  /**
+   * One email per payment: the recado alert defers to THIS recipient's actual
+   * payment_received delivery for the same payment, never to the current
+   * preference. Accepted (or possibly accepted) → it already carried the recado;
+   * still queued → wait for it; suppressed, failed or absent → the alert goes out.
+   */
+  private async paymentEmailCoverage(
+    delivery: Delivery,
+    userId: string,
+  ): Promise<'covered' | 'wait' | 'none'> {
+    const state = await this.deps.repository.paymentEmailState(delivery.subject_id, userId);
+    if (state === 'sent' || state === 'unknown') return 'covered';
+    if (state === 'pending' || state === 'sending') return 'wait';
+    return 'none';
+  }
+  /** True when the recado alert was settled (suppressed or deferred) instead of sent. */
+  private async settledByPaymentEmail(delivery: Delivery, userId: string): Promise<boolean> {
+    if (delivery.type !== 'new_message') return false;
+    const coverage = await this.paymentEmailCoverage(delivery, userId);
+    if (coverage === 'covered') {
+      await this.finish(delivery.delivery_id, 'suppressed', 'covered_by_payment_received');
+      return true;
+    }
+    if (coverage === 'wait') {
+      await this.deps.repository.defer(
+        delivery.delivery_id,
+        new Date(this.deps.clock().getTime() + 60_000),
+      );
+      return true;
+    }
+    return false;
   }
   private finish(id: string, state: string, reason: string): Promise<void> {
     return this.deps.repository.finish(id, state, reason, this.deps.clock());
@@ -222,7 +297,9 @@ export class LifecycleEmailService {
       await suppress('opt_out');
       return;
     }
-    if (delivery.type === 'payment_received') {
+    // One email per payment: "presente recebido" already carries the recado.
+    if (await this.settledByPaymentEmail(delivery, recipient.user_id)) return;
+    if (delivery.type === 'payment_received' || delivery.type === 'new_message') {
       const payment = await this.deps.pagamentoRepository.findById(delivery.subject_id);
       if (!payment || payment.status !== 'aprovado') {
         await suppress('payment_not_approved');
@@ -248,6 +325,16 @@ export class LifecycleEmailService {
         await suppress('event_date_changed');
         return;
       }
+    }
+    if (
+      delivery.type === 'presence_confirmed' &&
+      !(await this.deps.repository.presenceStillConfirmed(
+        delivery.campaign_id,
+        delivery.subject_id,
+      ))
+    ) {
+      await suppress('presence_changed');
+      return;
     }
     const ownerName = await this.deps.repository.ownerName(delivery.campaign_id);
     const origin = new URL(this.config.origin).origin;
@@ -314,8 +401,9 @@ export class LifecycleEmailService {
       await suppress('recipient_changed');
       return;
     }
+    if (await this.settledByPaymentEmail(delivery, recipient.user_id)) return;
     if (
-      delivery.type === 'payment_received' &&
+      (delivery.type === 'payment_received' || delivery.type === 'new_message') &&
       (await this.deps.pagamentoRepository.findById(delivery.subject_id))?.status !== 'aprovado'
     ) {
       await suppress('payment_not_approved');
@@ -330,6 +418,16 @@ export class LifecycleEmailService {
       ))
     ) {
       await suppress('event_date_changed');
+      return;
+    }
+    if (
+      delivery.type === 'presence_confirmed' &&
+      !(await this.deps.repository.presenceStillConfirmed(
+        delivery.campaign_id,
+        delivery.subject_id,
+      ))
+    ) {
+      await suppress('presence_changed');
       return;
     }
     try {
@@ -370,6 +468,13 @@ export class LifecycleEmailService {
     // A crash or DB failure here leaves sending -> unknown, NEVER a blind retry.
     await this.finish(delivery.delivery_id, 'sent', 'accepted');
   }
+}
+function guestSnapshot(payment: Pagamento): Snapshot {
+  const mensagem = payment.intencao.contribuinte?.mensagem;
+  return {
+    guestName: (payment.intencao.contribuinte?.nome || 'Uma pessoa querida').slice(0, 200),
+    ...(mensagem ? { guestMessage: mensagem.slice(0, 2000) } : {}),
+  };
 }
 function definitelyRejected(error: unknown): boolean {
   if (!error || typeof error !== 'object') return false;

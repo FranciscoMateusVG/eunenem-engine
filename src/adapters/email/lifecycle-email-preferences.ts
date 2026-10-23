@@ -3,6 +3,8 @@ export const LIFECYCLE_EMAIL_TYPES = [
   'list_ready',
   'event_reminder',
   'payment_received',
+  'new_message',
+  'presence_confirmed',
 ] as const;
 export type LifecycleEmailType = (typeof LIFECYCLE_EMAIL_TYPES)[number];
 export type LifecycleEmailPreferences = Record<LifecycleEmailType, boolean>;

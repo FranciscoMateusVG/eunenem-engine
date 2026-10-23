@@ -28,6 +28,8 @@ export const LIFECYCLE_EMAIL_TYPES = [
   'list_ready',
   'event_reminder',
   'payment_received',
+  'new_message',
+  'presence_confirmed',
 ] as const;
 
 export type LifecycleEmailRenderType = (typeof LIFECYCLE_EMAIL_TYPES)[number];
@@ -69,6 +71,15 @@ export interface LifecycleEmailVars {
     gifts: readonly { name: string; quantity: number }[];
     /** false for members with extrato:ver — neutral third-person copy. */
     recipientIsOwner: boolean;
+  };
+  /** Owners and co-owners only: a guest left a recado with their gift. */
+  new_message: LifecycleEmailCommonVars & {
+    guestName?: string | null;
+    guestMessage?: string | null;
+  };
+  /** Owners and co-owners only: a guest answered "sim" on the RSVP page. */
+  presence_confirmed: LifecycleEmailCommonVars & {
+    guestName?: string | null;
   };
 }
 
@@ -586,12 +597,7 @@ function renderPaymentReceived(v: LifecycleEmailVars['payment_received']): Rende
         ? esc(giftLabel(gifts[0] as { name: string; quantity: number }))
         : gifts.map((g) => `&bull; ${esc(giftLabel(g))}`).join('<br>');
 
-  const recadinho = message
-    ? `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="${C.soft}" style="background-color:${C.soft};border:1px solid ${C.line};border-radius:16px;border-collapse:separate;margin:8px 0 20px"><tr><td style="padding:20px 24px">
-${eyebrow(guest ? `recadinho de ${guest}` : 'recadinho', 'left', '0 0 8px')}
-<div style="font-family:${HAND};font-size:22px;line-height:1.35;color:${C.ink}">“${escMultiline(message)}”</div>
-</td></tr></table>`
-    : '';
+  const recadinho = message ? recadoBlock(guest, message) : '';
 
   const rows = [
     header(v.assetBaseUrl, true),
@@ -640,6 +646,98 @@ ${handTitle('feliz por você,<br>time EuNeném', 22)}`,
   return { subject, html: documentShell({ subject, preheader: `${guestLabel} escolheu um presente pro bebê ♡`, rows }), text };
 }
 
+const OWNER_ALERT_REASON =
+  'você recebeu este e-mail porque tem um chá de bebê na EuNeném. dá pra desligar este aviso a qualquer momento.';
+
+function recadoBlock(guest: string | null, message: string): string {
+  return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="${C.soft}" style="background-color:${C.soft};border:1px solid ${C.line};border-radius:16px;border-collapse:separate;margin:8px 0 20px"><tr><td style="padding:20px 24px">
+${eyebrow(guest ? `recadinho de ${guest}` : 'recadinho', 'left', '0 0 8px')}
+<div style="font-family:${HAND};font-size:22px;line-height:1.35;color:${C.ink}">“${escMultiline(message)}”</div>
+</td></tr></table>`;
+}
+
+function renderNewMessage(v: LifecycleEmailVars['new_message']): RenderedLifecycleEmail {
+  const recipient = clean(v.recipientName);
+  const guest = clean(v.guestName);
+  const guestLabel = guest ?? 'alguém';
+  const message = clean(v.guestMessage);
+  const messagesUrl = `${v.dashboardUrl}/mensagens`;
+  const subject = `${guestLabel} deixou um recadinho pro seu bebê ♡`;
+  const greeting = recipient ? `${recipient}, chegou um recadinho novo.` : 'chegou um recadinho novo.';
+  const intro = 'junto com o presente, veio um carinho em palavras — desses que dá vontade de guardar.';
+  const rows = [
+    header(v.assetBaseUrl, true),
+    hero({ eyebrow: 'novo recado', title: 'chegou um recadinho<br>pro seu bebê', align: 'center' }),
+    card(
+      `${para(esc(greeting))}
+${para(`<strong style="color:${C.ink}">${esc(guestLabel)}</strong> ${esc(intro)}`)}
+${message ? recadoBlock(guest, message) : ''}
+${para('todos os recados ficam guardados no seu painel, pra você ler com calma sempre que quiser.', `color:${C.muted};font-size:14px`)}
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">${button('ver recados', messagesUrl)}</table>
+${handTitle('com carinho,<br>time EuNeném', 22)}`,
+      '40px 44px',
+    ),
+    footer({ logo: logo(v.assetBaseUrl, 112), reason: OWNER_ALERT_REASON, unsubscribeUrl: v.unsubscribeUrl, preferencesUrl: v.preferencesUrl }),
+  ].join('\n');
+  const text = [
+    subject,
+    '',
+    greeting,
+    '',
+    `${guestLabel} ${intro}`,
+    ...(message ? ['', guest ? `recadinho de ${guest}:` : 'recadinho:', `“${message}”`] : []),
+    '',
+    `Ver recados: ${messagesUrl}`,
+    '',
+    'com carinho,',
+    'time EuNeném',
+    '',
+    textFooter(v, OWNER_ALERT_REASON, false),
+  ].join('\n');
+  return { subject, html: documentShell({ subject, preheader: `${guestLabel} deixou um recadinho no seu chá ♡`, rows }), text };
+}
+
+function renderPresenceConfirmed(v: LifecycleEmailVars['presence_confirmed']): RenderedLifecycleEmail {
+  const recipient = clean(v.recipientName);
+  const guest = clean(v.guestName);
+  const guestLabel = guest ?? 'um convidado';
+  const guestsUrl = `${v.dashboardUrl}/convidados`;
+  const subject = `${guestLabel} confirmou presença no seu chá ♡`;
+  const greeting = recipient ? `${recipient}, tem novidade na sua lista de convidados.` : 'tem novidade na sua lista de convidados.';
+  const confirmed = 'respondeu ao seu convite e confirmou presença. mais alguém pra celebrar a chegada do seu bebê!';
+  const rows = [
+    header(v.assetBaseUrl, true),
+    hero({ eyebrow: 'presença confirmada', title: 'mais alguém<br>vai estar lá ♡', align: 'center' }),
+    card(
+      `${para(esc(greeting))}
+<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:8px 0 20px"><tr>
+<td valign="top" style="padding-right:14px">${iconTile('&#10003;', C.pink, '#e78fa7')}</td>
+<td valign="top">${eyebrow('confirmou presença', 'left', '2px 0 4px')}<div style="font-family:${SANS};font-size:15px;line-height:22px;color:${C.body}"><strong style="color:${C.ink}">${esc(guestLabel)}</strong> ${esc(confirmed)}</div></td>
+</tr></table>
+${para('a lista completa, com quem já respondeu, fica no seu painel.', `color:${C.muted};font-size:14px`)}
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">${button('ver convidados', guestsUrl)}</table>
+${handTitle('com carinho,<br>time EuNeném', 22)}`,
+      '40px 44px',
+    ),
+    footer({ logo: logo(v.assetBaseUrl, 112), reason: OWNER_ALERT_REASON, unsubscribeUrl: v.unsubscribeUrl, preferencesUrl: v.preferencesUrl }),
+  ].join('\n');
+  const text = [
+    subject,
+    '',
+    greeting,
+    '',
+    `${guestLabel} ${confirmed}`,
+    '',
+    `Ver convidados: ${guestsUrl}`,
+    '',
+    'com carinho,',
+    'time EuNeném',
+    '',
+    textFooter(v, OWNER_ALERT_REASON, false),
+  ].join('\n');
+  return { subject, html: documentShell({ subject, preheader: `${guestLabel} confirmou presença ♡`, rows }), text };
+}
+
 export function renderLifecycleEmail<T extends LifecycleEmailRenderType>(
   type: T,
   vars: LifecycleEmailVars[T],
@@ -653,6 +751,10 @@ export function renderLifecycleEmail<T extends LifecycleEmailRenderType>(
       return renderEventReminder(vars as LifecycleEmailVars['event_reminder']);
     case 'payment_received':
       return renderPaymentReceived(vars as LifecycleEmailVars['payment_received']);
+    case 'new_message':
+      return renderNewMessage(vars as LifecycleEmailVars['new_message']);
+    case 'presence_confirmed':
+      return renderPresenceConfirmed(vars as LifecycleEmailVars['presence_confirmed']);
     default:
       throw new Error(`unknown lifecycle email type: ${String(type)}`);
   }
