@@ -106,7 +106,7 @@ describe('Receita 1b — cabeçalho', () => {
       renderToStaticMarkup(React.createElement(ReceitaCabecalho, { hoje: '2026-10-05' })),
     );
     expect(t).toContain('Receita EuNeném');
-    expect(t).toContain('Taxas da plataforma menos cancelamentos.');
+    expect(t).toContain('Taxas da plataforma e adicional do cartão, menos cancelamentos.');
     expect(t).toContain('Atualizado 05/10/2026 · horário de São Paulo');
   });
 });
@@ -245,7 +245,7 @@ describe('Receita 1b — notas e aviso', () => {
   it('as duas definições ficam no rodapé', () => {
     const t = texto(render(painel()));
     expect(t).toContain(
-      'Tarifas EuNeném: taxas registradas na data do pagamento aprovado, menos cancelamentos na data em que ocorreram.',
+      'Tarifas EuNeném: taxas da plataforma e adicional do cartão registrados na data do pagamento aprovado, menos cancelamentos na data em que ocorreram.',
     );
     expect(t).toContain(
       'Recebido no banco: soma dos pagamentos aprovados, menos estornos. É uma estimativa: o custo do provedor e o valor que de fato caiu na conta não são registrados.',
