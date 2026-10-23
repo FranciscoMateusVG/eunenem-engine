@@ -1,3 +1,4 @@
+import { registerProviderFeesJob } from './server/jobs/provider-fees.pgboss.js';
 import './src/lib/glitchtip/instrument.js'; // MUST stay first — GlitchTip/Sentry init (aperture-sm4el)
 import { serve } from '@hono/node-server';
 import { serveStatic } from '@hono/node-server/serve-static';
@@ -122,6 +123,11 @@ try {
       registerPixCobrancaReconciliationJob(deps.boss, deps, lifecycle),
     );
   }
+
+  // Read-only historical count before the worker starts persisting observations.
+  const feeDryRun = await lifecycle.startupStep(() => deps.providerFeeSync.run({ dryRun: true }));
+  console.log('provider_fees.dry_run', feeDryRun);
+  await lifecycle.startupStep(() => registerProviderFeesJob(deps.boss, deps.providerFeeSync, lifecycle));
 
   await lifecycle.startupStep(() => registerLifecycleEmailJob(deps.boss, deps.lifecycleEmail, lifecycle));
 
