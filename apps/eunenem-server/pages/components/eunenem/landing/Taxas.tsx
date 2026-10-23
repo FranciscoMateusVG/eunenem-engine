@@ -12,8 +12,8 @@ type FeeItem = {
 const FEE_ITEMS: FeeItem[] = [
   {
     label: 'Pix',
-    value: 'confirmado',
-    detail: 'saldo disponível para solicitar saque',
+    value: '10 min',
+    detail: 'após o convidado pagar',
     iconBg: 'f1',
     icon: (
       <svg
@@ -30,8 +30,8 @@ const FEE_ITEMS: FeeItem[] = [
   },
   {
     label: 'Cartão',
-    value: 'data no extrato',
-    detail: 'data prevista informada no extrato',
+    value: '31 dias',
+    detail: 'proteção contra estorno',
     iconBg: 'f2',
     icon: (
       <svg
@@ -49,8 +49,8 @@ const FEE_ITEMS: FeeItem[] = [
   },
   {
     label: 'Transferência',
-    value: 'até 3 dias úteis',
-    detail: 'após solicitar o saque',
+    value: '3 dias úteis',
+    detail: 'para a sua conta',
     iconBg: 'f3',
     icon: (
       <svg
@@ -94,9 +94,8 @@ export function Taxas() {
               pra você
             </div>
             <p>
-              Você recebe integralmente o valor cadastrado de cada presente
-              comprado. As taxas de serviço e os acréscimos aplicáveis ao
-              pagamento são cobrados de quem compra, no checkout.
+              Cada R$ 100 presenteados na sua lista cai inteirinho na sua conta. Sem
+              letra miúda.
             </p>
           </div>
           <div className="taxas-grid">
@@ -114,13 +113,6 @@ export function Taxas() {
             ))}
           </div>
         </div>
-        <p className="mt-6 mx-auto max-w-[760px] text-[15px] leading-relaxed text-ink-soft text-center">
-          O saque pode ser solicitado quando o pagamento estiver aprovado e o
-          saldo liberado. No Pix, a liberação ocorre após a confirmação do
-          pagamento. No cartão, depende da data informada pelo processador;
-          acompanhe a previsão e o saldo disponível no extrato. A solicitação de
-          saque e a transferência para sua conta são etapas distintas.
-        </p>
       </div>
     </section>
   );
