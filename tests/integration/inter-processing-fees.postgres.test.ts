@@ -297,3 +297,30 @@ it('dry-run counts historical days/payments without scan writes or provider requ
   expect(calls).toEqual([]);
   expect((await sql`SELECT day FROM provider_fee_inter_scans`.execute(testDb.db)).rows).toEqual([]);
 });
+it('429 cools down the entire account across due days and fresh worker instances', async () => {
+  await payment();
+  rateLimited = true;
+  let clock = now;
+  const makeWorker = () =>
+    new InterFeeSync(
+      testDb.db,
+      reader(),
+      '11111111-1111-4111-8111-111111111111',
+      () => clock,
+      true,
+    );
+  await makeWorker().run();
+  expect(
+    (await sql`SELECT day FROM provider_fee_inter_scans`.execute(testDb.db)).rows,
+  ).toHaveLength(2);
+  const before = calls.length;
+  clock = new Date(now.getTime() + 5 * 60_000);
+  await makeWorker().run();
+  expect(calls.length).toBe(before);
+  clock = new Date(now.getTime() + 59 * 60_000);
+  await makeWorker().run();
+  expect(calls.length).toBe(before);
+  clock = new Date(now.getTime() + 60 * 60_000);
+  await makeWorker().run();
+  expect(calls.length).toBeGreaterThan(before);
+});

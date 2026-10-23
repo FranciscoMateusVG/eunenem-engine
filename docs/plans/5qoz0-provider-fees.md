@@ -56,3 +56,5 @@ Only debit TARIFA + exact E2E is a candidate PIX fee. Missing E2E increments unm
 provider_fee_inter_scans: account_ref/day PK; last_success_at, last_reason, attempts, unmatched_count and lease/schedule fields. last_success_at null OR last_reason non-null means pending; attempts>=8 means exhausted. Successful empty statement does NOT confirm zero for a payment. Disabled/missing credentials/unobserved fee remains unknown.
 
 064 adds matching_ref + scans with down; no existing payment/ledger mutation. Real PG + HTTP loopback OAuth/statement tests; transport seam replaces TLS only. No external calls. Peppy authorized September sample67 TARIFA/67distinct idTransacao/exact E2E links/4485BRL cents; October429 pending, not replayed by tests.
+
+429 cooldown is account-wide: every claim checks all persisted scan rows for that account for `last_reason=rate_limited` with a future retry timestamp. No OAuth or statement HTTP is allowed during that interval, including from a fresh worker or another due day. Exhausted days still enforce the cooldown until it expires. No schema/UI contract change.

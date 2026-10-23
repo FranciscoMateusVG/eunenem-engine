@@ -34,9 +34,16 @@ export class InterFeeSync {
       SELECT ${account},d::date,${now} FROM generate_series('2026-09-01'::date,
         (${now}::timestamptz AT TIME ZONE 'America/Sao_Paulo')::date,'1 day'::interval) d
       ON CONFLICT DO NOTHING`.execute(this.db);
+    // A persisted 429 on ANY day blocks this account before OAuth or statement HTTP.
+    // Derive the cooldown from durable scan state, including exhausted days.
     const token = randomUUID();
     const rows = await sql<{ day: string; attempts: number }>`WITH due AS (
       SELECT account_ref,day FROM provider_fee_inter_scans WHERE account_ref=${account}
+      AND NOT EXISTS (
+        SELECT 1 FROM provider_fee_inter_scans cooldown
+        WHERE cooldown.account_ref=${account} AND cooldown.last_reason='rate_limited'
+          AND cooldown.next_attempt_at>${now}
+      )
       AND attempts<8 AND next_attempt_at<=${now} AND (claimed_until IS NULL OR claimed_until<=${now})
       ORDER BY next_attempt_at,day LIMIT 1 FOR UPDATE SKIP LOCKED
     ) UPDATE provider_fee_inter_scans s SET claim_token=${token}::uuid,
