@@ -26,7 +26,6 @@ export function TaxasEPrazosPage() {
         <header className="taxas-info-intro">
           <span className="taxas-info-tape" aria-hidden="true" />
           <h1>taxas e prazos <span aria-hidden="true">♡</span></h1>
-          <p>Tudo explicadinho, para você criar sua lista e receber seus presentes sem surpresas. 💛</p>
         </header>
 
         <section aria-labelledby="taxas-info-custo" className="taxas-info-section">
@@ -35,7 +34,7 @@ export function TaxasEPrazosPage() {
           <dl className="taxas-info-facts">
             <div><dt>Criar sua lista</dt><dd>Grátis</dd></div>
             <div><dt>Você recebe</dt><dd>100% <span>do valor dos presentes</span></dd></div>
-            <div><dt>Taxa de serviço</dt><dd>8,9% <span>paga pelo convidado</span></dd></div>
+            <div><dt>Taxa de serviço</dt><dd>8,98% <span>paga pelo convidado</span></dd></div>
           </dl>
           <p>Quando um convidado realiza o pagamento, ele verá o valor do presente e o valor total da contribuição antes de finalizar.</p>
           <p>Para você, <strong>não há nenhum desconto sobre o valor do presente</strong>. A taxa é paga pelo convidado e representa apenas um pequeno acréscimo ao valor da contribuição.</p>
@@ -50,11 +49,10 @@ export function TaxasEPrazosPage() {
           <div className="taxas-info-example">
             <dl>
               <div><dt>Valor do presente:</dt><dd>R$ 50,00</dd></div>
-              <div><dt>Taxa de serviço (8,9%):</dt><dd>R$ 4,45</dd></div>
-              <div className="taxas-info-total"><dt>Total pago pelo convidado:</dt><dd>R$ 54,45</dd></div>
+              <div><dt>Taxa de serviço (8,98%):</dt><dd>R$ 4,49</dd></div>
+              <div className="taxas-info-total"><dt>Total pago pelo convidado:</dt><dd>R$ 54,49</dd></div>
               <div className="taxas-info-recebe"><dt>Você recebe:</dt><dd>R$ 50,00</dd></div>
             </dl>
-            <p>Você escolhe o valor do presente, e recebe esse valor inteirinho. O convidado paga apenas um pequeno acréscimo referente à taxa de serviço. 💛</p>
           </div>
         </section>
 
