@@ -458,6 +458,32 @@ export interface PixCobrancaDevolucoes {
   status: string;
 }
 
+export interface ProviderFeeEvents {
+  account_ref: string;
+  amount_cents: Int8;
+  category: Generated<string>;
+  currency: string;
+  environment: string;
+  external_ref: string;
+  id: Generated<string>;
+  observed_at: Timestamp;
+  occurred_at: Timestamp;
+  payment_id: string | null;
+  provider: string;
+  source: string;
+}
+
+export interface ProviderFeeSync {
+  attempts: Generated<number>;
+  claim_token: string | null;
+  claimed_until: Timestamp | null;
+  last_reason: string | null;
+  next_attempt_at: Generated<Timestamp>;
+  payment_id: string;
+  status: Generated<string>;
+  updated_at: Generated<Timestamp>;
+}
+
 export interface RateLimit {
   count: Generated<number>;
   id: string;
@@ -662,6 +688,8 @@ export interface DB {
   perfil_campanhas: PerfilCampanhas;
   perfil_criadores: PerfilCriadores;
   pix_cobranca_devolucoes: PixCobrancaDevolucoes;
+  provider_fee_events: ProviderFeeEvents;
+  provider_fee_sync: ProviderFeeSync;
   rate_limit: RateLimit;
   recebedores: Recebedores;
   repasse_reconciliacao_candidatos: RepasseReconciliacaoCandidatos;

@@ -484,6 +484,14 @@ describe('Migration round-trip', () => {
     //    this sequence must start at the LATEST migration and walk earlier.
     //    Adding a new migration on top REQUIRES prepending its down-step here.
 
+    // 063 observed provider fees; preserve the historical tables below.
+    expect(await tableExists(db, 'provider_fee_events')).toBe(true);
+    expect(await tableExists(db, 'provider_fee_sync')).toBe(true);
+    const downProviderFees = await migrator.migrateDown();
+    expect(downProviderFees.error).toBeUndefined();
+    expect(await tableExists(db, 'provider_fee_events')).toBe(false);
+    expect(await tableExists(db, 'provider_fee_sync')).toBe(false);
+
     // 062 is a historical no-op: the design-only settings page needs no tables.
     for (const table of [
       'campanha_privacidade',

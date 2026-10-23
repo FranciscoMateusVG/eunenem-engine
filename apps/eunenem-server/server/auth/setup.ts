@@ -1,3 +1,5 @@
+import { ProviderFeeSync } from '../../../../src/use-cases/pagamentos/provider-fee-sync.js';
+import { StripeProcessingFeeReader } from '../../../../src/adapters/pagamentos/stripe-processing-fee-reader.js';
 import { LifecycleEmailService } from '../../../../src/use-cases/email/lifecycle-email.js';
 import { LifecycleEmailRepositoryPostgres } from '../../../../src/adapters/email/lifecycle-email.postgres.js';
 import { LifecycleEmailPreferencesPostgres } from '../../../../src/adapters/email/lifecycle-email-preferences.postgres.js';
@@ -331,6 +333,7 @@ export interface ServerDeps {
    * singletons — no per-request state.
    */
   readonly boss: PgBoss;
+  readonly providerFeeSync: ProviderFeeSync;
   readonly repasseJobEnqueuer: RepasseJobEnqueuer;
   readonly transferenciaProvider: TransferenciaProvider;
   /**
@@ -499,6 +502,7 @@ const ServerEnvSchema = z
       .string()
       .min(1, 'DATABASE_URL required (postgres connection string for the engine schema)'),
     NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
+    PROVIDER_FEES_ENABLED: z.enum(['true', 'false']).default('false'),
     /**
      * Stripe server-side keys (aperture-xaha2). REQUIRED in production
      * for the PagamentoProviderStripe DI gate. In development/test the
@@ -1287,7 +1291,12 @@ export function buildServerDeps(
       ...(emailAllowlist ? { recipientAllowlist: emailAllowlist } : {}),
     },
   );
+  const providerFeeSync = new ProviderFeeSync(db,
+    env.STRIPE_SECRET_KEY.length > 0 && !useFakeProviderSeam
+      ? new StripeProcessingFeeReader(getStripe()) : null, ID_PLATAFORMA_EUNENEM, () => new Date(), env.PROVIDER_FEES_ENABLED === 'true');
+
   return {
+    providerFeeSync,
     lifecycleEmail, lifecycleEmailTokens, lifecycleEmailPreferences,
     lifecyclePaymentFinalized: (payment) => lifecycleEmail.paymentFinalized(payment),
     contextoCompartilhamentoOnboarding: (usuarioId, idConta, plataformaId) => new CampanhaCompartilhamentoPostgres(db).contextoOnboarding(usuarioId, idConta, plataformaId),
