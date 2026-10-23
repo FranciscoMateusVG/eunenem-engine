@@ -75,11 +75,57 @@ export function DespesasCabecalho({ hoje }: { hoje: string | null }) {
   );
 }
 
+/**
+ * Estado do valor de uma coluna. `completo`: tudo o que devia ser observado
+ * foi. Caso contrário o número é só o subtotal observado — e, sem nada
+ * observado, não há número: "— pendente", nunca R$ 0,00.
+ */
+export type Completude =
+  | { readonly completo: true }
+  | { readonly completo: false; readonly semValor: string; readonly marca: string };
+
+const COMPLETO: Completude = { completo: true };
+
+function completudeStripe(c: Contagem | null): Completude {
+  if (!c) return { completo: false, semValor: "— não medido", marca: "observados" };
+  if (c.pendentes > 0) return { completo: false, semValor: "— pendente", marca: "observados" };
+  if (c.falhos > 0) return { completo: false, semValor: "— falha", marca: "observados" };
+  return COMPLETO;
+}
+
+function ValorKpi({ valor, completude }: { valor: number; completude: Completude }) {
+  const classe =
+    "whitespace-nowrap text-[26px] font-semibold leading-[1.1] tracking-[-0.02em] tabular-nums";
+  if (completude.completo) {
+    return (
+      <p data-testid="despesas-kpi-valor" data-completo="true" className={`${classe} text-ink`}>
+        {formatBRL(valor)}
+      </p>
+    );
+  }
+  if (valor === 0) {
+    return (
+      <p data-testid="despesas-kpi-valor" data-completo="false" className={`${classe} text-ink-mute`}>
+        {completude.semValor}
+      </p>
+    );
+  }
+  return (
+    <p data-testid="despesas-kpi-valor" data-completo="false" className={`${classe} text-ink`}>
+      {formatBRL(valor)}{" "}
+      <span className="text-[12px] font-normal tracking-normal text-ink-soft">
+        {completude.marca}
+      </span>
+    </p>
+  );
+}
+
 function ColunaKpi({
   serie,
   rotulo,
   cor,
   valor,
+  completude,
   comparacao,
   detalhe,
   divisor = false,
@@ -88,6 +134,7 @@ function ColunaKpi({
   rotulo: string;
   cor: string | null;
   valor: number;
+  completude: Completude;
   comparacao: string;
   detalhe?: string;
   divisor?: boolean;
@@ -103,9 +150,7 @@ function ColunaKpi({
         {cor ? <Amostra cor={cor} /> : null}
         {rotulo}
       </span>
-      <p className="whitespace-nowrap text-[26px] font-semibold leading-[1.1] tracking-[-0.02em] text-ink tabular-nums">
-        {formatBRL(valor)}
-      </p>
+      <ValorKpi valor={valor} completude={completude} />
       <p className="text-[12px] text-ink-soft">{comparacao}</p>
       {detalhe ? (
         <p data-testid={`despesas-kpi-${serie}-cobertura`} className="text-[11px] text-ink-mute">
@@ -136,6 +181,18 @@ function CartaoKpi({
   cobertura: DespesasPainelData["cobertura"];
 }) {
   const nv = atual.naoVinculadas;
+  const stripe = completudeStripe(coberturaStripe);
+  const inter: Completude = cobertura.inter.disponivel
+    ? COMPLETO
+    : { completo: false, semValor: "— não medido", marca: "observados" };
+  const total: Completude =
+    stripe.completo && inter.completo
+      ? COMPLETO
+      : {
+          completo: false,
+          semValor: stripe.completo ? "— não medido" : stripe.semValor,
+          marca: "observados · incompleto",
+        };
   return (
     <article
       data-testid={testId}
@@ -154,6 +211,7 @@ function CartaoKpi({
           rotulo="Stripe (cartão)"
           cor={COR_STRIPE.forte}
           valor={atual.stripeCents}
+          completude={stripe}
           comparacao={`${rotuloAnterior}: ${formatBRL(anterior.stripeCents)}`}
           detalhe={coberturaStripe ? resumoCobertura(coberturaStripe) : "cobertura ainda não medida"}
         />
@@ -162,6 +220,7 @@ function CartaoKpi({
           rotulo="Inter (PIX)"
           cor={COR_INTER.forte}
           valor={atual.interCents}
+          completude={inter}
           comparacao={`${rotuloAnterior}: ${formatBRL(anterior.interCents)}`}
           detalhe={cobertura.inter.disponivel ? undefined : "Inter: cobertura ainda não medida"}
           divisor
@@ -171,6 +230,7 @@ function CartaoKpi({
           rotulo="Total"
           cor={null}
           valor={atual.totalCents}
+          completude={total}
           comparacao={`${rotuloAnterior}: ${formatBRL(anterior.totalCents)}`}
           divisor
         />

@@ -121,16 +121,16 @@ describe('Despesas — KPIs', () => {
   it('mês atual: Stripe, Inter e total, com setembro como comparação', () => {
     const t = texto(trecho(html, 'despesas-kpi-mes', '</article>'));
     expect(t).toContain('Mês atual 01/10 – 05/10');
-    expect(t).toContain('Stripe (cartão) R$ 29,67 Setembro: R$ 133,40');
-    expect(t).toContain('Inter (PIX) R$ 2,97 Setembro: R$ 30,69');
-    expect(t).toContain('Total R$ 32,64 Setembro: R$ 164,09');
+    expect(t).toContain('Stripe (cartão) R$ 29,67 observados Setembro: R$ 133,40');
+    expect(t).toContain('Inter (PIX) R$ 2,97 observados Setembro: R$ 30,69');
+    expect(t).toContain('Total R$ 32,64 observados · incompleto Setembro: R$ 164,09');
   });
 
   it('semana atual: semana inteira, comparada com a anterior', () => {
     const t = texto(trecho(html, 'despesas-kpi-semana', '</article>'));
     expect(t).toContain('Semana atual 05 – 11/10');
-    expect(t).toContain('Stripe (cartão) R$ 4,67 Semana anterior: R$ 35,00');
-    expect(t).toContain('Total R$ 5,66 Semana anterior: R$ 37,97');
+    expect(t).toContain('Stripe (cartão) R$ 4,67 observados Semana anterior: R$ 35,00');
+    expect(t).toContain('Total R$ 5,66 observados · incompleto Semana anterior: R$ 37,97');
   });
 
   it('pendentes e falhos aparecem por extenso ao lado do valor, nunca como zero', () => {
@@ -146,6 +146,91 @@ describe('Despesas — KPIs', () => {
     expect(mes).toContain('Não vinculadas a pagamento: 3 tarifas · R$ 4,50 (fora do total)');
     const semana = texto(trecho(html, 'despesas-kpi-semana', '</article>'));
     expect(semana).toContain('Não vinculadas a pagamento: 2 tarifas · R$ 3,00 (fora do total)');
+  });
+});
+
+/** Texto do valor principal de cada coluna do cartão (sem comparação nem cobertura). */
+function valores(html: string, cartao: string): Record<string, string> {
+  const card = trecho(html, cartao, '</article>');
+  const out: Record<string, string> = {};
+  for (const serie of ['stripe', 'inter', 'total']) {
+    const coluna = trecho(card, `despesas-kpi-${serie}`, '</div>');
+    out[serie] = texto(trecho(coluna, 'despesas-kpi-valor', '</p>').replace(/^[^>]*>/, ''));
+  }
+  return out;
+}
+
+describe('Despesas — valor incompleto nunca aparece como zero', () => {
+  function semObservado(pendentes: number, falhos = 0): DespesasPainelData {
+    const grade = gradePainel('2026-10-05');
+    const agregado = agregarDespesas(grade, []);
+    const base = painel();
+    const c = { confirmados: 0, pendentes, falhos };
+    return {
+      ...base,
+      kpis: agregado.kpis,
+      meses: [...agregado.meses],
+      semanas: [...agregado.semanas],
+      cobertura: {
+        ...base.cobertura,
+        stripe: {
+          disponivel: true,
+          mesAtual: c,
+          semanaAtual: c,
+          desdeInicio: c,
+          desde: '2026-09-01',
+          ultimaLeituraEm: null,
+        },
+      },
+    };
+  }
+
+  it('0 observado + 1 pendente: "— pendente" em Stripe e Total, nunca R$ 0,00', () => {
+    const html = render(semObservado(1));
+    for (const cartao of ['despesas-kpi-mes', 'despesas-kpi-semana']) {
+      const t = texto(trecho(html, cartao, '</article>'));
+      expect(t).not.toMatch(/(Stripe \(cartão\)|Total) R\$ 0,00/);
+      const v = valores(html, cartao);
+      expect(v.stripe).toBe('— pendente');
+      expect(v.total).toBe('— pendente');
+      expect(v.inter).toBe('— não medido');
+      for (const valor of Object.values(v)) expect(valor).not.toMatch(/R\$\s0,00/);
+    }
+  });
+
+  it('0 observado + só falhas: "— falha"', () => {
+    expect(valores(render(semObservado(0, 2)), 'despesas-kpi-mes').stripe).toBe('— falha');
+  });
+
+  it('com pendentes, o valor observado vem marcado como subtotal; o total como incompleto', () => {
+    const v = valores(render(painel()), 'despesas-kpi-mes');
+    expect(v.stripe).toBe('R$ 29,67 observados');
+    expect(v.inter).toBe('R$ 2,97 observados');
+    expect(v.total).toBe('R$ 32,64 observados · incompleto');
+  });
+
+  it('cobertura completa: valor sem marca', () => {
+    const base = painel();
+    const completo = { confirmados: 4, pendentes: 0, falhos: 0 };
+    const html = render(
+      painel({
+        cobertura: {
+          inter: { disponivel: false, ultimaLeituraEm: null },
+          stripe: {
+            disponivel: true,
+            mesAtual: completo,
+            semanaAtual: completo,
+            desdeInicio: completo,
+            desde: '2026-09-01',
+            ultimaLeituraEm: base.cobertura.stripe.ultimaLeituraEm,
+          },
+        },
+      }),
+    );
+    const v = valores(html, 'despesas-kpi-mes');
+    expect(v.stripe).toBe('R$ 29,67');
+    // Inter segue não medido, então o total segue incompleto.
+    expect(v.total).toBe('R$ 32,64 observados · incompleto');
   });
 });
 
