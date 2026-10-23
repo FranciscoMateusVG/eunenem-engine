@@ -565,12 +565,17 @@ export class UsuarioRepositoryPostgres implements UsuarioRepository {
     return tracer.startActiveSpan('db.usuarios.desativarConta', async (span) => {
       span.setAttributes({ ...DB_USUARIOS_ATTRS, 'db.operation.name': 'UPDATE' });
       try {
-        await this.db
-          .updateTable('usuarios')
-          .set({ desativado_em: desativadoEm })
-          .where('id', '=', idUsuario)
-          .where('desativado_em', 'is', null)
-          .execute();
+        // One event: the account is disabled AND every session dies with it
+        // (users.id == usuarios.id). Nothing else is deleted.
+        await this.db.transaction().execute(async (trx) => {
+          await trx
+            .updateTable('usuarios')
+            .set({ desativado_em: desativadoEm })
+            .where('id', '=', idUsuario)
+            .where('desativado_em', 'is', null)
+            .execute();
+          await trx.deleteFrom('sessions').where('user_id', '=', idUsuario).execute();
+        });
         span.setStatus({ code: SpanStatusCode.OK });
       } catch (error: unknown) {
         span.recordException(error as Error);

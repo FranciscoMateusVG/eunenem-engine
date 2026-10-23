@@ -218,7 +218,10 @@ export interface UsuarioRepository {
    */
   marcarOnboardingConcluido(idUsuario: IdUsuario, concluidoEm: Date): Promise<void>;
 
-  /** Soft-disables the account, preserving all related business data. */
+  /**
+   * Soft-disables the account, preserving all related business data, and
+   * revokes every auth session of the user in the same transaction.
+   */
   desativarConta(idUsuario: IdUsuario, desativadoEm: Date): Promise<void>;
 
   /**

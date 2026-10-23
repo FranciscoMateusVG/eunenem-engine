@@ -1,4 +1,4 @@
-import { isCampaignPublicOwner } from './campaign-public-address.js';
+import { campanhaNoAr, isCampaignPublicOwner } from './campaign-public-address.js';
 import { createHash, randomBytes } from 'node:crypto';
 import { initTRPC, TRPCError } from '@trpc/server';
 import { z } from 'zod/v4';
@@ -320,6 +320,11 @@ async function resolvePaginaBySlug(
     }
   }
 
+  // aperture-851nu: sem owner com conta ativa, a campanha está fora do ar.
+  if (!(await campanhaNoAr(ctx, campanha.id))) {
+    throw new TRPCError({ code: 'NOT_FOUND', message: 'Pagina nao encontrada' });
+  }
+
   const opcaoPresentes = campanha.opcoes.find((o) => o.tipo === 'presente');
   if (!opcaoPresentes) {
     throw new TRPCError({ code: 'NOT_FOUND', message: 'Pagina nao encontrada' });
@@ -550,17 +555,27 @@ export const paginaRouter = t.router({
     .query(async ({ ctx, input }) => {
       const { campanha } = await resolvePaginaBySlug(ctx, input.slug, input.idCampanha);
 
+      // aperture-851nu: "Exibir recados publicamente" desligado → a página
+      // pública esconde a seção (`exibir: false`, sem recados). O painel
+      // (painelMensagens) continua listando tudo.
+      if (!(await ctx.deps.campanhaPrivacidadeRepository.exibeRecadosPublicamente(campanha.id))) {
+        return { exibir: false, recados: [] };
+      }
+
       const recados = await ctx.deps.pagamentoRepository.findMensagensMuralByCampanha(
         campanha.id,
         50,
       );
 
-      return recados.map((r) => ({
-        id: r.idPagamento as unknown as string,
-        contribuinteNome: r.contribuinteNome,
-        mensagem: r.mensagem,
-        criadoEm: r.criadoEm,
-      }));
+      return {
+        exibir: true,
+        recados: recados.map((r) => ({
+          id: r.idPagamento as unknown as string,
+          contribuinteNome: r.contribuinteNome,
+          mensagem: r.mensagem,
+          criadoEm: r.criadoEm,
+        })),
+      };
     }),
 
   /**
@@ -988,7 +1003,10 @@ export const paginaRouter = t.router({
       );
       const candidates = await Promise.all(
         campanhas.filter((c) => c.slug === alvo).map(async (c) =>
-          (await isCampaignPublicOwner(ctx, c.id, usuario.idConta)) ? c : undefined,
+          (await isCampaignPublicOwner(ctx, c.id, usuario.idConta)) &&
+          (await campanhaNoAr(ctx, c.id))
+            ? c
+            : undefined,
         ),
       );
       const campanha = candidates.find((c) => c !== undefined);

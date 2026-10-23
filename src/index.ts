@@ -840,12 +840,15 @@ export type {
   LifecycleEmailRepository,
   LifecycleEmailVars,
 } from './adapters/email/lifecycle-email-repository.js';
+export type { PendenciasDesativacaoRepository } from './adapters/usuario/pendencias-desativacao.js';
+export type { PendenciaDesativacao } from './domain/usuario/value-objects/pendencia-desativacao.js';
 export { ArrecadacaoRecebedorJaExisteError } from './errors/arrecadacao/recebedor-ja-existe.error.js';
 // Plan 0016 Phase 2 (aperture-eg1s2): cart-multi-campanha error.
 export { CarrinhoMultiplasCampanhasError } from './errors/checkout/carrinho-multiplas-campanhas.error.js';
 export { FinanceiroRepasseJaPendenteError } from './errors/pagamentos/financeiro/repasse-ja-pendente.error.js';
 export { FinanceiroRepasseNaoEncontradoError } from './errors/pagamentos/financeiro/repasse-nao-encontrado.error.js';
 export { FinanceiroRepasseStatusInvalidoError } from './errors/pagamentos/financeiro/repasse-status-invalido.error.js';
+export { ContaComPendenciasFinanceirasError } from './errors/usuario/conta-com-pendencias.error.js';
 export { UsuarioNaoEncontradoError } from './errors/usuario/nao-encontrado.error.js';
 export type {
   AdicionarAdministradorCampanhaDeps,

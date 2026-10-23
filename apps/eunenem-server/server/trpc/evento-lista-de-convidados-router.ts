@@ -29,6 +29,7 @@ import {
 } from '../../../../src/index.js';
 import { propsConvidadoCriado } from '../analytics/funil.js';
 import { distinctIdConvidado } from '../analytics/server-analytics.js';
+import { campanhaNoAr } from './campaign-public-address.js';
 import type { TrpcContext } from './context.js';
 import {
   CampanhaAcessoNegadoError,
@@ -234,7 +235,11 @@ async function resolveConvidadoPublico(
     throw new CampanhaSlugNaoEncontradaError('Usuario do slug nao encontrado');
   }
   const campanha = await ctx.deps.campanhaRepository.findById(evento.idCampanha);
-  if (!campanha || !campanha.idsAdministradores.includes(usuario.idConta)) {
+  if (
+    !campanha ||
+    !campanha.idsAdministradores.includes(usuario.idConta) ||
+    !(await campanhaNoAr(ctx, campanha.id))
+  ) {
     throw new ConvidadoNaoEncontradoError(idConvidado as IdConvidado, lista.id);
   }
 

@@ -8,6 +8,7 @@ import { useCampanhaRota } from "@/lib/campanha-rota";
 import { paginaSharePath } from "@/lib/painelRoutes";
 import { painelHref as buildPainelHref } from "@/lib/painelRoutes";
 import { sendEvent } from "@/lib/analytics";
+import { usePaginaMural } from "@/lib/paginaApi";
 
 // aperture-3d9t / aperture-uk8q1 — visitor page header.
 //
@@ -37,12 +38,20 @@ const NAV_LINKS = [
   { href: "#mural", label: "Mural" },
 ];
 
+/** aperture-851nu: no "Mural" anchor when the campanha hides its recados. */
+export function navLinks(exibirMural: boolean) {
+  return exibirMural ? NAV_LINKS : NAV_LINKS.filter((l) => l.href !== "#mural");
+}
+
 // aperture-t0ggy — the logo links back to the CURRENT page's slug (passed by
 // PaginaPage / PaginaSucessoPage), not a hardcoded "/pagina/francisco". Falls
 // back to the site root when no slug is supplied.
 export function Navbar({ slug }: { slug?: string } = {}) {
   // aperture-2v91z — the campanha the visitor is on (route-level provider).
   const idCampanhaNav = useCampanhaRota();
+  // aperture-851nu — same cached query as <Messages>; hidden mural → no chip.
+  const mural = usePaginaMural(slug);
+  const links = navLinks(mural.data?.exibir !== false);
   const [scrolled, setScrolled] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [activeSection, setActiveSection] = useState<string | null>(null);
@@ -159,7 +168,7 @@ export function Navbar({ slug }: { slug?: string } = {}) {
         <div className="hidden sm:flex items-center gap-3">
           <nav aria-label="Seções da página">
             <ul className="flex items-center gap-1 sm:gap-2 m-0 p-0 list-none">
-              {NAV_LINKS.map((link) => (
+              {links.map((link) => (
                 <li key={link.href}>
                   <a
                     href={link.href}
@@ -304,7 +313,7 @@ export function Navbar({ slug }: { slug?: string } = {}) {
                   owner sees it without opening the menu. Only the scroll-anchor
                   links remain inside the hamburger. */}
               <ul className="flex flex-col gap-1 m-0 p-0 list-none">
-                {NAV_LINKS.map((link) => (
+                {links.map((link) => (
                   <li key={link.href}>
                     <a
                       href={link.href}

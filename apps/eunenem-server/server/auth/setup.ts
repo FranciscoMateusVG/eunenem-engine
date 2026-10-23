@@ -5,6 +5,8 @@ import { StripeProcessingFeeReader } from '../../../../src/adapters/pagamentos/s
 import { LifecycleEmailService } from '../../../../src/use-cases/email/lifecycle-email.js';
 import { LifecycleEmailRepositoryPostgres } from '../../../../src/adapters/email/lifecycle-email.postgres.js';
 import { LifecycleEmailPreferencesPostgres } from '../../../../src/adapters/email/lifecycle-email-preferences.postgres.js';
+import type { CampanhaPrivacidadeRepository } from '../../../../src/adapters/arrecadacao/campanha-privacidade-repository.js';
+import { CampanhaPrivacidadeRepositoryPostgres } from '../../../../src/adapters/arrecadacao/campanha-privacidade-repository.postgres.js';
 import { createLifecycleEmailTokens, type LifecycleEmailTokens } from './lifecycle-email-tokens.js';
 import { renderLifecycleEmail } from './lifecycle-email.js';
 import { renderCampaignInviteEmail } from './campaign-invite-email.js';
@@ -190,6 +192,8 @@ export interface ServerDeps {
    * que exige uma ação específica (recebedor, saque, presentes, membros).
    */
   readonly campanhaMembrosRepository: CampanhaMembrosRepository;
+  /** "Exibir recados publicamente" por campanha (aperture-851nu). */
+  readonly campanhaPrivacidadeRepository: CampanhaPrivacidadeRepository;
   /**
    * Hook called by `campanhaMembros.remover` INSIDE its transaction (campanha
    * row already locked FOR UPDATE, before the membership rows are deleted) so
@@ -1071,6 +1075,7 @@ export function buildServerDeps(
   const recebedorRepository = new RecebedorRepositoryPostgres(db);
   const campanhaRepository = new CampanhaRepositoryPostgres(db, recebedorRepository);
   const campanhaMembrosRepository = new CampanhaMembrosRepositoryPostgres(db);
+  const campanhaPrivacidadeRepository = new CampanhaPrivacidadeRepositoryPostgres(db);
   const contribuicaoRepository = new ContribuicaoRepositoryPostgres(db);
   const eventoRepository = new EventoRepositoryPostgres(db);
   const conviteRepository = new ConviteRepositoryPostgres(db);
@@ -1335,6 +1340,7 @@ export function buildServerDeps(
     plataformaRepository,
     campanhaRepository,
     campanhaMembrosRepository,
+    campanhaPrivacidadeRepository,
     contribuicaoRepository,
     recebedorRepository,
     eventoRepository,

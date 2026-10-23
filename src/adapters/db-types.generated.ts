@@ -76,6 +76,12 @@ export interface CampanhaMembrosPermissoes {
   permissoes: Generated<string[]>;
 }
 
+export interface CampanhaPrivacidade {
+  atualizado_em: Generated<Timestamp>;
+  campanha_id: string;
+  exibir_recados: Generated<boolean>;
+}
+
 export interface Campanhas {
   criada_em: Generated<Timestamp>;
   id: string;
@@ -669,6 +675,7 @@ export interface DB {
   campanha_compartilhamento_audit: CampanhaCompartilhamentoAudit;
   campanha_convites: CampanhaConvites;
   campanha_membros_permissoes: CampanhaMembrosPermissoes;
+  campanha_privacidade: CampanhaPrivacidade;
   campanhas: Campanhas;
   catalogo_admin_audit_events: CatalogoAdminAuditEvents;
   catalogo_categorias: CatalogoCategorias;

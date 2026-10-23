@@ -37,7 +37,7 @@ export type PaginaContribuicao =
  * mensagem body, and the criadoEm timestamp. No PII beyond the nome
  * the contribuinte themselves chose to display.
  */
-export type PaginaMuralRecado = PaginaOutputs["obterMural"][number];
+export type PaginaMuralRecado = PaginaOutputs["obterMural"]["recados"][number];
 
 export type IniciarPagamentoInput = Omit<
   PaginaInputs["iniciarPagamentoContribuicao"],
@@ -95,12 +95,13 @@ export function usePaginaListaPresentes(slug: string) {
  * future tick can wire an invalidation hook if real-time freshness
  * becomes necessary.
  */
-export function usePaginaMural(slug: string) {
+export function usePaginaMural(slug: string | undefined) {
   // aperture-1yx1n — route campanha's mural; bare URL → server default.
   const idCampanha = useCampanhaRota();
+  const alvo = slug ?? "";
   return trpc.pagina.obterMural.useQuery(
-    idCampanha ? { slug, idCampanha } : { slug },
-    { staleTime: 30_000 },
+    idCampanha ? { slug: alvo, idCampanha } : { slug: alvo },
+    { staleTime: 30_000, enabled: alvo !== "" },
   );
 }
 

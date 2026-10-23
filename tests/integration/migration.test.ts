@@ -484,6 +484,14 @@ describe('Migration round-trip', () => {
     //    this sequence must start at the LATEST migration and walk earlier.
     //    Adding a new migration on top REQUIRES prepending its down-step here.
 
+    // 065 campanha_privacidade (aperture-851nu): "Exibir recados publicamente".
+    expect(await getColumn(db, 'campanha_privacidade', 'exibir_recados')).toMatchObject({
+      is_nullable: 'NO',
+    });
+    const downPrivacidade = await migrator.migrateDown();
+    expect(downPrivacidade.error).toBeUndefined();
+    expect(await tableExists(db, 'campanha_privacidade')).toBe(false);
+
     expect(await tableExists(db, 'provider_fee_inter_scans')).toBe(true);
     expect((await migrator.migrateDown()).error).toBeUndefined();
     expect(await tableExists(db, 'provider_fee_inter_scans')).toBe(false);

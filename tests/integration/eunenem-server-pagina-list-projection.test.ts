@@ -29,11 +29,14 @@
  *               = 45
  *   - valorComTaxaCartao = 109 + 45 = 154
  */
+
 import { randomUUID } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import type { ServerDeps } from '../../apps/eunenem-server/server/auth/setup.js';
 import type { TrpcContext } from '../../apps/eunenem-server/server/trpc/context.js';
 import { appRouter } from '../../apps/eunenem-server/server/trpc/router.js';
+import { CampanhaMembrosRepositoryMemory } from '../../src/adapters/arrecadacao/campanha-membros-repository.memory.js';
+import { CampanhaPrivacidadeRepositoryMemory } from '../../src/adapters/arrecadacao/campanha-privacidade-repository.memory.js';
 import { CampanhaRepositoryMemory } from '../../src/adapters/arrecadacao/campanha-repository.memory.js';
 import { ContribuicaoRepositoryMemory } from '../../src/adapters/arrecadacao/contribuicao-repository.memory.js';
 import { RecebedorRepositoryMemory } from '../../src/adapters/arrecadacao/recebedor-repository.memory.js';
@@ -82,6 +85,8 @@ function buildPaginaTestDeps(): ServerDeps {
     usuarioRepository,
     plataformaRepository,
     campanhaRepository,
+    campanhaMembrosRepository: new CampanhaMembrosRepositoryMemory(campanhaRepository),
+    campanhaPrivacidadeRepository: new CampanhaPrivacidadeRepositoryMemory(),
     contribuicaoRepository,
     recebedorRepository,
     pagamentoRepository,
