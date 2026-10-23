@@ -247,9 +247,9 @@ export function buildPainelMenu(
       items: [
         // TODO(aperture-5q39i): wire to the real perfil edit backend
         // (nome/foto/história) when trpc.usuario.updateProfile ships.
-        { id: "perfil", label: "Editar meu perfil", sub: "Nome, datas e informações do bebê", variant: null, icon: "edit-profile" },
-        { id: "personalizar", label: "Personalizar página", sub: "Fotos e cores da sua página", variant: null, icon: "edit-profile" },
-        { id: "configuracoes", label: "Configurações", sub: "Acessos, privacidade e notificações", variant: null, icon: "edit-profile" },
+        { id: "perfil", label: "editar meu perfil", sub: "Nome, datas e informações do bebê", variant: null, icon: "edit-profile" },
+        { id: "personalizar", label: "personalizar página", sub: "Fotos e cores da sua página", variant: null, icon: "edit-profile" },
+        { id: "configuracoes", label: "configurações", sub: "Acessos, privacidade e notificações", variant: null, icon: "edit-profile" },
         // aperture-tja4d — NO "verificado" badge. eunenem 2.0 performs ZERO
         // bank-data / PIX-key-ownership / identity verification (recebedores
         // supply a raw PIX chave; Inter has no DICT key-lookup — aperture-1n53f).
@@ -262,14 +262,14 @@ export function buildPainelMenu(
         // aperture-aqiu7, re-scoped to "IF a real verification ever ships").
         {
           id: "bancarios",
-          label: "Dados bancários",
+          label: "dados bancários",
           sub: "Informações para receber seus valores",
           variant: null,
           icon: "bank",
         },
         {
           id: "suporte",
-          label: "Fale com a gente",
+          label: "fale com a gente",
           sub: "Ajuda e atendimento",
           variant: null,
           icon: "phone",
