@@ -249,7 +249,6 @@ export function buildPainelMenu(
         // (nome/foto/história) when trpc.usuario.updateProfile ships.
         { id: "perfil", label: "Editar meu perfil", sub: "Nome, datas e informações do bebê", variant: null, icon: "edit-profile" },
         { id: "personalizar", label: "Personalizar página", sub: "Fotos e cores da sua página", variant: null, icon: "edit-profile" },
-        { id: "taxas-e-prazos", label: "Taxas e prazos", sub: "Entenda as taxas e quando receber", variant: null, icon: "bank" },
         { id: "configuracoes", label: "Configurações", sub: "Acessos, privacidade e notificações", variant: null, icon: "edit-profile" },
         // aperture-tja4d — NO "verificado" badge. eunenem 2.0 performs ZERO
         // bank-data / PIX-key-ownership / identity verification (recebedores

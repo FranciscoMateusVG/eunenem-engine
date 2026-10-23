@@ -42,18 +42,13 @@ test('painel compacto e configurações sem novas dependências de banco', async
     await expect(page.getByRole('link', { name: /Configurações/ })).toBeVisible();
     await expect(page.locator('.painel-top-strip-line')).toContainText('dias');
     await expect(page.locator('.painel-url-date')).not.toBeEmpty();
-    await expect(page.locator('#painel-group-conta').getByRole('link')).toHaveCount(6);
+    await expect(page.locator('#painel-group-conta').getByRole('link')).toHaveCount(5);
     await expect(
       page.locator('#painel-group-conta').getByRole('link', { name: /^compartilhar/i }),
     ).toHaveCount(0);
-    const taxasLink = page
-      .locator('#painel-group-conta')
-      .getByRole('link', { name: /^Taxas e prazos/ });
-    await expect(taxasLink).toHaveAttribute('href', '/taxas-e-prazos');
-    await taxasLink.click();
-    await expect(page).toHaveURL(/\/taxas-e-prazos$/);
-    await expect(page.getByRole('heading', { level: 1 })).toHaveText('taxas e prazos ♡');
-    await page.goto(base);
+    await expect(
+      page.locator('#painel-group-conta').getByRole('link', { name: /^Taxas e prazos/ }),
+    ).toHaveCount(0);
     for (const width of [320, 375, 390, 768, 1440]) {
       await page.setViewportSize({ width, height: 900 });
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
