@@ -44,3 +44,17 @@ Production sample (Peppy4447; read-only authorized,2026-10-23):30Stripe transact
 all expanded fee present. Inter September67TARIFA/67 exact E2E matches; October429
 is pending, not zero. These are not a seed or permission for further production
 writes. No automatic production deployment/promotion is authorized.
+
+## PR2 — Inter (migration 064)
+
+Existing mTLS banking credentials plus required INTER_CONTA_CORRENTE; separate token with extrato.read only. No payout operation. Same PROVIDER_FEES_ENABLED default OFF gate for scheduling and writes; OFF removes both persisted schedules. Registration is best-effort with finite log + OTel counter, never a webhook boot dependency.
+
+Official source (2026-10-23): https://developers.inter.co/redocusaurus/swagger-banking-yaml.yaml — /banking/v2/extrato/completo, idTransacao, TARIFA, detalhes.endToEndId, traditional pagination. One day/tick, max5 pages of1000; incomplete/429 commits nothing for that day. Start Sep1/2026 SP. Complete days re-scan daily for delayed fees; errors back off1h→24h, stop after8 attempts (manual retry needs separate authorization).
+
+Only debit TARIFA + exact E2E is a candidate PIX fee. Missing E2E increments unmatched_count (possibly another banking product). Identity=provider+SHA256(origin/account)+environment+idTransacao, NOT E2E. Exact E2E maps to one same-platform Inter PIX payment; absent/ambiguous matches retain payment_id=null and must NOT enter Engine expense totals. matching_ref stays internal, never UI/log. Re-scans cannot overwrite original amount/E2E.
+
+provider_fee_inter_scans: account_ref/day PK; last_success_at, last_reason, attempts, unmatched_count and lease/schedule fields. last_success_at null OR last_reason non-null means pending; attempts>=8 means exhausted. Successful empty statement does NOT confirm zero for a payment. Disabled/missing credentials/unobserved fee remains unknown.
+
+064 adds matching_ref + scans with down; no existing payment/ledger mutation. Real PG + HTTP loopback OAuth/statement tests; transport seam replaces TLS only. No external calls. Peppy authorized September sample67 TARIFA/67distinct idTransacao/exact E2E links/4485BRL cents; October429 pending, not replayed by tests.
+
+429 cooldown is account-wide: every claim checks all persisted scan rows for that account for `last_reason=rate_limited` with a future retry timestamp. No OAuth or statement HTTP is allowed during that interval, including from a fresh worker or another due day. Exhausted days still enforce the cooldown until it expires. No schema/UI contract change.

@@ -31,11 +31,11 @@ describe('public Taxas e prazos page', () => {
   it('renders without auth providers, with the fee validity next to the example and distinct payout stages', () => {
     const html = renderToStaticMarkup(createElement(TaxasEPrazosPage));
     const main = html.slice(html.indexOf('<main'), html.indexOf('</main>'));
-    expect(main).toContain('8,9%');
+    expect(main).toContain('8,98%');
     expect(main).toContain('paga pelo convidado');
     expect(main).toContain('não há nenhum desconto sobre o valor do presente');
-    expect(main).toContain('<dd>R$ 4,45</dd>');
-    expect(main).toContain('<dd>R$ 54,45</dd>');
+    expect(main).toContain('<dd>R$ 4,49</dd>');
+    expect(main).toContain('<dd>R$ 54,49</dd>');
     expect(main).toContain('<dt>Você recebe:</dt><dd>R$ 50,00</dd>');
     expect(main.indexOf('13/09/2026')).toBeLessThan(main.indexOf('id="taxas-info-exemplo"'));
     expect(main).toContain('até 10 minutos</strong> após o pagamento');
