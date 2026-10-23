@@ -340,6 +340,20 @@ const MAGIC_LINK_IP_MAX_SENDS = 5; // sends per IP per window
  * up) before sendMagicLink runs, so the catch is for truly exotic failures
  * only.
  */
+async function emailDeContaDesativada(
+  db: Database,
+  email: string,
+  idPlataforma: string | undefined,
+): Promise<boolean> {
+  let query = db
+    .selectFrom('usuarios')
+    .select('id')
+    .where(sql<string>`lower(trim(email))`, '=', email.trim().toLowerCase())
+    .where('desativado_em', 'is not', null);
+  if (idPlataforma) query = query.where('id_plataforma', '=', idPlataforma);
+  return (await query.executeTakeFirst()) !== undefined;
+}
+
 async function consumeMagicLinkEmailBudget(db: Database, email: string): Promise<boolean> {
   const key = `magic-link-email:${email.trim().toLowerCase()}`;
   const now = Date.now();
@@ -581,6 +595,9 @@ export function criarAuth(kysely: Database, config: CriarAuthConfig) {
                   // response (no account-existence / send-state oracle).
                   const within = await consumeMagicLinkEmailBudget(kysely, email);
                   if (!within) return;
+                  // aperture-851nu: a deactivated account gets no link. Same
+                  // uniform response as above — no account-state oracle.
+                  if (await emailDeContaDesativada(kysely, email, idPlataformaPadrao)) return;
                   await sendMagicLink({ email, url, token });
                 },
               }),
@@ -777,6 +794,15 @@ export function criarAuth(kysely: Database, config: CriarAuthConfig) {
         create: {
           before: async (session: { userId?: unknown }) => {
             if (typeof session.userId !== 'string') return;
+            // aperture-851nu: a deactivated account never gets a new session,
+            // whatever the entry path (OAuth, magic link issued before the
+            // deactivation, …). users.id == usuarios.id.
+            const dominio = await kysely
+              .selectFrom('usuarios')
+              .select('desativado_em')
+              .where('id', '=', session.userId)
+              .executeTakeFirst();
+            if (dominio?.desativado_em) return false;
             // STATE gate: only verified-email users. Pure password users are
             // email_verified=false → skip → their password is preserved.
             const usuario = await kysely

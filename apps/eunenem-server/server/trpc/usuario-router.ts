@@ -24,11 +24,14 @@
  */
 import { initTRPC, TRPCError } from '@trpc/server';
 import { z } from 'zod/v4';
+import { PendenciasDesativacaoPostgres } from '../../../../src/adapters/usuario/pendencias-desativacao.postgres.js';
 import {
   atualizarSlugUsuario,
+  ContaComPendenciasFinanceirasError,
   desativarContaUsuario,
   type IdUsuario,
   marcarTutorialUsuarioComoCompletado,
+  type PendenciaDesativacao,
   obterStatusTutorialUsuario,
   TutorialStatusResponseSchema,
   UsuarioInputInvalidoError,
@@ -104,8 +107,57 @@ async function resolveCallerIdUsuario(ctx: TrpcContext): Promise<IdUsuario> {
   }
 }
 
+/** Login recente exigido para desativar (aperture-851nu). */
+const JANELA_SESSAO_RECENTE_MS = 15 * 60_000;
+
+const MENSAGEM_PENDENCIA: Record<PendenciaDesativacao, string> = {
+  saldo_a_sacar: 'Você ainda tem saldo a sacar. Resgate o valor antes de desativar a conta.',
+  resgate_em_andamento:
+    'Há um resgate em andamento. Aguarde a conclusão antes de desativar a conta.',
+};
+
+/**
+ * Criação da sessão que fez a chamada: BetterAuth (cookie assinado) ou, no
+ * caminho legado de cookie simples, a linha em `sessions` pelo token.
+ */
+async function sessaoCriadaEm(ctx: TrpcContext, idUsuario: IdUsuario): Promise<Date | null> {
+  try {
+    const sessao = await ctx.deps.auth.api.getSession({ headers: ctx.headers });
+    if (sessao?.user.id === idUsuario) return new Date(sessao.session.createdAt);
+  } catch {
+    // Sem sessão BetterAuth válida: tenta o cookie simples abaixo.
+  }
+  const token = readSessionCookie(ctx.headers, ctx.deps.sessionCookieName);
+  if (!token) return null;
+  const row = await ctx.deps.db
+    .selectFrom('sessions')
+    .select('created_at')
+    .where('token', '=', token)
+    .where('user_id', '=', idUsuario)
+    .executeTakeFirst();
+  return row ? new Date(row.created_at) : null;
+}
+
+async function exigirSessaoRecente(ctx: TrpcContext, idUsuario: IdUsuario): Promise<void> {
+  const criadaEm = await sessaoCriadaEm(ctx, idUsuario);
+  const idade = criadaEm ? ctx.deps.clock().getTime() - criadaEm.getTime() : Number.NaN;
+  if (!Number.isFinite(idade) || idade < 0 || idade > JANELA_SESSAO_RECENTE_MS) {
+    throw new TRPCError({
+      code: 'UNAUTHORIZED',
+      message: 'Por segurança, saia e entre novamente antes de desativar a conta.',
+    });
+  }
+}
+
 function toTRPCError(err: unknown): TRPCError {
   if (err instanceof TRPCError) return err;
+  if (err instanceof ContaComPendenciasFinanceirasError) {
+    return new TRPCError({
+      code: 'PRECONDITION_FAILED',
+      message: err.pendencias.map((p) => MENSAGEM_PENDENCIA[p]).join(' '),
+      cause: err,
+    });
+  }
   if (err instanceof UsuarioNaoEncontradoError) {
     return new TRPCError({ code: 'NOT_FOUND', message: err.message, cause: err });
   }
@@ -123,17 +175,20 @@ function toTRPCError(err: unknown): TRPCError {
 export const usuarioRouter = t.router({
   /**
    * Desativa a conta no domínio sem apagar campanhas ou histórico financeiro.
-   * A gravação acontece antes do logout; depois dela qualquer sessão restante
-   * é rejeitada pelo resolver central por `conta_desativada`.
+   * Exige login recente e nenhuma pendência financeira nas campanhas em que o
+   * usuário é owner (aperture-851nu). A gravação revoga todas as sessões; o
+   * resolver central e o hook de sessão do BetterAuth recusam a conta depois.
    */
   desativarConta: t.procedure
     .output(z.object({ desativadoEm: z.string().datetime() }))
     .mutation(async ({ ctx }) => {
       try {
         const idUsuario = await resolveCallerIdUsuario(ctx);
+        await exigirSessaoRecente(ctx, idUsuario);
         const result = await desativarContaUsuario(
           {
             usuarioRepository: ctx.deps.usuarioRepository,
+            pendenciasRepository: new PendenciasDesativacaoPostgres(ctx.deps.db),
             observability: ctx.deps.observability,
           },
           idUsuario,

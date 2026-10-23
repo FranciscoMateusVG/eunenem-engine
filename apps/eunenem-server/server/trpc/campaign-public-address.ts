@@ -13,7 +13,20 @@ export async function isCampaignPublicOwner(
   );
 }
 
-/** Stable owner ordering from the membership port; no financial transfer implied. */
+/**
+ * aperture-851nu: a campaign is public only while at least one owner has an
+ * active account. A sole owner who deactivates takes it offline; with an
+ * active co-owner it stays up (including on the old owner's slug).
+ */
+export async function campanhaNoAr(ctx: TrpcContext, idCampanha: IdCampanha): Promise<boolean> {
+  return (await campaignPublicOwner(ctx, idCampanha)) !== undefined;
+}
+
+/**
+ * Stable owner ordering from the membership port; no financial transfer
+ * implied. Deactivated owners are skipped, so share links point at an
+ * active owner.
+ */
 export async function campaignPublicOwner(
   ctx: TrpcContext,
   idCampanha: IdCampanha,
@@ -24,7 +37,7 @@ export async function campaignPublicOwner(
       owner.idConta as unknown as IdContaUsuario,
       ID_PLATAFORMA_EUNENEM,
     );
-    if (usuario) return usuario;
+    if (usuario && !usuario.desativadoEm) return usuario;
   }
   return undefined;
 }
