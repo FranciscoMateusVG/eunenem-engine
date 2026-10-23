@@ -1,6 +1,7 @@
 
 import { useEffect, useState } from "react";
 import { artigoPosse } from "@/lib/concordancia";
+import { isLocalDate, localDateInSaoPaulo } from "@/lib/receitaPeriodo";
 import { toast } from "sonner";
 import { useTweaks } from "../TweaksContext";
 import type { PainelEventSnapshot } from "@/lib/mocks/painelDemo";
@@ -93,18 +94,23 @@ export function PainelHeaderCard({
   // NOT show the old mock "15 jun 2026" / "0 dias". The operator's tweaks panel
   // still drives both when a date is set.
   const rawTarget = (tweaks.targetDate ?? "").trim();
-  // aperture-niw6o — noon-BRT anchor for DATE MATH ONLY (a bare yyyy-mm-dd
-  // parses as UTC midnight and shifts the day in BRT). The hour is NEVER
-  // displayed: the old '· 16h' was a demo-era fabrication (no surface lets
-  // the user choose an event time — that idea is parked on aperture-5lu4z).
-  const targetDate = rawTarget ? new Date(`${rawTarget}T12:00:00-03:00`) : null;
-  const hasDate = targetDate !== null && !Number.isNaN(targetDate.getTime());
-  const daysLeft = hasDate
-    ? Math.max(0, Math.floor((targetDate.getTime() - now) / 86_400_000))
+  // Compare calendar days in São Paulo, not elapsed 24h periods. UTC here
+  // is only a calendar index; event dates have no time-of-day.
+  const hasDate = isLocalDate(rawTarget);
+  const targetDate = hasDate ? new Date(`${rawTarget}T00:00:00Z`) : null;
+  const today = localDateInSaoPaulo(new Date(now));
+  const daysLeft = targetDate
+    ? (targetDate.getTime() - Date.parse(`${today}T00:00:00Z`)) / 86_400_000
     : 0;
-  const chipDate = hasDate
-    ? `${targetDate.getDate()} ${MONTHS_PT[targetDate.getMonth()]} ${targetDate.getFullYear()}`
+  const chipDate = targetDate
+    ? `${targetDate.getUTCDate()} ${MONTHS_PT[targetDate.getUTCMonth()]} ${targetDate.getUTCFullYear()}`
     : "";
+  const countdownEyebrow = !hasDate ? "sua página tá no ar ♡"
+    : daysLeft < 0 ? "o evento já aconteceu ♡"
+    : daysLeft === 0 ? "é hoje ♡" : "falta pouco ♡";
+  const countdownLine = daysLeft < 0 ? `evento em ${chipDate}`
+    : daysLeft === 0 ? "dia do evento"
+    : `${daysLeft} ${daysLeft === 1 ? "dia" : "dias"} para o evento`;
 
   const reais = (snapshot.receivedCents / 100).toLocaleString("pt-BR", {
     minimumFractionDigits: 2,
@@ -144,11 +150,11 @@ export function PainelHeaderCard({
       <section className="painel-top-strip" aria-label="contagem regressiva e link do evento">
         <div className="painel-top-strip-left">
           <span className="painel-top-strip-eyebrow">
-            {hasDate ? "falta pouco ♡" : "sua página tá no ar ♡"}
+            {countdownEyebrow}
           </span>
           {hasDate && (
             <span className="painel-top-strip-line">
-              {daysLeft} dias para o evento
+              {countdownLine}
             </span>
           )}
         </div>
