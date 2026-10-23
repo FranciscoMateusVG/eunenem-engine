@@ -12,7 +12,7 @@ const databaseUrl =
   process.env.E2E_DATABASE_URL ??
   process.env.DATABASE_URL ??
   'postgresql://frame:frame@localhost:54320/frame';
-test('painel compacto e configurações sem novas dependências de banco', async ({
+test('painel compacto e configurações ligadas ao backend', async ({
   authenticatedPage: page,
   seededData,
 }) => {
@@ -108,14 +108,34 @@ test('painel compacto e configurações sem novas dependências de banco', async
     await expect(
       page.getByRole('link', { name: 'Gerenciar acessos', exact: true }),
     ).toHaveAttribute('href', `${base}/compartilhar`);
-    for (const name of [
-      'Exibir recados publicamente',
-      'Presentes recebidos',
-      'Novos recados',
-      'Confirmações de presença',
-    ]) {
+    // aperture-851nu: Presentes recebidos and recados privacy are live.
+    for (const name of ['Novos recados', 'Confirmações de presença']) {
       await expect(page.getByRole('switch', { name, exact: true })).toBeDisabled();
     }
+    const presentes = page.getByRole('switch', { name: 'Presentes recebidos', exact: true });
+    const recados = page.getByRole('switch', { name: 'Exibir recados publicamente', exact: true });
+    await expect(presentes).toBeEnabled();
+    await expect(presentes).toBeChecked();
+    await presentes.click();
+    await expect(presentes).not.toBeChecked();
+    await expect(presentes).toBeEnabled();
+    await expect(recados).toBeEnabled();
+    await expect(recados).toBeChecked();
+    await recados.click();
+    await expect(recados).not.toBeChecked();
+    await expect(recados).toBeEnabled();
+    await page.reload();
+    await expect(presentes).not.toBeChecked();
+    await expect(recados).not.toBeChecked();
+    expect(
+      (
+        await sql<{
+          exibir_recados: boolean;
+        }>`SELECT exibir_recados FROM campanha_privacidade WHERE campanha_id=${seededData.idCampanha}`.execute(
+          db,
+        )
+      ).rows[0]?.exibir_recados,
+    ).toBe(false);
     for (const width of [320, 375, 390, 768, 1440]) {
       await page.setViewportSize({ width, height: 900 });
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
@@ -127,24 +147,25 @@ test('painel compacto e configurações sem novas dependências de banco', async
     await page.goto(`${base}/configuracoes`);
     await page.getByRole('button', { name: 'Excluir minha conta', exact: true }).click();
     await expect(page.getByRole('dialog')).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Falar com o atendimento' })).toBeDisabled();
+    await expect(page.getByRole('link', { name: 'atendimento' })).toHaveAttribute('href', /wa.me/);
+    await expect(page.getByRole('button', { name: 'Desativar minha conta' })).toBeDisabled();
     await page.getByRole('button', { name: 'Cancelar', exact: true }).click();
     await expect(page.getByRole('dialog')).toHaveCount(0);
-    await page.getByRole('button', { name: 'Excluir minha conta', exact: true }).click();
-    await page.getByRole('checkbox', { name: /Entendo e quero conversar/ }).check();
-    await expect(page.getByRole('link', { name: 'Falar com o atendimento' })).toHaveAttribute(
-      'href',
-      /wa.me/,
-    );
-    expect(
+    const desativadoEm = async () =>
       (
         await db
           .selectFrom('usuarios')
           .select('desativado_em')
           .where('id', '=', seededData.session.userId)
           .executeTakeFirst()
-      )?.desativado_em,
-    ).toBeNull();
+      )?.desativado_em;
+    expect(await desativadoEm()).toBeNull();
+    await page.getByRole('button', { name: 'Excluir minha conta', exact: true }).click();
+    await page.getByRole('checkbox', { name: /Entendo e quero desativar/ }).check();
+    await page.getByRole('button', { name: 'Desativar minha conta' }).click();
+    await expect(page.getByText('Sua conta foi desativada')).toBeVisible();
+    expect(await desativadoEm()).not.toBeNull();
+    await page.waitForURL((url) => url.pathname === '/');
   } finally {
     await db.destroy();
   }
