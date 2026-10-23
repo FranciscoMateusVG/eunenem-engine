@@ -32,7 +32,7 @@ interface MessagesProps {
 export function Messages({ slug }: MessagesProps) {
   const { tweaks } = useTweaks();
   const { data, isLoading } = usePaginaMural(slug);
-  const recados = data ?? [];
+  const recados = data?.recados ?? [];
 
   return (
     <MessagesView
@@ -40,6 +40,7 @@ export function Messages({ slug }: MessagesProps) {
       genero={tweaks.genero}
       recados={recados}
       isLoading={isLoading}
+      oculto={data?.exibir === false}
     />
   );
 }
@@ -49,6 +50,8 @@ interface MessagesViewProps {
   genero?: string | null;
   recados: PaginaMuralRecado[];
   isLoading: boolean;
+  /** aperture-851nu: campanha escondeu os recados — a seção some. */
+  oculto?: boolean;
 }
 
 export function MessagesView({
@@ -56,7 +59,9 @@ export function MessagesView({
   genero,
   recados,
   isLoading,
+  oculto = false,
 }: MessagesViewProps) {
+  if (oculto) return null;
   const copy = muralCopy(genero);
 
   return (

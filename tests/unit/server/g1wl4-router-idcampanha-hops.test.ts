@@ -978,10 +978,11 @@ describe('g1wl4 — per-hop idCampanha, THROUGH the router (PR #344 + aperture-4
       const user = await rig.addUser(uniqueEmail('pagina'));
       const c2 = (await user.caller.campanhas.criar({ titulo: 'Segunda Lista' })).id;
 
-      await expect(rig.anonCaller.pagina.obterMural({ slug: user.slug })).resolves.toEqual([]);
+      const vazio = { exibir: true, recados: [] };
+      await expect(rig.anonCaller.pagina.obterMural({ slug: user.slug })).resolves.toEqual(vazio);
       await expect(
         rig.anonCaller.pagina.obterMural({ slug: user.slug, idCampanha: c2 }),
-      ).resolves.toEqual([]);
+      ).resolves.toEqual(vazio);
     });
 
     it('iniciarPagamentoContribuicao: bare pins the OLDEST — a c2 gift via bare fails the saga; via idCampanha=c2 it checks out', async () => {

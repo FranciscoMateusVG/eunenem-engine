@@ -1,3 +1,5 @@
+import { InterFeeSync } from '../../../../src/use-cases/pagamentos/inter-fee-sync.js';
+import { InterProcessingFeeReader } from '../../../../src/adapters/pagamentos/inter-processing-fee-reader.js';
 import { ProviderFeeSync } from '../../../../src/use-cases/pagamentos/provider-fee-sync.js';
 import { StripeProcessingFeeReader } from '../../../../src/adapters/pagamentos/stripe-processing-fee-reader.js';
 import { LifecycleEmailService } from '../../../../src/use-cases/email/lifecycle-email.js';
@@ -342,6 +344,13 @@ export interface ServerDeps {
    */
   readonly boss: PgBoss;
   readonly providerFeeSync: ProviderFeeSync;
+  readonly interFeeSync: InterFeeSync;
+  /**
+   * account_ref da conta Inter que o `interFeeSync` lê (o mesmo
+   * `InterProcessingFeeReader.accountRef`); null sem credenciais. A aba
+   * Despesas (aperture-5qoz0 PR3) só lê scans/eventos desta conta.
+   */
+  readonly interFeeAccountRef: string | null;
   readonly repasseJobEnqueuer: RepasseJobEnqueuer;
   readonly transferenciaProvider: TransferenciaProvider;
   /**
@@ -1300,12 +1309,21 @@ export function buildServerDeps(
       ...(emailAllowlist ? { recipientAllowlist: emailAllowlist } : {}),
     },
   );
+  const interFeeConfigured = !useFakeProviderSeam && [env.INTER_CLIENT_ID, env.INTER_CLIENT_SECRET,
+    env.INTER_CERT_BASE64, env.INTER_KEY_BASE64, env.INTER_CONTA_CORRENTE].every(value => value.trim().length > 0);
+  const interFeeReader = interFeeConfigured ? new InterProcessingFeeReader({
+    baseUrl: env.INTER_BASE_URL, clientId: env.INTER_CLIENT_ID, clientSecret: env.INTER_CLIENT_SECRET,
+    scope: 'extrato.read', contaCorrente: env.INTER_CONTA_CORRENTE,
+    certPem: Buffer.from(env.INTER_CERT_BASE64, 'base64').toString('utf8'),
+    keyPem: Buffer.from(env.INTER_KEY_BASE64, 'base64').toString('utf8'),
+  }) : null;
+  const interFeeSync = new InterFeeSync(db, interFeeReader, ID_PLATAFORMA_EUNENEM, () => new Date(), env.PROVIDER_FEES_ENABLED === 'true');
   const providerFeeSync = new ProviderFeeSync(db,
     env.STRIPE_SECRET_KEY.length > 0 && !useFakeProviderSeam
       ? new StripeProcessingFeeReader(getStripe()) : null, ID_PLATAFORMA_EUNENEM, () => new Date(), env.PROVIDER_FEES_ENABLED === 'true');
 
   return {
-    providerFeeSync,
+    providerFeeSync, interFeeSync, interFeeAccountRef: interFeeReader?.accountRef ?? null,
     lifecycleEmail, lifecycleEmailTokens, lifecycleEmailPreferences,
     lifecyclePaymentFinalized: (payment) => lifecycleEmail.paymentFinalized(payment),
     lifecyclePresenceConfirmed: (idCampanha, idConvidado, nome) => lifecycleEmail.presenceConfirmed(idCampanha, idConvidado, nome),

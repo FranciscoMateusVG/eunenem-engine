@@ -157,6 +157,13 @@ test('painel compacto e configurações ligadas ao backend', async ({
         )
       ).rows[0]?.exibir_recados,
     ).toBe(false);
+    // Public page: the whole mural section and its nav chip disappear.
+    const muralCarregado = page.waitForResponse((r) => r.url().includes('pagina.obterMural'));
+    await page.goto(`/pagina/${seededData.slug}/c/${seededData.idCampanha}`);
+    await muralCarregado;
+    await expect(page.locator('#mural')).toHaveCount(0);
+    await expect(page.getByRole('link', { name: 'Mural', exact: true })).toHaveCount(0);
+    await page.goto(`${base}/configuracoes`);
     for (const width of [320, 375, 390, 768, 1440]) {
       await page.setViewportSize({ width, height: 900 });
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(

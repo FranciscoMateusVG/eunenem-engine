@@ -23,7 +23,7 @@ import type { ReceitaPainelData } from "./types";
  * Tudo vem de UMA resposta de `admin.receita.painel`.
  */
 
-const MONO = "font-mono text-[11px] text-ink-mute";
+export const MONO = "font-mono text-[11px] text-ink-mute";
 
 /*
  * `[data-admin] h1–h4` (tailwind.css) fica fora de @layer e vence utilitários
@@ -33,13 +33,13 @@ const MONO = "font-mono text-[11px] text-ink-mute";
 /** Tom da coluna de valor de cada série (texto sobre branco). */
 const TEXTO_TARIFAS = "text-[#7d4f97]";
 const TEXTO_RECEBIDO = "text-[#2f6e74]";
-const EIXO = "border-[#d9c9d3]";
+export const EIXO = "border-[#d9c9d3]";
 
-function capitalizar(texto: string): string {
+export function capitalizar(texto: string): string {
   return texto.charAt(0).toUpperCase() + texto.slice(1);
 }
 
-function Amostra({ cor, tamanho = "size-2" }: { cor: string; tamanho?: string }) {
+export function Amostra({ cor, tamanho = "size-2" }: { cor: string; tamanho?: string }) {
   return <span aria-hidden className={`${tamanho} shrink-0 rounded-[2px] ${cor}`} />;
 }
 
@@ -201,7 +201,7 @@ export function rolarAteCorrente(caixa: HTMLElement, seletor: string): void {
   caixa.scrollLeft = Math.max(0, fim - caixa.clientWidth + 8);
 }
 
-function Grafico({
+export function Grafico({
   titulo,
   legenda,
   corrente,
@@ -231,7 +231,7 @@ function Grafico({
   );
 }
 
-function maximo(valores: readonly number[]): number {
+export function maximo(valores: readonly number[]): number {
   return Math.max(...valores, 1);
 }
 
