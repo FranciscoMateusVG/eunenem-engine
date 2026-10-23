@@ -368,6 +368,23 @@ export class LifecycleEmailRepositoryPostgres implements LifecycleEmailRepositor
       });
     });
   }
+  async defer(id: string, nextAttempt: Date): Promise<void> {
+    return lifecycleSpan('db.lifecycle_email.defer', async () => {
+      await sql`UPDATE lifecycle_email_deliveries SET state='pending',reason='awaiting_payment_email',
+        attempts=GREATEST(attempts-1,0),next_attempt_at=${nextAttempt}
+      WHERE id=${id} AND state='sending'`.execute(this.db);
+    });
+  }
+  async paymentEmailState(paymentId: string, userId: string): Promise<string | undefined> {
+    return lifecycleSpan('db.lifecycle_email.paymentEmailState', async () => {
+      const { rows } = await sql<{ state: string }>`SELECT d.state FROM lifecycle_email_deliveries d
+      JOIN lifecycle_email_events e ON e.id=d.event_id
+      WHERE e.type='payment_received' AND e.subject_id=${paymentId} AND d.user_id=${userId}`.execute(
+        this.db,
+      );
+      return rows[0]?.state;
+    });
+  }
   async retry(id: string, nextAttempt: Date): Promise<void> {
     return lifecycleSpan('db.lifecycle_email.retry', async () => {
       await sql`UPDATE lifecycle_email_deliveries SET state='pending',reason='smtp_rejected',next_attempt_at=${nextAttempt}

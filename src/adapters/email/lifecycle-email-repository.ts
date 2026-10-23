@@ -103,4 +103,8 @@ export interface LifecycleEmailRepository {
   ownerName(campaignId: string | null): Promise<string | null>;
   reserveEmail(eventId: string, deliveryId: string, emailKey: string): Promise<boolean>;
   retry(id: string, nextAttempt: Date): Promise<void>;
+  /** Re-queue a claimed delivery that must wait, without spending an attempt. */
+  defer(id: string, nextAttempt: Date): Promise<void>;
+  /** State of this recipient's payment_received delivery for the payment, if admitted. */
+  paymentEmailState(paymentId: string, userId: string): Promise<string | undefined>;
 }

@@ -228,12 +228,37 @@ export class LifecycleEmailService {
       }
     });
   }
-  private async coveredByPaymentEmail(recipient: { user_id: string; tenant_id: string }) {
-    return (
-      this.active('payment_received') &&
-      (await this.deps.preferences.getPreferences(recipient.user_id, recipient.tenant_id))
-        .payment_received
-    );
+  /**
+   * One email per payment: the recado alert defers to THIS recipient's actual
+   * payment_received delivery for the same payment, never to the current
+   * preference. Accepted (or possibly accepted) → it already carried the recado;
+   * still queued → wait for it; suppressed, failed or absent → the alert goes out.
+   */
+  private async paymentEmailCoverage(
+    delivery: Delivery,
+    userId: string,
+  ): Promise<'covered' | 'wait' | 'none'> {
+    const state = await this.deps.repository.paymentEmailState(delivery.subject_id, userId);
+    if (state === 'sent' || state === 'unknown') return 'covered';
+    if (state === 'pending' || state === 'sending') return 'wait';
+    return 'none';
+  }
+  /** True when the recado alert was settled (suppressed or deferred) instead of sent. */
+  private async settledByPaymentEmail(delivery: Delivery, userId: string): Promise<boolean> {
+    if (delivery.type !== 'new_message') return false;
+    const coverage = await this.paymentEmailCoverage(delivery, userId);
+    if (coverage === 'covered') {
+      await this.finish(delivery.delivery_id, 'suppressed', 'covered_by_payment_received');
+      return true;
+    }
+    if (coverage === 'wait') {
+      await this.deps.repository.defer(
+        delivery.delivery_id,
+        new Date(this.deps.clock().getTime() + 60_000),
+      );
+      return true;
+    }
+    return false;
   }
   private finish(id: string, state: string, reason: string): Promise<void> {
     return this.deps.repository.finish(id, state, reason, this.deps.clock());
@@ -272,12 +297,8 @@ export class LifecycleEmailService {
       await suppress('opt_out');
       return;
     }
-    // One email per payment: while this recipient gets "presente recebido" (which
-    // already carries the recado), the separate recado alert stays silent.
-    if (delivery.type === 'new_message' && (await this.coveredByPaymentEmail(recipient))) {
-      await suppress('covered_by_payment_received');
-      return;
-    }
+    // One email per payment: "presente recebido" already carries the recado.
+    if (await this.settledByPaymentEmail(delivery, recipient.user_id)) return;
     if (delivery.type === 'payment_received' || delivery.type === 'new_message') {
       const payment = await this.deps.pagamentoRepository.findById(delivery.subject_id);
       if (!payment || payment.status !== 'aprovado') {
@@ -380,10 +401,7 @@ export class LifecycleEmailService {
       await suppress('recipient_changed');
       return;
     }
-    if (delivery.type === 'new_message' && (await this.coveredByPaymentEmail(recipient))) {
-      await suppress('covered_by_payment_received');
-      return;
-    }
+    if (await this.settledByPaymentEmail(delivery, recipient.user_id)) return;
     if (
       (delivery.type === 'payment_received' || delivery.type === 'new_message') &&
       (await this.deps.pagamentoRepository.findById(delivery.subject_id))?.status !== 'aprovado'

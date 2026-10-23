@@ -539,6 +539,12 @@ describe('lifecycle real Postgres and loopback TLS SMTP', () => {
     for (const u of users)
       await prefs.setPreferences(u.userId, u.tenant, { payment_received: false });
   }
+  /** A deferred recado alert waits a minute for its payment email; drain both rounds. */
+  async function dispatchUntilSettled(target: { dispatch(): Promise<void> } = service) {
+    await target.dispatch();
+    now = new Date(now.getTime() + 2 * MINUTE);
+    await target.dispatch();
+  }
   const guestLists = new Map<string, string>();
   async function guest(owner: Awaited<ReturnType<typeof seed>>, presenca = 'sim') {
     let lista = guestLists.get(owner.campaign);
@@ -573,6 +579,7 @@ describe('lifecycle real Postgres and loopback TLS SMTP', () => {
     await Promise.all([service.paymentFinalized(payment), service.paymentFinalized(payment)]);
     await service.paymentFinalized(payment);
     await Promise.all([service.dispatch(), service.dispatch()]);
+    await dispatchUntilSettled();
     const rows = await recipientsOf('new_message');
     expect(rows.map((r) => r.user_id).sort()).toEqual([owner.userId, coOwner.userId].sort());
     expect(rows.map((r) => r.state)).toEqual(['sent', 'sent']);
@@ -590,7 +597,7 @@ describe('lifecycle real Postgres and loopback TLS SMTP', () => {
     await giftEmailsOff(coOwner);
     const contribution = await gift(owner);
     await service.paymentFinalized(await approved(owner, contribution, true, 'Recado único'));
-    await service.dispatch();
+    await dispatchUntilSettled();
     const alerts = await recipientsOf('new_message');
     expect(alerts.find((r) => r.user_id === owner.userId)).toMatchObject({
       state: 'suppressed',
@@ -606,6 +613,50 @@ describe('lifecycle real Postgres and loopback TLS SMTP', () => {
     expect(mails.filter((m) => m.includes(owner.email))).toHaveLength(1);
     expect(mails.filter((m) => m.includes(coOwner.email))).toHaveLength(1);
     expect(mails.every((m) => m.includes('Recado ') && m.includes('nico'))).toBe(true);
+  });
+  it('a suppressed payment email never silences the recado alert, even if Presentes recebidos is turned back on', async () => {
+    const owner = await seed();
+    const contribution = await gift(owner);
+    const payment = await approved(owner, contribution, true, 'Não pode sumir');
+    await giftEmailsOff(owner);
+    await build({ enabledTypes: ['payment_received'] }).paymentFinalized(payment);
+    await service.dispatch();
+    expect(await recipientsOf('payment_received')).toMatchObject([
+      { state: 'suppressed', reason: 'opt_out' },
+    ]);
+    // Turned back on before the recado alert goes out: the payment email is
+    // already gone, so the alert is the only email left for this payment.
+    await new LifecycleEmailPreferencesPostgres(test.db).setPreferences(
+      owner.userId,
+      owner.tenant,
+      {
+        payment_received: true,
+      },
+    );
+    now = new Date(now.getTime() + 11 * MINUTE);
+    await service.scan();
+    await service.dispatch();
+    expect(await recipientsOf('new_message')).toMatchObject([{ state: 'sent' }]);
+    expect(decoded().filter((m) => m.includes('/mensagens'))).toHaveLength(1);
+  });
+  it('a recado alert claimed before its pending payment email waits for it instead of guessing', async () => {
+    const owner = await seed();
+    const contribution = await gift(owner);
+    await service.paymentFinalized(await approved(owner, contribution, true, 'Ordem'));
+    await sql`UPDATE lifecycle_email_deliveries SET next_attempt_at=${new Date(now.getTime() + MINUTE)}
+      WHERE type='payment_received'`.execute(test.db);
+    await service.dispatch();
+    expect(await recipientsOf('new_message')).toMatchObject([{ state: 'pending' }]);
+    expect(sink.messages).toHaveLength(0);
+    now = new Date(now.getTime() + 2 * MINUTE);
+    await service.dispatch();
+    expect(await states('payment_received')).toEqual(['sent']);
+    now = new Date(now.getTime() + 2 * MINUTE);
+    await service.dispatch();
+    expect(await recipientsOf('new_message')).toMatchObject([
+      { state: 'suppressed', reason: 'covered_by_payment_received' },
+    ]);
+    expect(sink.messages).toHaveLength(1);
   });
   it('new_message is not admitted for a payment without a recado or a blank one', async () => {
     const owner = await seed();
@@ -623,7 +674,7 @@ describe('lifecycle real Postgres and loopback TLS SMTP', () => {
     await prefs.setPreferences(owner.userId, owner.tenant, { payment_received: false });
     const contribution = await gift(owner);
     await service.paymentFinalized(await approved(owner, contribution, true, 'Um beijo'));
-    await service.dispatch();
+    await dispatchUntilSettled();
     const rows = await recipientsOf('new_message');
     expect(rows.find((r) => r.user_id === owner.userId)?.state).toBe('sent');
     expect(rows.find((r) => r.user_id === coOwner.userId)).toMatchObject({
@@ -662,7 +713,7 @@ describe('lifecycle real Postgres and loopback TLS SMTP', () => {
     await giftEmailsOff(owner, coOwner);
     await service.scan();
     await service.scan();
-    await service.dispatch();
+    await dispatchUntilSettled();
     const rows = await recipientsOf('new_message');
     expect(rows.map((r) => r.user_id).sort()).toEqual([owner.userId, coOwner.userId].sort());
     expect(rows.every((r) => r.state === 'sent')).toBe(true);
@@ -690,7 +741,7 @@ describe('lifecycle real Postgres and loopback TLS SMTP', () => {
       .set({ status: 'estornado' })
       .where('id', '=', payment.id)
       .execute();
-    await service.dispatch();
+    await dispatchUntilSettled();
     expect(await recipientsOf('new_message')).toMatchObject([
       { state: 'suppressed', reason: 'payment_not_approved' },
     ]);
@@ -1079,7 +1130,7 @@ describe('lifecycle real Postgres and loopback TLS SMTP', () => {
       await deps.lifecyclePresenceConfirmed?.(owner.campaign, convidado, 'Vovó Synthetic');
       expect(await states('new_message')).toEqual(['pending']);
       expect(await states('presence_confirmed')).toEqual(['pending']);
-      await deps.lifecycleEmail.dispatch();
+      await dispatchUntilSettled(deps.lifecycleEmail);
       // Presentes recebidos is on by default, so the recado rides in that email.
       expect(await recipientsOf('new_message')).toMatchObject([
         { state: 'suppressed', reason: 'covered_by_payment_received' },
