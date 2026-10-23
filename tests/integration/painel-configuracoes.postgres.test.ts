@@ -179,15 +179,21 @@ describe('configuracoes.privacidade (Exibir recados publicamente)', () => {
     await recado(owner.idCampanha);
     const publico = () =>
       caller('').pagina.obterMural({ slug: owner.user.slug, idCampanha: owner.idCampanha });
-    expect((await publico()).map((r) => r.mensagem)).toEqual(['Felicidades!']);
+    const ligado = await publico();
+    expect(ligado.exibir).toBe(true);
+    expect(ligado.recados.map((r) => r.mensagem)).toEqual(['Felicidades!']);
 
     await owner.caller.configuracoes.privacidade({
       idCampanha: owner.idCampanha,
       exibirRecados: false,
     });
-    expect(await publico()).toEqual([]);
+    // Desligado: a página pública esconde a seção inteira, sem recados.
+    expect(await publico()).toEqual({ exibir: false, recados: [] });
     // URL sem idCampanha (campanha padrão do slug) também respeita.
-    expect(await caller('').pagina.obterMural({ slug: owner.user.slug })).toEqual([]);
+    expect(await caller('').pagina.obterMural({ slug: owner.user.slug })).toEqual({
+      exibir: false,
+      recados: [],
+    });
     expect(
       (await owner.caller.configuracoes.get({ idCampanha: owner.idCampanha })).exibirRecados,
     ).toBe(false);
@@ -201,7 +207,7 @@ describe('configuracoes.privacidade (Exibir recados publicamente)', () => {
       idCampanha: owner.idCampanha,
       exibirRecados: true,
     });
-    expect(await publico()).toHaveLength(1);
+    expect((await publico()).recados).toHaveLength(1);
   });
 
   it('a preferência não impede excluir a campanha (cascade)', async () => {

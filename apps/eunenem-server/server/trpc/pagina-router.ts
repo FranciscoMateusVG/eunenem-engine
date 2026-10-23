@@ -555,10 +555,11 @@ export const paginaRouter = t.router({
     .query(async ({ ctx, input }) => {
       const { campanha } = await resolvePaginaBySlug(ctx, input.slug, input.idCampanha);
 
-      // aperture-851nu: "Exibir recados publicamente" desligado → mural
-      // público vazio. O painel (painelMensagens) continua listando tudo.
+      // aperture-851nu: "Exibir recados publicamente" desligado → a página
+      // pública esconde a seção (`exibir: false`, sem recados). O painel
+      // (painelMensagens) continua listando tudo.
       if (!(await ctx.deps.campanhaPrivacidadeRepository.exibeRecadosPublicamente(campanha.id))) {
-        return [];
+        return { exibir: false, recados: [] };
       }
 
       const recados = await ctx.deps.pagamentoRepository.findMensagensMuralByCampanha(
@@ -566,12 +567,15 @@ export const paginaRouter = t.router({
         50,
       );
 
-      return recados.map((r) => ({
-        id: r.idPagamento as unknown as string,
-        contribuinteNome: r.contribuinteNome,
-        mensagem: r.mensagem,
-        criadoEm: r.criadoEm,
-      }));
+      return {
+        exibir: true,
+        recados: recados.map((r) => ({
+          id: r.idPagamento as unknown as string,
+          contribuinteNome: r.contribuinteNome,
+          mensagem: r.mensagem,
+          criadoEm: r.criadoEm,
+        })),
+      };
     }),
 
   /**
