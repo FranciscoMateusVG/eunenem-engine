@@ -10,6 +10,7 @@ import {
   registerProviderFeesJob,
 } from '../../apps/eunenem-server/server/jobs/provider-fees.pgboss.js';
 import { down, up } from '../../migrations/20261023_063_provider_processing_fees.js';
+import { down as downInter, up as upInter } from '../../migrations/20261023_064_inter_fee_scans.js';
 import { StripeProcessingFeeReader } from '../../src/adapters/pagamentos/stripe-processing-fee-reader.js';
 import { ProviderFeeSync } from '../../src/use-cases/pagamentos/provider-fee-sync.js';
 import { ReceitaLedgerSeed } from '../helpers/receita-ledger-seed.js';
@@ -253,6 +254,8 @@ it('real server composition constructs the service even without credentials; no 
   );
   try {
     expect(deps.providerFeeSync).toBeInstanceOf(ProviderFeeSync);
+    expect(deps.interFeeSync).toBeDefined();
+    expect(await deps.interFeeSync.run()).toMatchObject({ imported: 0 });
     await payment();
     expect(await deps.providerFeeSync.run()).toMatchObject({ confirmed: 0 });
     expect((await sql`SELECT * FROM provider_fee_events`.execute(database.db)).rows).toEqual([]);
@@ -264,11 +267,13 @@ it('real server composition constructs the service even without credentials; no 
 
 it('additive migration down/up preserves the real existing payments schema and rows', async () => {
   const id = await payment();
+  await downInter(database.db);
   await down(database.db);
   expect(
     await database.db.selectFrom('pagamentos').select('id').where('id', '=', id).execute(),
   ).toHaveLength(1);
   await up(database.db);
+  await upInter(database.db);
   expect((await sql`SELECT * FROM provider_fee_events`.execute(database.db)).rows).toEqual([]);
 });
 
@@ -401,6 +406,7 @@ it('OFF prevents queue registration as well as service writes', async () => {
   const off = new ProviderFeeSync(database.db, feeReader, '11111111-1111-4111-8111-111111111111');
   await registerProviderFeesJob(
     {
+      unschedule: async () => {},
       createQueue: async () => {
         throw new Error('must not register');
       },
@@ -435,4 +441,18 @@ it('timeout reason is finite and retryable, unlike auth/404', async () => {
   expect(
     (await sql`SELECT status,last_reason FROM provider_fee_sync`.execute(database.db)).rows,
   ).toEqual([{ status: 'pending', last_reason: 'provider_timeout' }]);
+});
+it('OFF removes a persisted pg-boss schedule after previously enabling it', async () => {
+  const boss = new PgBoss({ connectionString: database.connectionUri });
+  await boss.start();
+  const lifecycle = { assertAdmissionOpen: () => {}, runJob: <T>(op: () => Promise<T>) => op() };
+  try {
+    await registerProviderFeesJob(boss, service, lifecycle);
+    expect((await boss.getSchedules()).some((s) => s.name === PROVIDER_FEES_QUEUE)).toBe(true);
+    const off = new ProviderFeeSync(database.db, feeReader, '11111111-1111-4111-8111-111111111111');
+    await registerProviderFeesJob(boss, off, lifecycle);
+    expect((await boss.getSchedules()).some((s) => s.name === PROVIDER_FEES_QUEUE)).toBe(false);
+  } finally {
+    await boss.stop({ graceful: true });
+  }
 });
