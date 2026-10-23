@@ -492,6 +492,10 @@ describe('Migration round-trip', () => {
     expect(downPrivacidade.error).toBeUndefined();
     expect(await tableExists(db, 'campanha_privacidade')).toBe(false);
 
+    expect(await tableExists(db, 'provider_fee_inter_scans')).toBe(true);
+    expect((await migrator.migrateDown()).error).toBeUndefined();
+    expect(await tableExists(db, 'provider_fee_inter_scans')).toBe(false);
+
     // 063 observed provider fees; preserve the historical tables below.
     expect(await tableExists(db, 'provider_fee_events')).toBe(true);
     expect(await tableExists(db, 'provider_fee_sync')).toBe(true);

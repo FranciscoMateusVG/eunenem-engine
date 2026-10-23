@@ -472,11 +472,24 @@ export interface ProviderFeeEvents {
   environment: string;
   external_ref: string;
   id: Generated<string>;
+  matching_ref: string | null;
   observed_at: Timestamp;
   occurred_at: Timestamp;
   payment_id: string | null;
   provider: string;
   source: string;
+}
+
+export interface ProviderFeeInterScans {
+  account_ref: string;
+  attempts: Generated<number>;
+  claim_token: string | null;
+  claimed_until: Timestamp | null;
+  day: Timestamp;
+  last_reason: string | null;
+  last_success_at: Timestamp | null;
+  next_attempt_at: Generated<Timestamp>;
+  unmatched_count: Generated<number>;
 }
 
 export interface ProviderFeeSync {
@@ -696,6 +709,7 @@ export interface DB {
   perfil_criadores: PerfilCriadores;
   pix_cobranca_devolucoes: PixCobrancaDevolucoes;
   provider_fee_events: ProviderFeeEvents;
+  provider_fee_inter_scans: ProviderFeeInterScans;
   provider_fee_sync: ProviderFeeSync;
   rate_limit: RateLimit;
   recebedores: Recebedores;

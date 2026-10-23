@@ -16,6 +16,9 @@ export const E2E_SPEC_SAFETY = [
     safety: 'money-movement',
     capability: 'Confirms a Stripe or Inter refund through admin.pagamentos.estornar.',
   },
+  // Read-only admin screen (Despesas). Self-skips unless launched by the
+  // 9bpre ephemeral-DB runner with this spec as argument.
+  { file: '5qoz0-admin-despesas.spec.ts', safety: 'non-payment' },
   { file: '8bac7-postlogin-routing.spec.ts', safety: 'non-payment' },
   { file: '8bac7-welcome-optout.spec.ts', safety: 'non-payment' },
   { file: '8jcec-campanhas-multicampanha.spec.ts', safety: 'non-payment' },
