@@ -160,9 +160,9 @@ describe('7mqsg item 3 — card fee hint without "arredondado para cima"', () =>
     expect(cart).toMatch(/hint="processamento: 3,9% sobre o total \+ R\$ 0,39"/);
     expect(cart).not.toMatch(/arredondad/);
   });
-  it('public FAQ card-fee answer keeps 3,9% + R$ 0,39 and drops the rounding phrase (termos-de-uso legal text untouched by design)', () => {
+  it('public FAQ uses the requested 3,99% processing copy without a rounding phrase', () => {
     const landing = src('pages/lib/mocks/landing.ts');
-    expect(landing).toMatch(/3,9% sobre o total processado, mais R\$ 0,39 por transação\./);
+    expect(landing).toContain('acréscimo de 3,99% referente aos custos de processamento.');
     expect(landing).not.toMatch(/arredondamento para cima/);
   });
 });
