@@ -4628,6 +4628,7 @@ const notaFiscalRouter = t.router({
 
 const ContagemCoberturaSchema = z.object({
   confirmados: z.number().int().nonnegative(),
+  semTarifa: z.number().int().nonnegative().optional(),
   pendentes: z.number().int().nonnegative(),
   falhos: z.number().int().nonnegative(),
 });
