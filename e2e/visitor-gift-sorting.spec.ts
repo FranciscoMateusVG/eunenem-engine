@@ -1,6 +1,9 @@
 import { createDatabase } from '../src/adapters/database.js';
 import { expect, test } from './fixtures.js';
 import { buildSeedGiftRepos, seedAvailableGift } from './seed-helpers.js';
+import { classifyTarget } from './target-classifier.js';
+
+test.skip(!classifyTarget(process.env.E2E_BASE_URL).isLocal, 'Uses local synthetic fixtures.');
 
 const DATABASE_URL =
   process.env.E2E_DATABASE_URL ??
