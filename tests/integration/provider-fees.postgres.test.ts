@@ -6,6 +6,7 @@ import { afterAll, beforeAll, beforeEach, expect, it } from 'vitest';
 import { PgBoss } from '../../apps/eunenem-server/node_modules/pg-boss/dist/index.js';
 import { buildServerDeps, loadEnv } from '../../apps/eunenem-server/server/auth/setup.js';
 import {
+  INTER_FEES_QUEUE,
   PROVIDER_FEES_QUEUE,
   registerProviderFeesJob,
 } from '../../apps/eunenem-server/server/jobs/provider-fees.pgboss.js';
@@ -455,4 +456,45 @@ it('OFF removes a persisted pg-boss schedule after previously enabling it', asyn
   } finally {
     await boss.stop({ graceful: true });
   }
+});
+
+it('7513q: both persisted schedules replace 5-min polling with 06/14/22 SP', async () => {
+  const boss = new PgBoss({ connectionString: database.connectionUri });
+  await boss.start();
+  try {
+    for (const queue of [PROVIDER_FEES_QUEUE, INTER_FEES_QUEUE]) {
+      await boss.createQueue(queue);
+      await boss.schedule(queue, '*/5 * * * *', {});
+
+      await registerProviderFeesJob(
+        boss,
+        service,
+        {
+          assertAdmissionOpen: () => {},
+          runJob: (op) => op(),
+        },
+        queue,
+      );
+      const schedules = await boss.getSchedules();
+      expect(schedules.find((s) => s.name === queue)).toMatchObject({
+        cron: '0 6,14,22 * * *',
+        timezone: 'America/Sao_Paulo',
+      });
+    }
+  } finally {
+    await boss.stop({ graceful: true });
+  }
+});
+
+it('7513q: scheduled drain visits more than one batch, preserving backoff', async () => {
+  for (let i = 0; i < 26; i++) await payment();
+  fee = null;
+  await service.runAll();
+  const rows = await sql<{ n: number; attempts: number }>`
+    SELECT count(*)::int n, min(attempts)::int attempts FROM provider_fee_sync
+  `.execute(database.db);
+  expect(rows.rows).toEqual([{ n: 26, attempts: 1 }]);
+  const before = requests.length;
+  await service.runAll();
+  expect(requests.length).toBe(before);
 });

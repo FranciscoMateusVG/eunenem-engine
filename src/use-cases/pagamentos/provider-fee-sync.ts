@@ -27,10 +27,22 @@ export class ProviderFeeSync {
     private readonly clock: () => Date = () => new Date(),
     readonly enabled = false,
   ) {}
-  async run(options: { dryRun?: boolean } = {}) {
+  /** Drain only work due at admission; retries wait for a later schedule. */
+  async runAll() {
+    const dueBefore = this.clock();
+    let attempted = 0;
+    while (true) {
+      const result = await this.run({ dueBefore });
+      const processed = result.confirmed + result.pending;
+      attempted += processed;
+      if (processed === 0) return { attempted };
+    }
+  }
+  async run(options: { dryRun?: boolean; dueBefore?: Date } = {}) {
     if (!options.dryRun && !this.enabled) return { eligible: 0, confirmed: 0, pending: 0 };
     const now = this.clock();
-    const eligible = sql`${ELIGIBLE} AND EXISTS (SELECT 1 FROM campanhas c
+    const dueBefore = options.dueBefore ?? now;
+    const eligible = sql`${ELIGIBLE} AND p.criado_em <= ${dueBefore} AND EXISTS (SELECT 1 FROM campanhas c
       WHERE c.id=p.intencao_id_campanha AND c.id_plataforma=${this.platformId}::uuid)`;
     const count = await sql<{
       n: string;
@@ -39,13 +51,13 @@ export class ProviderFeeSync {
     if (options.dryRun || !this.reader) return result;
     // Bounded candidates and leases. No transaction/connection is held during network I/O.
     await sql`INSERT INTO provider_fee_sync(payment_id, next_attempt_at, updated_at)
-      SELECT p.id, ${now}, ${now} FROM pagamentos p WHERE ${eligible}
+      SELECT p.id, ${dueBefore}, ${now} FROM pagamentos p WHERE ${eligible}
       AND NOT EXISTS (SELECT 1 FROM provider_fee_sync s WHERE s.payment_id=p.id)
       ORDER BY p.criado_em, p.id LIMIT 20 ON CONFLICT DO NOTHING`.execute(this.db);
     const token = randomUUID();
     const candidates = await sql<Candidate>`WITH due AS (
       SELECT s.payment_id FROM provider_fee_sync s JOIN pagamentos p ON p.id=s.payment_id
-      WHERE ${eligible} AND s.status='pending' AND s.next_attempt_at <= ${now}
+      WHERE ${eligible} AND s.status='pending' AND s.next_attempt_at <= ${dueBefore}
       AND (s.claimed_until IS NULL OR s.claimed_until <= ${now})
       ORDER BY s.next_attempt_at, s.payment_id LIMIT 5 FOR UPDATE OF s SKIP LOCKED
     ), claimed AS (

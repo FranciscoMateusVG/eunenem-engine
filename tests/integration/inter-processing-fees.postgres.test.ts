@@ -430,3 +430,23 @@ it('a conflicting observed identity still rolls back the day, never overwrites a
     [{ amount_cents: '67' }],
   );
 });
+
+it('7513q: drains all due days, but a 429 stops the account across days', async () => {
+  const service = new InterFeeSync(
+    testDb.db,
+    reader(),
+    '11111111-1111-4111-8111-111111111111',
+    () => now,
+    true,
+  );
+  await service.runAll();
+  expect(calls.filter((p) => p.includes('/extrato/completo')).length).toBe(2);
+  await sql`DELETE FROM provider_fee_inter_scans`.execute(testDb.db);
+  calls = [];
+  rateLimited = true;
+  await service.runAll();
+  expect(calls.filter((p) => p.includes('/extrato/completo')).length).toBe(1);
+  const before = calls.length;
+  await service.runAll();
+  expect(calls.length).toBe(before);
+});
