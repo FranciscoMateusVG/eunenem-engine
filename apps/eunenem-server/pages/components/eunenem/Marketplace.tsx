@@ -10,6 +10,7 @@ import { emitirCarrinhoAberto } from "@/lib/analytics-funil";
 import { useTweaks } from "./TweaksContext";
 import { OWNER_EDIT_LISTA_LABEL } from "@/lib/pagina-owner";
 import { usePaginaListaPresentes } from "@/lib/paginaApi";
+import { formatBRL } from "@/lib/formatBRL";
 import { filterVisitorGifts, type GiftSort } from "@/lib/visitorGiftFilters";
 import { groupVisitorGifts, type VisitorGift } from "@/lib/visitorGift";
 
@@ -78,16 +79,16 @@ export function Marketplace({ slug, ownerEditHref = null }: MarketplaceProps) {
   const gifts = useMemo(() => (data ? groupVisitorGifts(data) : []), [data]);
 
   const [search, setSearch] = useState("");
-  const [minPrice, setMinPrice] = useState("");
   const [maxPrice, setMaxPrice] = useState("");
   const [sort, setSort] = useState<GiftSort>("default");
+  const priceCeiling = Math.max(1, ...gifts.map((gift) => gift.valorCents));
+  const selectedPrice = maxPrice === "" ? priceCeiling : Math.min(Math.round(Number(maxPrice) * 100), priceCeiling);
   const visibleGifts = useMemo(
-    () => filterVisitorGifts(gifts, { search, minPrice, maxPrice, sort }),
-    [gifts, search, minPrice, maxPrice, sort],
+    () => filterVisitorGifts(gifts, { search, minPrice: "", maxPrice, sort }),
+    [gifts, search, maxPrice, sort],
   );
   const resetFilters = () => {
     setSearch("");
-    setMinPrice("");
     setMaxPrice("");
     setSort("default");
   };
@@ -188,44 +189,67 @@ export function Marketplace({ slug, ownerEditHref = null }: MarketplaceProps) {
 
         {!isLoading && !isError && gifts.length > 0 && (
           <div role="search" aria-label="Filtrar presentes" style={{ marginTop: 32 }}>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-              <label style={{ color: "var(--ink-soft)" }}>
-                Buscar presente
-                <input type="search" value={search} onChange={(event) => setSearch(event.target.value)}
-                  placeholder="Nome ou tipo de presente" style={controlStyle} />
-              </label>
-              <fieldset style={{ minWidth: 0, border: 0, padding: 0, margin: 0, color: "var(--ink-soft)" }}>
-                <legend>Faixa de preço (R$)</legend>
-                <div className="grid grid-cols-2 gap-2">
-                  <input aria-label="Preço mínimo em reais" type="number" min="0" step="0.01"
-                    inputMode="decimal" placeholder="De" value={minPrice}
-                    onChange={(event) => setMinPrice(event.target.value)} style={controlStyle} />
-                  <input aria-label="Preço máximo em reais" type="number" min="0" step="0.01"
-                    inputMode="decimal" placeholder="Até" value={maxPrice}
-                    onChange={(event) => setMaxPrice(event.target.value)} style={controlStyle} />
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <div style={{ position: "relative", flex: 1, minWidth: 0 }}>
+                <svg aria-hidden="true" viewBox="0 0 24 24" width={20} height={20}
+                  fill="none" stroke="currentColor" strokeWidth={1.8}
+                  style={{ position: "absolute", left: 14, top: "50%", transform: "translateY(-50%)", color: "var(--ink-soft)", pointerEvents: "none" }}>
+                  <circle cx="10.5" cy="10.5" r="6.5" /><path d="m16 16 4.5 4.5" />
+                </svg>
+                <input aria-label="Buscar presente" type="search" value={search}
+                  onChange={(event) => setSearch(event.target.value)}
+                  placeholder="Buscar presente" style={{ ...controlStyle, paddingLeft: 44 }} />
+              </div>
+              <details style={{ position: "relative", flexShrink: 0 }}
+                onKeyDown={(event) => { if (event.key === "Escape") { event.currentTarget.open = false; event.currentTarget.querySelector("summary")?.focus(); } }}
+                onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) event.currentTarget.open = false; }}>
+                <summary aria-label="Ordenar presentes" title="Ordenar presentes"
+                  className="gift-sort-trigger"
+                  style={{ ...controlStyle, width: 44, height: 44, padding: 10, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", listStyle: "none" }}>
+                  <svg aria-hidden="true" viewBox="0 0 24 24" width={22} height={22} fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M8 4v16m-4-4 4 4 4-4M14 5h6m-6 5h4m-4 5h2" />
+                  </svg>
+                </summary>
+                <div role="group" aria-label="Ordenar por"
+                  style={{ position: "absolute", right: 0, top: 52, width: 240, zIndex: 10, padding: 6, borderRadius: 16, background: "var(--paper)", border: "1px solid var(--line)", boxShadow: "var(--shadow-sm)" }}>
+                  {([
+                    ["default", "Ordem da lista"],
+                    ["name", "Ordem alfabética (A–Z)"],
+                    ["price-asc", "Menor para o maior preço"],
+                    ["price-desc", "Maior para o menor preço"],
+                  ] as const).map(([value, label]) => (
+                    <button key={value} type="button" aria-pressed={sort === value}
+                      onClick={(event) => {
+                        setSort(value);
+                        const details = event.currentTarget.closest("details");
+                        if (details) { details.open = false; details.querySelector("summary")?.focus(); }
+                      }}
+                      style={{ display: "block", width: "100%", textAlign: "left", minHeight: 44, padding: "10px 12px", border: 0, borderRadius: 10, cursor: "pointer", color: "var(--ink)", background: sort === value ? "var(--lilac-soft)" : "transparent", fontSize: 14 }}>
+                      {label}
+                    </button>
+                  ))}
                 </div>
-              </fieldset>
-              <label style={{ color: "var(--ink-soft)" }}>
-                Ordenar por
-                <select value={sort} onChange={(event) => setSort(event.target.value as GiftSort)} style={controlStyle}>
-                  <option value="default">Ordem da lista</option>
-                  <option value="name">Ordem alfabética (A–Z)</option>
-                  <option value="price-asc">Menor preço</option>
-                  <option value="price-desc">Maior preço</option>
-                </select>
-              </label>
+              </details>
+            </div>
+            <div style={{ marginTop: 18 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, color: "var(--ink-soft)", fontSize: 14 }}>
+                <label htmlFor="gift-price-limit">Preço até</label>
+                <output htmlFor="gift-price-limit" style={{ fontWeight: 600 }}>{formatBRL(selectedPrice)}</output>
+              </div>
+              <input id="gift-price-limit" aria-label="Preço máximo do presente" type="range"
+                min={0} max={priceCeiling} step={1} value={selectedPrice}
+                aria-valuetext={formatBRL(selectedPrice)} className="calculadora-slider"
+                style={{ width: "100%", ["--pct" as string]: `${selectedPrice / priceCeiling * 100}%` }}
+                onChange={(event) => setMaxPrice(Number(event.target.value) === priceCeiling ? "" : (Number(event.target.value) / 100).toFixed(2))} />
             </div>
             <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 12, marginTop: 12 }}>
               <p role="status" style={{ color: "var(--ink-soft)", margin: 0 }}>
                 {visibleGifts.length} de {gifts.length} presentes
               </p>
-              {(search || minPrice || maxPrice || sort !== "default") && (
+              {(search || maxPrice || sort !== "default") && (
                 <button type="button" className="btn-outline" onClick={resetFilters}>Limpar filtros</button>
               )}
             </div>
-            {minPrice !== "" && maxPrice !== "" && Number(minPrice) > Number(maxPrice) && (
-              <p role="alert" style={{ color: "var(--ink-soft)", marginTop: 8 }}>O preço mínimo deve ser menor ou igual ao máximo.</p>
-            )}
           </div>
         )}
 
