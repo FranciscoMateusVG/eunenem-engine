@@ -15,6 +15,8 @@ export interface InterFeeObservation {
 export interface InterFeePage {
   fees: InterFeeObservation[];
   unmatched: number;
+  /** Invalid candidate rows; the day remains pending even when valid fees are saved. */
+  invalid: number;
 }
 export interface InterFeeReader {
   readonly accountRef: string;
@@ -45,7 +47,7 @@ export class InterProcessingFeeReader implements InterFeeReader {
   async readDay(day: string): Promise<InterFeePage> {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) throw new InterFeeReadError('incomplete');
     const token = await this.http.getToken();
-    const result: InterFeePage = { fees: [], unmatched: 0 };
+    const result: InterFeePage = { fees: [], unmatched: 0, invalid: 0 };
     for (let page = 0; page < 5; page++) {
       const query = new URLSearchParams({
         dataInicio: day,
@@ -65,7 +67,7 @@ export class InterProcessingFeeReader implements InterFeeReader {
         totalPaginas?: number;
       }>(response.body);
       if (!body || !Array.isArray(body.transacoes)) throw new InterFeeReadError('incomplete');
-      for (const raw of body.transacoes) appendFee(raw, day, result);
+      for (const raw of body.transacoes) appendFeeOrMarkInvalid(raw, day, result);
       if (
         body.ultimaPagina === true ||
         (typeof body.totalPaginas === 'number' && page + 1 >= body.totalPaginas)
@@ -75,6 +77,15 @@ export class InterProcessingFeeReader implements InterFeeReader {
       if (body.transacoes.length === 0) throw new InterFeeReadError('incomplete');
     }
     throw new InterFeeReadError('incomplete');
+  }
+}
+
+function appendFeeOrMarkInvalid(raw: unknown, day: string, result: InterFeePage): void {
+  try {
+    appendFee(raw, day, result);
+  } catch (error) {
+    if (!(error instanceof InterFeeReadError) || error.reason !== 'invalid_fee') throw error;
+    result.invalid++;
   }
 }
 
@@ -94,7 +105,10 @@ function appendFee(raw: unknown, day: string, result: InterFeePage): void {
     result.unmatched++;
     return;
   }
-  const match = typeof row.valor === 'string' ? /^(\d{1,10})\.(\d{2})$/.exec(row.valor) : null;
+  // Inter specifies a decimal string, not a fixed-width display amount.
+  // Extra fractional digits are accepted only when zero: never round money.
+  const match =
+    typeof row.valor === 'string' ? /^(\d{1,10})(?:\.(\d{1,2})0*)?$/.exec(row.valor) : null;
   if (
     typeof row.idTransacao !== 'string' ||
     !row.idTransacao.trim() ||
@@ -107,7 +121,7 @@ function appendFee(raw: unknown, day: string, result: InterFeePage): void {
   result.fees.push({
     externalRef: row.idTransacao,
     e2e,
-    amountCents: Number(match[1]) * 100 + Number(match[2]),
+    amountCents: Number(match[1]) * 100 + Number((match[2] ?? '').padEnd(2, '0')),
     occurredAt: new Date(`${day}T00:00:00-03:00`),
   });
 }

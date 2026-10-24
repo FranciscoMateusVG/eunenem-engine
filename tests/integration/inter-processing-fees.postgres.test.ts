@@ -18,6 +18,7 @@ let rateLimited = false;
 let missingIdentity = false;
 let feeIdentity = 'tarifa-1';
 let secondPageFails = false;
+let feeValues: unknown[] | null = null;
 function reader() {
   return new InterProcessingFeeReader(
     {
@@ -56,9 +57,17 @@ function fixtureResponse(path: string) {
           dataTransacao: '2026-09-01',
           tipoTransacao: 'TARIFA',
           tipoOperacao: 'D',
-          valor: '0.67',
+          valor: feeValues ? feeValues[0] : '0.67',
           detalhes: { endToEndId: e2e },
         },
+        ...(feeValues?.slice(1).map((valor, index) => ({
+          idTransacao: `synthetic-fee-${index + 2}`,
+          dataTransacao: '2026-09-01',
+          tipoTransacao: 'TARIFA',
+          tipoOperacao: 'D',
+          valor,
+          detalhes: { endToEndId: e2e },
+        })) ?? []),
         {
           idTransacao: 'pix-1',
           dataTransacao: '2026-09-01',
@@ -94,6 +103,7 @@ beforeEach(async () => {
   missingIdentity = false;
   feeIdentity = 'tarifa-1';
   secondPageFails = false;
+  feeValues = null;
 });
 afterAll(async () => {
   await sql`DELETE FROM provider_fee_events`.execute(testDb.db);
@@ -323,4 +333,100 @@ it('429 cools down the entire account across due days and fresh worker instances
   clock = new Date(now.getTime() + 60 * 60_000);
   await makeWorker().run();
   expect(calls.length).toBeGreaterThan(before);
+});
+
+it('decimal strings normalize exactly without requiring two printed decimals', async () => {
+  feeValues = ['1', '1.5', '1.50', '1.5000', '10.000', '0.670'];
+  await payment();
+  const result = await new InterFeeSync(
+    testDb.db,
+    reader(),
+    '11111111-1111-4111-8111-111111111111',
+    () => now,
+    true,
+  ).run();
+  expect(result).toEqual({ pending: false, imported: 6 });
+  const rows = (
+    await sql<{
+      amount_cents: string;
+    }>`SELECT amount_cents FROM provider_fee_events ORDER BY amount_cents`.execute(testDb.db)
+  ).rows;
+  expect(rows.map((r) => r.amount_cents)).toEqual(['67', '100', '150', '150', '150', '1000']);
+});
+
+it('bad precision does not erase valid fees; corrected day retries without duplicates', async () => {
+  await payment();
+  feeValues = ['0.67', '1.501'];
+  const service = new InterFeeSync(
+    testDb.db,
+    reader(),
+    '11111111-1111-4111-8111-111111111111',
+    () => now,
+    true,
+  );
+  expect(await service.run()).toEqual({ pending: true, imported: 1 });
+  expect((await sql`SELECT amount_cents FROM provider_fee_events`.execute(testDb.db)).rows).toEqual(
+    [{ amount_cents: '67' }],
+  );
+  expect(
+    (
+      await sql`SELECT last_reason,last_success_at,attempts FROM provider_fee_inter_scans WHERE day='2026-09-01'`.execute(
+        testDb.db,
+      )
+    ).rows,
+  ).toEqual([{ last_reason: 'invalid_fee', last_success_at: null, attempts: 1 }]);
+  feeValues = ['0.6700', '1.500'];
+  for (let n = 0; n < 2; n++) {
+    await sql`UPDATE provider_fee_inter_scans SET next_attempt_at=${new Date(now.getTime() - 1000)} WHERE day='2026-09-01'`.execute(
+      testDb.db,
+    );
+    expect(await service.run()).toEqual({ pending: false, imported: 2 });
+    expect(
+      (
+        await sql`SELECT amount_cents FROM provider_fee_events ORDER BY amount_cents`.execute(
+          testDb.db,
+        )
+      ).rows,
+    ).toEqual([{ amount_cents: '67' }, { amount_cents: '150' }]);
+  }
+  expect(
+    (
+      await sql`SELECT last_reason,last_success_at,attempts FROM provider_fee_inter_scans WHERE day='2026-09-01'`.execute(
+        testDb.db,
+      )
+    ).rows,
+  ).toEqual([{ last_reason: null, last_success_at: now, attempts: 0 }]);
+});
+
+it('malformed or lossy decimals never become zero or an estimated fee', async () => {
+  feeValues = ['1.501', '-1.50', '1,50', '1e2', '1.', '.5', '', 1.5, '10000000000.00'];
+  const service = new InterFeeSync(
+    testDb.db,
+    reader(),
+    '11111111-1111-4111-8111-111111111111',
+    () => now,
+    true,
+  );
+  expect(await service.run()).toEqual({ pending: true, imported: 0 });
+  expect((await sql`SELECT id FROM provider_fee_events`.execute(testDb.db)).rows).toEqual([]);
+});
+
+it('a conflicting observed identity still rolls back the day, never overwrites a fee', async () => {
+  await payment();
+  const service = new InterFeeSync(
+    testDb.db,
+    reader(),
+    '11111111-1111-4111-8111-111111111111',
+    () => now,
+    true,
+  );
+  await service.run();
+  feeValues = ['0.68', '1.50'];
+  await sql`UPDATE provider_fee_inter_scans SET next_attempt_at=${new Date(now.getTime() - 1000)} WHERE day='2026-09-01'`.execute(
+    testDb.db,
+  );
+  expect(await service.run()).toEqual({ pending: true, imported: 0 });
+  expect((await sql`SELECT amount_cents FROM provider_fee_events`.execute(testDb.db)).rows).toEqual(
+    [{ amount_cents: '67' }],
+  );
 });
