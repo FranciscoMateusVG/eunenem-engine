@@ -10,6 +10,7 @@ import { emitirCarrinhoAberto } from "@/lib/analytics-funil";
 import { useTweaks } from "./TweaksContext";
 import { OWNER_EDIT_LISTA_LABEL } from "@/lib/pagina-owner";
 import { usePaginaListaPresentes } from "@/lib/paginaApi";
+import { filterVisitorGifts, type GiftSort } from "@/lib/visitorGiftFilters";
 import { groupVisitorGifts, type VisitorGift } from "@/lib/visitorGift";
 
 // aperture-3d9t (original visual scaffold) + aperture-3xgch (data swap).
@@ -75,6 +76,26 @@ export function Marketplace({ slug, ownerEditHref = null }: MarketplaceProps) {
   const [selectedGift, setSelectedGift] = useState<VisitorGift | null>(null);
 
   const gifts = useMemo(() => (data ? groupVisitorGifts(data) : []), [data]);
+
+  const [search, setSearch] = useState("");
+  const [minPrice, setMinPrice] = useState("");
+  const [maxPrice, setMaxPrice] = useState("");
+  const [sort, setSort] = useState<GiftSort>("default");
+  const visibleGifts = useMemo(
+    () => filterVisitorGifts(gifts, { search, minPrice, maxPrice, sort }),
+    [gifts, search, minPrice, maxPrice, sort],
+  );
+  const resetFilters = () => {
+    setSearch("");
+    setMinPrice("");
+    setMaxPrice("");
+    setSort("default");
+  };
+  const controlStyle = {
+    width: "100%", minWidth: 0, minHeight: 44, padding: "10px 14px",
+    borderRadius: 16, border: "1px solid var(--line)",
+    background: "var(--paper)", color: "var(--ink)", fontSize: 16,
+  };
 
   const cart = useCart();
   const drawer = useCartDrawer();
@@ -165,6 +186,49 @@ export function Marketplace({ slug, ownerEditHref = null }: MarketplaceProps) {
           )}
         </header>
 
+        {!isLoading && !isError && gifts.length > 0 && (
+          <div role="search" aria-label="Filtrar presentes" style={{ marginTop: 32 }}>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              <label style={{ color: "var(--ink-soft)" }}>
+                Buscar presente
+                <input type="search" value={search} onChange={(event) => setSearch(event.target.value)}
+                  placeholder="Nome ou tipo de presente" style={controlStyle} />
+              </label>
+              <fieldset style={{ minWidth: 0, border: 0, padding: 0, margin: 0, color: "var(--ink-soft)" }}>
+                <legend>Faixa de preço (R$)</legend>
+                <div className="grid grid-cols-2 gap-2">
+                  <input aria-label="Preço mínimo em reais" type="number" min="0" step="0.01"
+                    inputMode="decimal" placeholder="De" value={minPrice}
+                    onChange={(event) => setMinPrice(event.target.value)} style={controlStyle} />
+                  <input aria-label="Preço máximo em reais" type="number" min="0" step="0.01"
+                    inputMode="decimal" placeholder="Até" value={maxPrice}
+                    onChange={(event) => setMaxPrice(event.target.value)} style={controlStyle} />
+                </div>
+              </fieldset>
+              <label style={{ color: "var(--ink-soft)" }}>
+                Ordenar por
+                <select value={sort} onChange={(event) => setSort(event.target.value as GiftSort)} style={controlStyle}>
+                  <option value="default">Ordem da lista</option>
+                  <option value="name">Ordem alfabética (A–Z)</option>
+                  <option value="price-asc">Menor preço</option>
+                  <option value="price-desc">Maior preço</option>
+                </select>
+              </label>
+            </div>
+            <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 12, marginTop: 12 }}>
+              <p role="status" style={{ color: "var(--ink-soft)", margin: 0 }}>
+                {visibleGifts.length} de {gifts.length} presentes
+              </p>
+              {(search || minPrice || maxPrice || sort !== "default") && (
+                <button type="button" className="btn-outline" onClick={resetFilters}>Limpar filtros</button>
+              )}
+            </div>
+            {minPrice !== "" && maxPrice !== "" && Number(minPrice) > Number(maxPrice) && (
+              <p role="alert" style={{ color: "var(--ink-soft)", marginTop: 8 }}>O preço mínimo deve ser menor ou igual ao máximo.</p>
+            )}
+          </div>
+        )}
+
         {/* aperture-rdr8u — Mobile renders 2 columns (was 1) because the
             inline auto-fill minmax(260px, 1fr) couldn't fit 2 columns under
             ~544px viewport. From sm: up we restore the original auto-fill
@@ -198,9 +262,13 @@ export function Marketplace({ slug, ownerEditHref = null }: MarketplaceProps) {
           >
             ainda não tem presentes aqui — volte daqui a pouco ♡
           </p>
+        ) : visibleGifts.length === 0 ? (
+          <p className="text-center mt-10" style={{ color: "var(--ink-soft)" }}>
+            Nenhum presente encontrado. Tente outro nome ou faixa de preço ♡
+          </p>
         ) : (
           <div className="grid gap-4 sm:gap-6 mt-12 grid-cols-2 sm:grid-cols-[repeat(auto-fill,minmax(260px,1fr))]">
-            {gifts.map((g) => (
+            {visibleGifts.map((g) => (
               <GiftCard key={g.nome} gift={g} onPick={onPick} onAdd={onAdd} />
             ))}
           </div>
