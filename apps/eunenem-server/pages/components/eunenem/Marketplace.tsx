@@ -1,5 +1,5 @@
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { artigoPosse } from "@/lib/concordancia";
 import { BottleDoodle, FlowerDoodle } from "./Doodles";
 import { GiftCard } from "./GiftCard";
@@ -81,6 +81,19 @@ export function Marketplace({ slug, ownerEditHref = null }: MarketplaceProps) {
   const [search, setSearch] = useState("");
   const [maxPrice, setMaxPrice] = useState("");
   const [sort, setSort] = useState<GiftSort>("default");
+  const sortMenuRef = useRef<HTMLDetailsElement>(null);
+  useEffect(() => {
+    // Close on an actual outside press, not blur: Safari can report a null
+    // relatedTarget when a menu option is pressed, before its click fires.
+    const closeOutside = (event: PointerEvent) => {
+      const menu = sortMenuRef.current;
+      if (menu && event.target instanceof Node && !menu.contains(event.target)) {
+        menu.open = false;
+      }
+    };
+    document.addEventListener("pointerdown", closeOutside);
+    return () => document.removeEventListener("pointerdown", closeOutside);
+  }, []);
   const priceCeiling = Math.max(1, ...gifts.map((gift) => gift.valorCents));
   const selectedPrice = maxPrice === "" ? priceCeiling : Math.min(Math.round(Number(maxPrice) * 100), priceCeiling);
   const visibleGifts = useMemo(
@@ -200,9 +213,9 @@ export function Marketplace({ slug, ownerEditHref = null }: MarketplaceProps) {
                   onChange={(event) => setSearch(event.target.value)}
                   placeholder="Buscar presente" style={{ ...controlStyle, paddingLeft: 44 }} />
               </div>
-              <details style={{ position: "relative", flexShrink: 0 }}
+              <details ref={sortMenuRef} style={{ position: "relative", flexShrink: 0 }}
                 onKeyDown={(event) => { if (event.key === "Escape") { event.currentTarget.open = false; event.currentTarget.querySelector("summary")?.focus(); } }}
-                onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) event.currentTarget.open = false; }}>
+                onBlur={(event) => { if (event.relatedTarget && !event.currentTarget.contains(event.relatedTarget)) event.currentTarget.open = false; }}>
                 <summary aria-label="Ordenar presentes" title="Ordenar presentes"
                   className="gift-sort-trigger"
                   style={{ ...controlStyle, width: 44, height: 44, padding: 10, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", listStyle: "none" }}>

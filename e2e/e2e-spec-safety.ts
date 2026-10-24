@@ -75,6 +75,7 @@ export const E2E_SPEC_SAFETY = [
     capability: 'Approves, retries, and manually settles real PIX payouts.',
   },
   { file: 'slug-isolation-gate.spec.ts', safety: 'non-payment' },
+  { file: 'visitor-gift-sorting.spec.ts', safety: 'non-payment' },
   {
     file: 'stripe-webhook-cartao.spec.ts',
     safety: 'money-movement',
