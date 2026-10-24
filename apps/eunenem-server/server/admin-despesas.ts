@@ -23,7 +23,8 @@ import { emSnapshotDeLeitura } from "./admin-receita.js";
  * (`occurred_at`), em dias locais de São Paulo e na mesma grade da Receita 1b.
  *
  * O QUE NÃO É: estimativa. Pagamento sem tarifa observada não vira R$ 0 —
- * aparece na cobertura como pendente ou falho. Nenhuma chamada a provedor.
+ * aparece pendente/falho, exceto franquia Inter observada após scan OK e 72h.
+ * Nenhuma chamada a provedor.
  *
  * ESCOPO: evento com `payment_id` só conta se o pagamento resolve para uma
  * campanha DESTA plataforma. Evento sem `payment_id` (ex.: tarifa Inter sem
@@ -33,10 +34,10 @@ import { emSnapshotDeLeitura } from "./admin-receita.js";
  *
  * COBERTURA (por pagamento elegível, datado pelo dia do PAGAMENTO):
  *   Stripe — status do `provider_fee_sync`; sem linha de sync = pendente.
- *   Inter  — confirmado SÓ com tarifa Inter vinculada ao pagamento. Dia do
- *            pagamento com scan esgotado (≥ 8 tentativas com erro, sem sucesso)
- *            NA CONTA DO SYNC = falha; scans de outra conta não contam. Todo o resto é pendente — inclusive dia
- *            escaneado com sucesso sem tarifa: extrato vazio NÃO confirma zero.
+ *   Inter — tarifa vinculada tem precedência. Scan OK da conta + 72h desde
+ *            pagamento + E2E válido sem tarifa: zero observado (franquia).
+ *            É derivado, não grava evento fictício; tarifa posterior substitui.
+ *            Scan esgotado com erro = falha; demais casos = pendente.
  * Cada bucket exibido (KPIs, meses, semanas) recebe a sua contagem.
  *
  * SNAPSHOT ÚNICO: as quatro consultas (dias, total independente, cobertura,
@@ -136,7 +137,7 @@ function toProvedor(value: string): ProvedorDespesa {
 }
 
 function toStatus(value: string): StatusTarifa {
-  if (value === "confirmed" || value === "failed") return value;
+  if (value === "confirmed" || value === "failed" || value === "no_fee") return value;
   return "pending";
 }
 
@@ -230,6 +231,19 @@ export async function loadDespesasPainel(
               SELECT 1 FROM provider_fee_events e
               WHERE e.payment_id = p.id AND e.provider = 'inter'
             ) THEN 'confirmed'
+            WHEN p.criado_em <= ${input.now}::timestamptz - interval '72 hours'
+              AND p.intencao_e2e_external_ref ~ '^[A-Za-z0-9]{32}$'
+              AND EXISTS (
+                SELECT 1 FROM provider_fee_inter_scans x
+                WHERE x.account_ref = ${interConta}
+                  AND x.day = (p.criado_em AT TIME ZONE ${sql.lit(RECEITA_TIMEZONE)})::date
+                  AND x.last_success_at IS NOT NULL AND x.last_reason IS NULL
+              )
+              AND NOT EXISTS (
+                SELECT 1 FROM provider_fee_events e
+                WHERE e.provider = 'inter' AND e.account_ref = ${interConta}
+                  AND e.matching_ref = p.intencao_e2e_external_ref
+              ) THEN 'no_fee'
             WHEN EXISTS (
               SELECT 1 FROM provider_fee_inter_scans x
               WHERE x.account_ref = ${interConta}

@@ -28,7 +28,7 @@ export interface NaoVinculadas {
   readonly cents: number;
 }
 
-export type StatusTarifa = "confirmed" | "pending" | "failed";
+export type StatusTarifa = "confirmed" | "pending" | "failed" | "no_fee";
 export type ProvedorDespesa = "stripe" | "inter";
 
 /**
@@ -44,6 +44,8 @@ export interface DiaCobertura {
 
 export interface ContagemCobertura {
   readonly confirmados: number;
+  /** Subconjunto confirmado: zero observado após scan completo e 72h. */
+  readonly semTarifa?: number;
   readonly pendentes: number;
   readonly falhos: number;
 }
@@ -142,16 +144,20 @@ export function contarCobertura(
   intervalo?: Intervalo,
 ): ContagemCobertura {
   let confirmados = 0;
+  let semTarifa = 0;
   let pendentes = 0;
   let falhos = 0;
   for (const d of dias) {
     if (d.provedor !== provedor) continue;
     if (intervalo && !dentro(d.dia, intervalo)) continue;
-    if (d.status === "confirmed") confirmados += d.pagamentos;
+    if (d.status === "no_fee") {
+      confirmados += d.pagamentos;
+      semTarifa += d.pagamentos;
+    } else if (d.status === "confirmed") confirmados += d.pagamentos;
     else if (d.status === "failed") falhos += d.pagamentos;
     else pendentes += d.pagamentos;
   }
-  return { confirmados, pendentes, falhos };
+  return { confirmados, pendentes, falhos, ...(semTarifa > 0 ? { semTarifa } : {}) };
 }
 
 /**

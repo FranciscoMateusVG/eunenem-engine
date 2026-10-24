@@ -70,3 +70,20 @@ After complete pagination, valid fees can commit even if another candidate is in
 Reprocessing after approved hotfix: existing non-exhausted days retry under current backoff. To accelerate or revive exhausted days, Peppy must have explicit authorization for the exact11 day/account rows, preserve a before-image, and requeue only those with `last_reason='invalid_fee'` and no unexpired claim. Set `attempts=0,next_attempt_at=now()` and clear expired claim fields; keep the reason until a successful scan. Do NOT delete fee events, reset successful days, bypass account-wide429 cooldown, or manually call financial operations. Existing worker imports by provider/account/environment/idTransacao; repeated observations cannot duplicate or replace the original amount/E2E.
 
 Acceptance after rollout (RO aggregates): exact target-day count, reasons/success timestamps, event count/sums and duplicate-key count. This PR does not perform production requeue or assert all11 days are already fixed. Synthetic PG+HTTP tests cover decimal normalization, partial invalid→corrected retry→repeat with exactly2 rows, malformed precision rejection,429 atomicity and identity-conflict rollback.
+
+
+## yr3fj — zero observado / franquia Inter (24/10/2026)
+
+Decisão explícita do operador: há franquia mensal de PIX, sem fixar ou estimar
+quantidade/valor. Na cobertura, um pagamento Inter com E2E válido, pelo menos
+72 horas desde sua criação e scan completo bem-sucedido do seu dia (SP), na
+conta ativa e sem erro atual, conta como confirmado sem tarifa quando não há
+evento vinculado nem evento dessa conta com o mesmo E2E. Sem scan, outra conta,
+erro, E2E ausente ou prazo insuficiente continuam pendentes/falhos.
+
+A classificação é derivada em leitura, sem evento monetário fictício/migration.
+Uma tarifa real vinculada tem precedência; sua chegada remove a classificação
+de franquia automaticamente, sem duplicar pagamento ou somar um valor estimado.
+A UI discrimina “N PIX sem tarifa – franquia” dentro dos confirmados. Não é
+garantia contratual de gratuidade futura: descreve ausência observada com a
+janela de tolerância decidida pelo operador.

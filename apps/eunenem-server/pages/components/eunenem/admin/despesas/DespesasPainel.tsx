@@ -52,6 +52,7 @@ export function resumoCobertura(c: Contagem, meio: "cartão" | "PIX"): string {
     return `nenhum pagamento com ${meio} no período`;
   }
   const partes = [plural(c.confirmados, "confirmada", "confirmadas")];
+  if (c.semTarifa) partes.push(`${c.semTarifa} PIX sem tarifa – franquia`);
   if (c.pendentes > 0) partes.push(plural(c.pendentes, "pendente", "pendentes"));
   if (c.falhos > 0) partes.push(plural(c.falhos, "falha", "falhas"));
   if (c.pendentes === 0 && c.falhos === 0) partes.push("nenhuma pendente");
@@ -595,8 +596,9 @@ export function DespesasNotas() {
       </p>
       <p>
         <span className="text-ink-soft">Cobertura:</span> pagamentos do período, pela data do
-        pagamento. Stripe: leitura da tarifa por pagamento. Inter: confirmada só quando a tarifa
-        do extrato é vinculada ao pagamento; extrato sem tarifa não confirma zero.
+        pagamento. Stripe: leitura da tarifa por pagamento. Inter: tarifa vinculada ou, após
+        72h do pagamento e scan completo, sem tarifa cobrada (franquia Inter). Uma tarifa
+        posterior substitui o zero observado.
       </p>
       <p>
         <span className="text-ink-soft">Não vinculadas:</span> tarifas que o provedor cobrou sem
