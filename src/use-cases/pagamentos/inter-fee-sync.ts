@@ -26,13 +26,29 @@ export class InterFeeSync {
        AND p.criado_em<=${now}) AS payments`.execute(this.db);
     return result.rows[0] ?? { days: 0, payments: 0 };
   }
+  /** One admission snapshot; per-day limits/leases and account cooldown remain intact. */
+  async runAll() {
+    const dueBefore = this.clock();
+    let imported = 0;
+    while (true) {
+      const result = await this.runBatch(dueBefore);
+      imported += result.imported;
+      if (!result.processed) return { imported };
+    }
+  }
   async run(): Promise<{ pending: boolean; imported: number }> {
+    const { pending, imported } = await this.runBatch(this.clock());
+    return { pending, imported };
+  }
+  private async runBatch(
+    dueBefore: Date,
+  ): Promise<{ pending: boolean; imported: number; processed?: boolean }> {
     if (!this.enabled || !this.reader) return { pending: true, imported: 0 };
     const now = this.clock();
     const account = this.reader.accountRef;
     await sql`INSERT INTO provider_fee_inter_scans(account_ref,day,next_attempt_at)
-      SELECT ${account},d::date,${now} FROM generate_series('2026-09-01'::date,
-        (${now}::timestamptz AT TIME ZONE 'America/Sao_Paulo')::date,'1 day'::interval) d
+      SELECT ${account},d::date,${dueBefore} FROM generate_series('2026-09-01'::date,
+        (${dueBefore}::timestamptz AT TIME ZONE 'America/Sao_Paulo')::date,'1 day'::interval) d
       ON CONFLICT DO NOTHING`.execute(this.db);
     // A persisted 429 on ANY day blocks this account before OAuth or statement HTTP.
     // Derive the cooldown from durable scan state, including exhausted days.
@@ -44,7 +60,7 @@ export class InterFeeSync {
         WHERE cooldown.account_ref=${account} AND cooldown.last_reason='rate_limited'
           AND cooldown.next_attempt_at>${now}
       )
-      AND attempts<8 AND next_attempt_at<=${now} AND (claimed_until IS NULL OR claimed_until<=${now})
+      AND attempts<8 AND next_attempt_at<=${dueBefore} AND (claimed_until IS NULL OR claimed_until<=${now})
       ORDER BY next_attempt_at,day LIMIT 1 FOR UPDATE SKIP LOCKED
     ) UPDATE provider_fee_inter_scans s SET claim_token=${token}::uuid,
       claimed_until=${new Date(now.getTime() + 300_000)},attempts=attempts+1
@@ -62,7 +78,7 @@ export class InterFeeSync {
         const owned =
           await sql`SELECT day FROM provider_fee_inter_scans WHERE account_ref=${account}
           AND day=${scan.day}::date AND claim_token=${token}::uuid FOR UPDATE`.execute(trx);
-        if (!owned.rows.length) return { pending: true, imported: 0 };
+        if (!owned.rows.length) return { pending: true, imported: 0, processed: true };
         let imported = 0;
         for (const fee of page.fees) {
           const payments = await sql<{
@@ -91,14 +107,14 @@ export class InterFeeSync {
             WHERE account_ref=${account} AND day=${scan.day}::date AND claim_token=${token}::uuid`.execute(
             trx,
           );
-          return { pending: true, imported };
+          return { pending: true, imported, processed: true };
         }
         await sql`UPDATE provider_fee_inter_scans SET last_success_at=${now},last_reason=NULL,attempts=0,
           unmatched_count=${page.unmatched},next_attempt_at=${new Date(now.getTime() + 86_400_000)},claim_token=NULL,claimed_until=NULL
           WHERE account_ref=${account} AND day=${scan.day}::date AND claim_token=${token}::uuid`.execute(
           trx,
         );
-        return { pending: false, imported };
+        return { pending: false, imported, processed: true };
       });
     } catch (error) {
       const reason = error instanceof InterFeeReadError ? error.reason : 'unavailable';
@@ -107,7 +123,7 @@ export class InterFeeSync {
         WHERE account_ref=${account} AND day=${scan.day}::date AND claim_token=${token}::uuid`.execute(
         this.db,
       );
-      return { pending: true, imported: 0 };
+      return { pending: true, imported: 0, processed: true };
     }
   }
 }
