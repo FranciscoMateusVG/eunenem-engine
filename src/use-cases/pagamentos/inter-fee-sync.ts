@@ -52,6 +52,9 @@ export class InterFeeSync {
       RETURNING s.day::text,s.attempts`.execute(this.db);
     const scan = rows.rows[0];
     if (!scan) return { pending: true, imported: 0 };
+    const retryAt = new Date(
+      now.getTime() + Math.min(86_400_000, 3_600_000 * 2 ** Math.min(scan.attempts - 1, 5)),
+    );
     try {
       const page = await this.reader.readDay(scan.day);
       const environment = this.reader.environment;
@@ -80,6 +83,16 @@ export class InterFeeSync {
           if (!inserted.rows.length) throw new InterFeeReadError('invalid_fee');
           imported++;
         }
+        if (page.invalid > 0) {
+          // Only a fully paginated response reaches here. Preserve valid rows,
+          // but do not mark this day successful or erase its finite retry budget.
+          await sql`UPDATE provider_fee_inter_scans SET last_reason='invalid_fee',
+            unmatched_count=${page.unmatched},next_attempt_at=${retryAt},claim_token=NULL,claimed_until=NULL
+            WHERE account_ref=${account} AND day=${scan.day}::date AND claim_token=${token}::uuid`.execute(
+            trx,
+          );
+          return { pending: true, imported };
+        }
         await sql`UPDATE provider_fee_inter_scans SET last_success_at=${now},last_reason=NULL,attempts=0,
           unmatched_count=${page.unmatched},next_attempt_at=${new Date(now.getTime() + 86_400_000)},claim_token=NULL,claimed_until=NULL
           WHERE account_ref=${account} AND day=${scan.day}::date AND claim_token=${token}::uuid`.execute(
@@ -90,7 +103,7 @@ export class InterFeeSync {
     } catch (error) {
       const reason = error instanceof InterFeeReadError ? error.reason : 'unavailable';
       await sql`UPDATE provider_fee_inter_scans SET last_reason=${reason},claimed_until=NULL,claim_token=NULL,
-        next_attempt_at=${new Date(now.getTime() + Math.min(86_400_000, 3_600_000 * 2 ** Math.min(scan.attempts - 1, 5)))}
+        next_attempt_at=${retryAt}
         WHERE account_ref=${account} AND day=${scan.day}::date AND claim_token=${token}::uuid`.execute(
         this.db,
       );
