@@ -334,6 +334,14 @@ describe('Despesas — cobertura e avisos', () => {
     const t = texto(render(painel()));
     expect(t).toContain('data em que o provedor debitou');
     expect(t).toContain('Nada é estimado');
-    expect(t).toContain('extrato sem tarifa não confirma zero');
+    expect(t).toContain('sem tarifa cobrada (franquia Inter)');
   });
+});
+
+it('yr3fj: mostra a contagem separada de PIX sem tarifa na cobertura', () => {
+  const data = painel(
+    [],
+    [{ dia: '2026-10-02', provedor: 'inter', status: 'no_fee', pagamentos: 3 }],
+  );
+  expect(texto(render(data))).toContain('3 PIX sem tarifa – franquia');
 });

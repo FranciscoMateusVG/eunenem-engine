@@ -323,6 +323,55 @@ describe('Despesas — cobertura: pendente é pendente, nunca zero', () => {
     expect(d.cobertura.stripe.ultimaLeituraEm).toBeNull();
   });
 
+  it('yr3fj: scan completo e 72h confirmam franquia; tarifa posterior substitui zero', async () => {
+    const campaign = await seed.campanha();
+    const old = await pix(campaign, new Date(NOW.getTime() - 72 * 3600_000));
+    await pix(campaign, new Date(NOW.getTime() - 72 * 3600_000 + 1));
+    await scan('2037-10-02', { sucesso: NOW });
+    let data = await caller().admin.despesas.painel();
+    expect(data.cobertura.inter.desdeInicio).toMatchObject({
+      confirmados: 1,
+      semTarifa: 1,
+      pendentes: 1,
+      falhos: 0,
+    });
+    expect(data.kpis.mesAtual.interCents).toBe(0);
+    await tarifa({ provider: 'inter', amountCents: 99, occurredAt: NOW, paymentId: old });
+    data = await caller().admin.despesas.painel();
+    expect(data.cobertura.inter.desdeInicio).toMatchObject({
+      confirmados: 1,
+      pendentes: 1,
+    });
+    expect(data.cobertura.inter.desdeInicio.semTarifa ?? 0).toBe(0);
+    expect(data.kpis.mesAtual.interCents).toBe(99);
+    expect((await caller().admin.despesas.painel()).cobertura).toEqual(data.cobertura);
+  });
+
+  it('yr3fj: sem scan, scan errado/inválido ou E2E ausente não confirma franquia', async () => {
+    const campaign = await seed.campanha();
+    await pix(campaign, sp('2037-09-01T12:00:00'));
+    await pix(campaign, sp('2037-09-02T12:00:00'));
+    await scan('2037-09-02', { conta: 'outra-conta', sucesso: NOW });
+    await pix(campaign, sp('2037-09-03T12:00:00'));
+    await scan('2037-09-03', { sucesso: NOW, motivo: 'invalid_fee' });
+    const missing = await pix(campaign, sp('2037-09-04T12:00:00'));
+    await sql`UPDATE pagamentos SET intencao_e2e_external_ref=NULL WHERE id=${missing}::uuid`.execute(
+      testDb.db,
+    );
+    await scan('2037-09-04', { sucesso: NOW });
+    const unlinked = await pix(campaign, sp('2037-09-05T12:00:00'));
+    await scan('2037-09-05', { sucesso: NOW });
+    await sql`
+      INSERT INTO provider_fee_events
+      (provider, account_ref, environment, external_ref, amount_cents, currency,
+       occurred_at, observed_at, source, matching_ref)
+      SELECT 'inter', 'acct_fixture', 'live', 'unlinked-test', 99, 'brl',
+       ${NOW}, ${NOW}, 'fixture', intencao_e2e_external_ref FROM pagamentos WHERE id=${unlinked}::uuid
+    `.execute(testDb.db);
+    const data = await caller().admin.despesas.painel();
+    expect(data.cobertura.inter.desdeInicio).toEqual({ confirmados: 0, pendentes: 5, falhos: 0 });
+  });
+
   it('Inter: confirmado só com tarifa vinculada; scan vazio NÃO confirma zero; dia esgotado é falha', async () => {
     const campanha = await seed.campanha();
     // Confirmado: tarifa Inter vinculada ao pagamento.
