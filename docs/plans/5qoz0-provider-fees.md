@@ -87,3 +87,24 @@ de franquia automaticamente, sem duplicar pagamento ou somar um valor estimado.
 A UI discrimina “N PIX sem tarifa – franquia” dentro dos confirmados. Não é
 garantia contratual de gratuidade futura: descreve ausência observada com a
 janela de tolerância decidida pelo operador.
+
+
+## 7513q — coleta agendada 3x/dia (24/10/2026)
+
+Escopo final aprovado: **sem webhook novo**, sem configuração na conta Stripe.
+As duas filas existentes passam para cron `0 6,14,22 * * *` com timezone
+`America/Sao_Paulo` (06:00/14:00/22:00 SP). O registro substitui o cron antigo;
+flag OFF continua removendo os schedules e impedindo escrita.
+
+Cada execução drena os elegíveis vencidos no instante de admissão, em lotes
+sequenciais existentes (Stripe: até 20 admissões/5 claims; Inter: um dia por
+claim). HTTP/paginação, leases, attempts/tetos, backoff e cooldown Inter por
+conta são mantidos. Uma tentativa que ganha backoff não é repetida na mesma
+execução, mesmo que a execução atravesse esse horário. Trabalho já claimed
+por outra instância não é tomado. A expiração externa do job passa de 240s
+para 6h (abaixo do intervalo de 8h), para caber a drenagem; retry pg-boss=0.
+Não altera a franquia derivada de 72h nem inventa tarifas.
+
+Gate operacional após deploy: conferir ambos os schedules persistidos
+(cron/timezone), flag, saúde e resultado do próximo horário. Nenhum envio ou
+transferência; somente coleta já autorizada. Não há migration/env nova.
