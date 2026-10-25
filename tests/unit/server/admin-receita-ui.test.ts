@@ -53,6 +53,7 @@ function painel(
   const grade = gradePainel(hoje);
   const agregado = agregarDias(grade, dias);
   return {
+    lucro: { meses: [], semanas: [] },
     snapshotAt: '2026-10-05T15:00:00.000Z',
     timezone: 'America/Sao_Paulo',
     hoje,
