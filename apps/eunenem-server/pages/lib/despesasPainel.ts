@@ -5,6 +5,7 @@
 // as tarifas observadas somadas por dia de débito e as contagens de cobertura
 // por dia do pagamento; aqui elas viram buckets.
 
+import type { DiaManual } from "./despesasManuais.js";
 import {
   type GradePainel,
   type Intervalo,
@@ -53,11 +54,21 @@ export interface ContagemCobertura {
 export interface ValoresDespesas {
   readonly stripeCents: number;
   readonly interCents: number;
-  /** Stripe + Inter vinculados. Não inclui as não vinculadas. */
+  /** Despesas recorrentes/manuais (aperture-0ngn4): valor conhecido, sempre confirmado. */
+  readonly manualCents: number;
+  /** Stripe + Inter vinculados + manuais. Não inclui as não vinculadas. */
   readonly totalCents: number;
   readonly naoVinculadas: NaoVinculadas;
-  /** Pagamentos do período (por data do pagamento) com tarifa confirmada/pendente/falha. */
-  readonly cobertura: { readonly stripe: ContagemCobertura; readonly inter: ContagemCobertura };
+  /**
+   * Pagamentos do período (por data do pagamento) com tarifa
+   * confirmada/pendente/falha. `manual`: ocorrências do período, todas
+   * confirmadas — nunca deixam um período incompleto.
+   */
+  readonly cobertura: {
+    readonly stripe: ContagemCobertura;
+    readonly inter: ContagemCobertura;
+    readonly manual: ContagemCobertura;
+  };
 }
 
 export interface DespesasAgregado {
@@ -68,6 +79,7 @@ export interface DespesasAgregado {
   readonly somaDosDias: {
     readonly stripeCents: number;
     readonly interCents: number;
+    readonly manualCents: number;
     readonly naoVinculadasCents: number;
   };
 }
@@ -80,7 +92,15 @@ function valoresDe<T extends Intervalo>(
   intervalo: T,
   dias: readonly DiaDespesas[],
   cobertura: readonly DiaCobertura[],
+  manuais: readonly DiaManual[],
 ): T & ValoresDespesas {
+  let manualCents = 0;
+  let ocorrencias = 0;
+  for (const m of manuais) {
+    if (!dentro(m.dia, intervalo)) continue;
+    manualCents += m.manualCents;
+    ocorrencias += m.ocorrencias;
+  }
   let stripeCents = 0;
   let interCents = 0;
   let count = 0;
@@ -96,11 +116,13 @@ function valoresDe<T extends Intervalo>(
     ...intervalo,
     stripeCents,
     interCents,
-    totalCents: stripeCents + interCents,
+    manualCents,
+    totalCents: stripeCents + interCents + manualCents,
     naoVinculadas: { count, cents },
     cobertura: {
       stripe: contarCobertura(cobertura, "stripe", intervalo),
       inter: contarCobertura(cobertura, "inter", intervalo),
+      manual: { confirmados: ocorrencias, pendentes: 0, falhos: 0 },
     },
   };
 }
@@ -109,6 +131,7 @@ export function agregarDespesas(
   grade: GradePainel,
   dias: readonly DiaDespesas[],
   cobertura: readonly DiaCobertura[] = [],
+  manuais: readonly DiaManual[] = [],
 ): DespesasAgregado {
   let stripeCents = 0;
   let interCents = 0;
@@ -120,16 +143,22 @@ export function agregarDespesas(
     interCents += d.interCents;
     naoVinculadasCents += d.naoVinculadasCents;
   }
+  let manualCents = 0;
+  for (const m of manuais) {
+    if (!dentro(m.dia, grade.janela)) throw new Error("despesas_painel_dia_fora_da_janela");
+    manualCents += m.manualCents;
+  }
+  const v = <T extends Intervalo>(i: T) => valoresDe(i, dias, cobertura, manuais);
   return {
     kpis: {
-      mesAtual: valoresDe(grade.kpis.mesAtual, dias, cobertura),
-      mesAnterior: valoresDe(grade.kpis.mesAnterior, dias, cobertura),
-      semanaAtual: valoresDe(grade.kpis.semanaAtual, dias, cobertura),
-      semanaAnterior: valoresDe(grade.kpis.semanaAnterior, dias, cobertura),
+      mesAtual: v(grade.kpis.mesAtual),
+      mesAnterior: v(grade.kpis.mesAnterior),
+      semanaAtual: v(grade.kpis.semanaAtual),
+      semanaAnterior: v(grade.kpis.semanaAnterior),
     },
-    meses: grade.meses.map((m) => valoresDe(m, dias, cobertura)),
-    semanas: grade.semanas.map((s) => valoresDe(s, dias, cobertura)),
-    somaDosDias: { stripeCents, interCents, naoVinculadasCents },
+    meses: grade.meses.map(v),
+    semanas: grade.semanas.map(v),
+    somaDosDias: { stripeCents, interCents, manualCents, naoVinculadasCents },
   };
 }
 
@@ -178,18 +207,22 @@ export function completude(...contagens: readonly ContagemCobertura[]): Completu
 
 /**
  * Barra empilhada de despesas: altura = total (escala única, o maior total
- * do gráfico chega a `escala`% da área); a fatia de baixo é Stripe, o resto
- * Inter. `total` é % da área; `stripe` é % da barra.
+ * do gráfico chega a `escala`% da área); a fatia de baixo é Stripe, a de cima
+ * são as manuais, o meio é Inter. `total` é % da área; `stripe` e `manual`
+ * são % da barra.
  */
 export function barraDespesas(
   stripe: number,
   total: number,
   maxTotal: number,
   escala: number,
-): { total: number; stripe: number } {
-  if (total <= 0 || maxTotal <= 0) return { total: 0, stripe: 0 };
+  manual = 0,
+): { total: number; stripe: number; manual: number } {
+  if (total <= 0 || maxTotal <= 0) return { total: 0, stripe: 0, manual: 0 };
+  const pct = (x: number) => Math.min(100, Math.max(0, (x / total) * 100));
   return {
     total: Math.min(escala, (total / maxTotal) * escala),
-    stripe: Math.min(100, Math.max(0, (stripe / total) * 100)),
+    stripe: pct(stripe),
+    manual: pct(manual),
   };
 }

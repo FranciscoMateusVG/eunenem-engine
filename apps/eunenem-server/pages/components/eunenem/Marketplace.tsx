@@ -1,5 +1,5 @@
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { artigoPosse } from "@/lib/concordancia";
 import { BottleDoodle, FlowerDoodle } from "./Doodles";
 import { GiftCard } from "./GiftCard";
@@ -10,6 +10,8 @@ import { emitirCarrinhoAberto } from "@/lib/analytics-funil";
 import { useTweaks } from "./TweaksContext";
 import { OWNER_EDIT_LISTA_LABEL } from "@/lib/pagina-owner";
 import { usePaginaListaPresentes } from "@/lib/paginaApi";
+import { formatBRL } from "@/lib/formatBRL";
+import { filterVisitorGifts, type GiftSort } from "@/lib/visitorGiftFilters";
 import { groupVisitorGifts, type VisitorGift } from "@/lib/visitorGift";
 
 // aperture-3d9t (original visual scaffold) + aperture-3xgch (data swap).
@@ -75,6 +77,39 @@ export function Marketplace({ slug, ownerEditHref = null }: MarketplaceProps) {
   const [selectedGift, setSelectedGift] = useState<VisitorGift | null>(null);
 
   const gifts = useMemo(() => (data ? groupVisitorGifts(data) : []), [data]);
+
+  const [search, setSearch] = useState("");
+  const [maxPrice, setMaxPrice] = useState("");
+  const [sort, setSort] = useState<GiftSort>("default");
+  const sortMenuRef = useRef<HTMLDetailsElement>(null);
+  useEffect(() => {
+    // Close on an actual outside press, not blur: Safari can report a null
+    // relatedTarget when a menu option is pressed, before its click fires.
+    const closeOutside = (event: PointerEvent) => {
+      const menu = sortMenuRef.current;
+      if (menu && event.target instanceof Node && !menu.contains(event.target)) {
+        menu.open = false;
+      }
+    };
+    document.addEventListener("pointerdown", closeOutside);
+    return () => document.removeEventListener("pointerdown", closeOutside);
+  }, []);
+  const priceCeiling = Math.max(1, ...gifts.map((gift) => gift.valorCents));
+  const selectedPrice = maxPrice === "" ? priceCeiling : Math.min(Math.round(Number(maxPrice) * 100), priceCeiling);
+  const visibleGifts = useMemo(
+    () => filterVisitorGifts(gifts, { search, minPrice: "", maxPrice, sort }),
+    [gifts, search, maxPrice, sort],
+  );
+  const resetFilters = () => {
+    setSearch("");
+    setMaxPrice("");
+    setSort("default");
+  };
+  const controlStyle = {
+    width: "100%", minWidth: 0, minHeight: 44, padding: "10px 14px",
+    borderRadius: 16, border: "1px solid var(--line)",
+    background: "var(--paper)", color: "var(--ink)", fontSize: 16,
+  };
 
   const cart = useCart();
   const drawer = useCartDrawer();
@@ -165,6 +200,72 @@ export function Marketplace({ slug, ownerEditHref = null }: MarketplaceProps) {
           )}
         </header>
 
+        {!isLoading && !isError && gifts.length > 0 && (
+          <div role="search" aria-label="Filtrar presentes" style={{ marginTop: 32 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <div style={{ position: "relative", flex: 1, minWidth: 0 }}>
+                <svg aria-hidden="true" viewBox="0 0 24 24" width={20} height={20}
+                  fill="none" stroke="currentColor" strokeWidth={1.8}
+                  style={{ position: "absolute", left: 14, top: "50%", transform: "translateY(-50%)", color: "var(--ink-soft)", pointerEvents: "none" }}>
+                  <circle cx="10.5" cy="10.5" r="6.5" /><path d="m16 16 4.5 4.5" />
+                </svg>
+                <input aria-label="Buscar presente" type="search" value={search}
+                  onChange={(event) => setSearch(event.target.value)}
+                  placeholder="Buscar presente" style={{ ...controlStyle, paddingLeft: 44 }} />
+              </div>
+              <details ref={sortMenuRef} style={{ position: "relative", flexShrink: 0 }}
+                onKeyDown={(event) => { if (event.key === "Escape") { event.currentTarget.open = false; event.currentTarget.querySelector("summary")?.focus(); } }}
+                onBlur={(event) => { if (event.relatedTarget && !event.currentTarget.contains(event.relatedTarget)) event.currentTarget.open = false; }}>
+                <summary aria-label="Ordenar presentes" title="Ordenar presentes"
+                  className="gift-sort-trigger"
+                  style={{ ...controlStyle, width: 44, height: 44, padding: 10, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", listStyle: "none" }}>
+                  <svg aria-hidden="true" viewBox="0 0 24 24" width={22} height={22} fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M8 4v16m-4-4 4 4 4-4M14 5h6m-6 5h4m-4 5h2" />
+                  </svg>
+                </summary>
+                <div role="group" aria-label="Ordenar por"
+                  style={{ position: "absolute", right: 0, top: 52, width: 240, zIndex: 10, padding: 6, borderRadius: 16, background: "var(--paper)", border: "1px solid var(--line)", boxShadow: "var(--shadow-sm)" }}>
+                  {([
+                    ["default", "Ordem da lista"],
+                    ["name", "Ordem alfabética (A–Z)"],
+                    ["price-asc", "Menor para o maior preço"],
+                    ["price-desc", "Maior para o menor preço"],
+                  ] as const).map(([value, label]) => (
+                    <button key={value} type="button" aria-pressed={sort === value}
+                      onClick={(event) => {
+                        setSort(value);
+                        const details = event.currentTarget.closest("details");
+                        if (details) { details.open = false; details.querySelector("summary")?.focus(); }
+                      }}
+                      style={{ display: "block", width: "100%", textAlign: "left", minHeight: 44, padding: "10px 12px", border: 0, borderRadius: 10, cursor: "pointer", color: "var(--ink)", background: sort === value ? "var(--lilac-soft)" : "transparent", fontSize: 14 }}>
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </details>
+            </div>
+            <div style={{ marginTop: 18 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, color: "var(--ink-soft)", fontSize: 14 }}>
+                <label htmlFor="gift-price-limit">Preço até</label>
+                <output htmlFor="gift-price-limit" style={{ fontWeight: 600 }}>{formatBRL(selectedPrice)}</output>
+              </div>
+              <input id="gift-price-limit" aria-label="Preço máximo do presente" type="range"
+                min={0} max={priceCeiling} step={1} value={selectedPrice}
+                aria-valuetext={formatBRL(selectedPrice)} className="calculadora-slider"
+                style={{ width: "100%", ["--pct" as string]: `${selectedPrice / priceCeiling * 100}%` }}
+                onChange={(event) => setMaxPrice(Number(event.target.value) === priceCeiling ? "" : (Number(event.target.value) / 100).toFixed(2))} />
+            </div>
+            <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 12, marginTop: 12 }}>
+              <p role="status" style={{ color: "var(--ink-soft)", margin: 0 }}>
+                {visibleGifts.length} de {gifts.length} presentes
+              </p>
+              {(search || maxPrice || sort !== "default") && (
+                <button type="button" className="btn-outline" onClick={resetFilters}>Limpar filtros</button>
+              )}
+            </div>
+          </div>
+        )}
+
         {/* aperture-rdr8u — Mobile renders 2 columns (was 1) because the
             inline auto-fill minmax(260px, 1fr) couldn't fit 2 columns under
             ~544px viewport. From sm: up we restore the original auto-fill
@@ -198,9 +299,13 @@ export function Marketplace({ slug, ownerEditHref = null }: MarketplaceProps) {
           >
             ainda não tem presentes aqui — volte daqui a pouco ♡
           </p>
+        ) : visibleGifts.length === 0 ? (
+          <p className="text-center mt-10" style={{ color: "var(--ink-soft)" }}>
+            Nenhum presente encontrado. Tente outro nome ou faixa de preço ♡
+          </p>
         ) : (
           <div className="grid gap-4 sm:gap-6 mt-12 grid-cols-2 sm:grid-cols-[repeat(auto-fill,minmax(260px,1fr))]">
-            {gifts.map((g) => (
+            {visibleGifts.map((g) => (
               <GiftCard key={g.nome} gift={g} onPick={onPick} onAdd={onAdd} />
             ))}
           </div>

@@ -37,10 +37,12 @@ import type { CoberturaDespesasData, DespesasPainelData } from "./types";
 
 type Bucket = DespesasPainelData["kpis"]["mesAtual"];
 type Contagem = Bucket["cobertura"]["stripe"];
-type Serie = "stripe" | "inter" | "total";
+type Serie = "stripe" | "inter" | "manual" | "total";
 
 const COR_STRIPE = { forte: "bg-coral-pink", clara: "bg-pink-soft" };
 const COR_INTER = { forte: "bg-green-deep", clara: "bg-green" };
+/** Recorrentes/manuais (aperture-0ngn4). */
+const COR_MANUAL = { forte: "bg-lilac-deep", clara: "bg-lilac" };
 
 function plural(n: number, um: string, varios: string): string {
   return `${n} ${n === 1 ? um : varios}`;
@@ -59,16 +61,27 @@ export function resumoCobertura(c: Contagem, meio: "cartão" | "PIX"): string {
   return partes.join(" · ");
 }
 
+/** Manuais são valor conhecido: nunca deixam um período incompleto. */
 function completudeDe(b: Bucket, serie: Serie): Completude {
   if (serie === "stripe") return completude(b.cobertura.stripe);
   if (serie === "inter") return completude(b.cobertura.inter);
+  if (serie === "manual") return "completo";
   return completude(b.cobertura.stripe, b.cobertura.inter);
 }
 
 function centsDe(b: Bucket, serie: Serie): number {
   if (serie === "stripe") return b.stripeCents;
   if (serie === "inter") return b.interCents;
+  if (serie === "manual") return b.manualCents;
   return b.totalCents;
+}
+
+/** "2 lançamentos · confirmados" — manuais são sempre confirmados. */
+export function resumoManuais(c: Contagem): string {
+  if (c.confirmados === 0) return "nenhum lançamento no período";
+  return `${plural(c.confirmados, "lançamento", "lançamentos")} · ${
+    c.confirmados === 1 ? "confirmado" : "confirmados"
+  }`;
 }
 
 /**
@@ -102,7 +115,8 @@ export function DespesasCabecalho({ hoje }: { hoje: string | null }) {
       <div className="flex flex-col gap-1.5">
         <h1 className="text-[30px] font-semibold tracking-[-0.02em]! text-ink">Despesas</h1>
         <p className="text-[14px] text-ink-soft">
-          Tarifas de processamento cobradas pelos provedores, na data do débito.
+          Tarifas de processamento cobradas pelos provedores, na data do débito, e despesas
+          recorrentes/manuais cadastradas aqui.
         </p>
       </div>
       {hoje ? (
@@ -202,7 +216,7 @@ function CartaoKpi({
         </h3>
         <span className={MONO}>{faixa}</span>
       </div>
-      <div className="grid gap-5 sm:grid-cols-3">
+      <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-4">
         <ColunaKpi
           serie="stripe"
           rotulo="Stripe (cartão)"
@@ -215,6 +229,14 @@ function CartaoKpi({
           rotulo="Inter (PIX)"
           cor={COR_INTER.forte}
           detalhe={resumoCobertura(atual.cobertura.inter, "PIX")}
+          divisor
+          {...comum}
+        />
+        <ColunaKpi
+          serie="manual"
+          rotulo="Recorrentes/manuais"
+          cor={COR_MANUAL.forte}
+          detalhe={resumoManuais(atual.cobertura.manual)}
           divisor
           {...comum}
         />
@@ -267,6 +289,10 @@ function Legenda() {
           Inter (PIX)
         </span>
         <span className="flex items-center gap-1.5">
+          <Amostra cor={COR_MANUAL.forte} tamanho="size-2.5" />
+          Recorrentes/manuais
+        </span>
+        <span className="flex items-center gap-1.5">
           <span
             aria-hidden
             className="size-2.5 shrink-0 rounded-[2px] border border-dashed border-ink-mute"
@@ -287,7 +313,7 @@ function Barra({
   raio,
   vazia = false,
 }: {
-  barra: { total: number; stripe: number };
+  barra: { total: number; stripe: number; manual: number };
   claro: boolean;
   completo: boolean;
   largura: string;
@@ -314,6 +340,13 @@ function Barra({
       className={`flex w-full flex-col overflow-hidden ${largura} ${raio} ${minimo} ${marca}`}
       style={{ height: `${barra.total.toFixed(2)}%` }}
     >
+      {barra.manual > 0 ? (
+        <div
+          data-fatia="manual"
+          className={`shrink-0 ${claro ? COR_MANUAL.clara : COR_MANUAL.forte}`}
+          style={{ height: `${barra.manual.toFixed(2)}%` }}
+        />
+      ) : null}
       <div data-fatia="inter" className={`flex-1 ${claro ? COR_INTER.clara : COR_INTER.forte}`} />
       <div
         data-fatia="stripe"
@@ -326,9 +359,10 @@ function Barra({
 
 /** Rótulo de acessibilidade de um bucket, com a pendência por extenso. */
 function detalheValores(b: Bucket): string {
+  const manuais = b.manualCents > 0 ? ` · manuais ${formatBRL(b.manualCents)}` : "";
   const base = `Stripe ${formatBRL(b.stripeCents)} · Inter ${formatBRL(
     b.interCents,
-  )} · total ${formatBRL(b.totalCents)}`;
+  )}${manuais} · total ${formatBRL(b.totalCents)}`;
   const pendentes = b.cobertura.stripe.pendentes + b.cobertura.inter.pendentes;
   const falhos = b.cobertura.stripe.falhos + b.cobertura.inter.falhos;
   if (pendentes + falhos === 0) return base;
@@ -397,7 +431,7 @@ export function DespesasPorMes({ meses }: Pick<DespesasPainelData, "meses">) {
               >
                 <RotuloBarra b={m} curto destaque={m.parcial} />
                 <Barra
-                  barra={barraDespesas(m.stripeCents, m.totalCents, maxT, 80)}
+                  barra={barraDespesas(m.stripeCents, m.totalCents, maxT, 80, m.manualCents)}
                   claro={m.parcial}
                   completo={completo}
                   largura="max-w-[60px]"
@@ -464,7 +498,7 @@ export function DespesasSemanasDoMes({
                   <RotuloBarra b={s} curto={false} destaque={atual} />
                 )}
                 <Barra
-                  barra={barraDespesas(s.stripeCents, s.totalCents, maxT, 72)}
+                  barra={barraDespesas(s.stripeCents, s.totalCents, maxT, 72, s.manualCents)}
                   claro={atual}
                   completo={completo}
                   largura="max-w-[112px]"
@@ -599,6 +633,11 @@ export function DespesasNotas() {
         pagamento. Stripe: leitura da tarifa por pagamento. Inter: tarifa vinculada ou, após
         72h do pagamento e scan completo, sem tarifa cobrada (franquia Inter). Uma tarifa
         posterior substitui o zero observado.
+      </p>
+      <p>
+        <span className="text-ink-soft">Recorrentes/manuais:</span> despesas cadastradas abaixo
+        (servidores, ferramentas, assinaturas), no dia de cobrança, horário de São Paulo. Valor
+        conhecido, sempre confirmado; só conta depois que o dia chega. Entram no total.
       </p>
       <p>
         <span className="text-ink-soft">Não vinculadas:</span> tarifas que o provedor cobrou sem

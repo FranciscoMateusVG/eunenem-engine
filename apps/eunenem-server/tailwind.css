@@ -8385,3 +8385,5 @@ dialog.config-modal::backdrop { background: #33233380; }
   .camp-grid .camp-cover { flex-basis: 88px; width: 88px; height: 88px; }
   .camp-grid .camp-card-name { font-size: 22px; }
 }
+
+.gift-sort-trigger::-webkit-details-marker { display: none; }

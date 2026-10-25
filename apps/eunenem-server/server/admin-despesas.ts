@@ -11,8 +11,10 @@ import {
   type ProvedorDespesa,
   type StatusTarifa,
 } from "../pages/lib/despesasPainel.js";
+import { diasManuais } from "../pages/lib/despesasManuais.js";
 import { gradePainel } from "../pages/lib/receitaPainel.js";
-import { localDateInSaoPaulo, RECEITA_TIMEZONE } from "../pages/lib/receitaPeriodo.js";
+import { addDays, localDateInSaoPaulo, RECEITA_TIMEZONE } from "../pages/lib/receitaPeriodo.js";
+import { carregarDespesasManuais } from "./admin-despesas-manuais.js";
 import { emSnapshotDeLeitura } from "./admin-receita.js";
 
 /**
@@ -40,7 +42,12 @@ import { emSnapshotDeLeitura } from "./admin-receita.js";
  *            Scan esgotado com erro = falha; demais casos = pendente.
  * Cada bucket exibido (KPIs, meses, semanas) recebe a sua contagem.
  *
- * SNAPSHOT ÚNICO: as quatro consultas (dias, total independente, cobertura,
+ * MANUAIS (aperture-0ngn4): despesas recorrentes/manuais cadastradas no
+ * admin (`despesas_manuais`), série própria `manualCents`, sempre confirmada
+ * e incluída em `totalCents`. Ocorrência só conta quando o dia de cobrança já
+ * chegou (≤ hoje em SP). Ver `admin-despesas-manuais.ts`.
+ *
+ * SNAPSHOT ÚNICO: as consultas (dias, total independente, cobertura,
  * últimas leituras) rodam na mesma transação REPEATABLE READ + READ ONLY.
  */
 
@@ -267,7 +274,12 @@ export async function loadDespesasPainel(
       status: toStatus(row.status),
       pagamentos: naoNegativo(row.pagamentos, "cobertura.pagamentos"),
     }));
-    const agregado = agregarDespesas(grade, dias, diasCobertura);
+    const manuais = diasManuais(await carregarDespesasManuais(trx, platformId), {
+      de: janela.de,
+      // Cobrança futura ainda não é despesa.
+      ate: addDays(grade.hoje, 1) < janela.ate ? addDays(grade.hoje, 1) : janela.ate,
+    });
+    const agregado = agregarDespesas(grade, dias, diasCobertura, manuais);
 
     const leiturasRes = await sql<{
       stripe_sync_em: Date | null;

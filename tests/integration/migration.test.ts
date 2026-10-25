@@ -484,6 +484,28 @@ describe('Migration round-trip', () => {
     //    this sequence must start at the LATEST migration and walk earlier.
     //    Adding a new migration on top REQUIRES prepending its down-step here.
 
+    // 067 despesas_manuais (aperture-0ngn4): CHECK coerente por tipo —
+    // mensal exige dia 1–28 + início e nada de data; única só a data.
+    const plataforma067 = '30000000-0000-4000-8000-000000000067';
+    const despesa067 = (campos: string) =>
+      sql
+        .raw(
+          `INSERT INTO despesas_manuais (id_plataforma, nome, recorrencia, dia_cobranca, inicio, fim, data)
+           VALUES ('${plataforma067}', 'X', ${campos})`,
+        )
+        .execute(db);
+    await expect(despesa067(`'mensal', 5, '2037-01-01', NULL, NULL`)).resolves.toBeDefined();
+    await expect(despesa067(`'unica', NULL, NULL, NULL, '2037-01-01'`)).resolves.toBeDefined();
+    await expect(despesa067(`'mensal', 29, '2037-01-01', NULL, NULL`)).rejects.toThrow();
+    await expect(despesa067(`'mensal', 5, NULL, NULL, NULL`)).rejects.toThrow();
+    await expect(despesa067(`'mensal', 5, '2037-01-01', '2036-12-31', NULL`)).rejects.toThrow();
+    await expect(despesa067(`'unica', 5, NULL, NULL, '2037-01-01'`)).rejects.toThrow();
+    await expect(despesa067(`'unica', NULL, '2037-01-01', NULL, NULL`)).rejects.toThrow();
+    await sql`DELETE FROM despesas_manuais WHERE id_plataforma = ${plataforma067}`.execute(db);
+    expect((await migrator.migrateDown()).error).toBeUndefined();
+    expect(await tableExists(db, 'despesas_manuais_valores')).toBe(false);
+    expect(await tableExists(db, 'despesas_manuais')).toBe(false);
+
     // 066 owner alert lifecycle emails widen the three type CHECKs; down
     // refuses while any new-type row exists, then narrows them back.
     for (const table of [
