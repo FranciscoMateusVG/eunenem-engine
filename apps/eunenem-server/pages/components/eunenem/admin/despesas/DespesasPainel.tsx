@@ -468,7 +468,7 @@ export function DespesasSemanasDoMes({
   return (
     <Grafico
       titulo={`Semanas de ${nomeMes(mes)}`}
-      legenda="semana de segunda a domingo"
+      legenda="Recorrentes rateadas por dia; avulsas e provedores na data real. As semanas do mês corrente podem ser recalculadas quando uma cobrança acontece."
       corrente='[data-estado="atual"]'
     >
       <div className="flex min-w-[520px] flex-col px-2 lg:min-w-0 lg:px-0">

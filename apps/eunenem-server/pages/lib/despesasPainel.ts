@@ -56,6 +56,7 @@ export interface ValoresDespesas {
   readonly interCents: number;
   /** Despesas recorrentes/manuais (aperture-0ngn4): valor conhecido, sempre confirmado. */
   readonly manualCents: number;
+  readonly metaRecorrenteCents?: number;
   /** Stripe + Inter vinculados + manuais. Não inclui as não vinculadas. */
   readonly totalCents: number;
   readonly naoVinculadas: NaoVinculadas;
@@ -132,6 +133,8 @@ export function agregarDespesas(
   dias: readonly DiaDespesas[],
   cobertura: readonly DiaCobertura[] = [],
   manuais: readonly DiaManual[] = [],
+  semanaManuais: readonly DiaManual[] = manuais,
+  metas: readonly DiaManual[] = [],
 ): DespesasAgregado {
   let stripeCents = 0;
   let interCents = 0;
@@ -149,15 +152,19 @@ export function agregarDespesas(
     manualCents += m.manualCents;
   }
   const v = <T extends Intervalo>(i: T) => valoresDe(i, dias, cobertura, manuais);
+  const semanal = <T extends Intervalo>(i: T) => ({
+    ...valoresDe(i, dias, cobertura, semanaManuais),
+    metaRecorrenteCents: metas.filter(m => dentro(m.dia, i)).reduce((s, m) => s + m.manualCents, 0),
+  });
   return {
     kpis: {
       mesAtual: v(grade.kpis.mesAtual),
       mesAnterior: v(grade.kpis.mesAnterior),
-      semanaAtual: v(grade.kpis.semanaAtual),
-      semanaAnterior: v(grade.kpis.semanaAnterior),
+      semanaAtual: semanal(grade.kpis.semanaAtual),
+      semanaAnterior: semanal(grade.kpis.semanaAnterior),
     },
     meses: grade.meses.map(v),
-    semanas: grade.semanas.map(v),
+    semanas: grade.semanas.map(semanal),
     somaDosDias: { stripeCents, interCents, manualCents, naoVinculadasCents },
   };
 }

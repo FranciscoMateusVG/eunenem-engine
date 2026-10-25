@@ -2,6 +2,8 @@ import { completude, type DespesasAgregado } from "./despesasPainel.js";
 import type { PainelAgregado, Intervalo } from "./receitaPainel.js";
 
 export interface LucroPeriodo extends Intervalo {
+  readonly metaRecorrenteCents?: number;
+  readonly faltamCents?: number;
   readonly valorCents: number | null;
   readonly estado: "completo" | "incompleto" | "sem_dados" | "futuro";
 }
@@ -18,6 +20,11 @@ export function agregarLucro(receita: PainelAgregado, despesas: DespesasAgregado
   if (receita.meses.length !== despesas.meses.length || receita.semanas.length !== despesas.semanas.length) throw new Error("lucro_grade_divergente");
   return {
     meses: receita.meses.map((r, i) => combinar(r, despesas.meses[i]!)),
-    semanas: receita.semanas.map((r, i) => combinar(r, despesas.semanas[i]!)),
+    semanas: receita.semanas.map((r, i) => {
+      const d = despesas.semanas[i]!;
+      const meta = d.metaRecorrenteCents ?? 0;
+      return { ...combinar(r, d), metaRecorrenteCents: meta,
+        ...(r.estado === "atual" ? { faltamCents: Math.max(0, meta - r.tarifas.resultadoCents) } : {}) };
+    }),
   };
 }

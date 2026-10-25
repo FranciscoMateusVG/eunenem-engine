@@ -4,10 +4,10 @@ import { rotuloMesCurto, rotuloSemana } from "../../../../lib/receitaPainel.js";
 const dinheiro = (cents: number) => (cents / 100).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 
 function Grafico({ titulo, periodos, mensal }: { titulo: string; periodos: readonly LucroPeriodo[]; mensal: boolean }) {
-  const max = Math.max(1, ...periodos.map((p) => Math.abs(p.valorCents ?? 0)));
+  const max = Math.max(1, ...periodos.map((p) => Math.max(Math.abs(p.valorCents ?? 0), p.metaRecorrenteCents ?? 0)));
   return <section className="rounded-2xl border border-stone-200 bg-white p-4">
     <h2 className="font-semibold text-stone-800">{titulo}</h2>
-    <p className="mt-1 text-xs text-stone-500">Tarifas EuNeném menos despesas observadas. Calendário de São Paulo.</p>
+    <p className="mt-1 text-xs text-stone-500">Tarifas EuNeném menos despesas observadas. Calendário de São Paulo.{!mensal && " Recorrentes rateadas por dia; demais despesas na data real. As semanas do mês corrente podem ser recalculadas quando uma cobrança acontece."}</p>
     <div className="mt-5 grid gap-x-3 gap-y-6 grid-cols-2 sm:grid-cols-4 xl:grid-cols-6">
       {periodos.map((p) => {
         const negativo = (p.valorCents ?? 0) < 0;
@@ -16,6 +16,7 @@ function Grafico({ titulo, periodos, mensal }: { titulo: string; periodos: reado
         const rotulo = mensal ? rotuloMesCurto(p.de) : rotuloSemana(p);
         return <div key={p.de} aria-label={rotulo}>
           <div className="relative h-28" aria-hidden="true">
+            {!mensal && p.metaRecorrenteCents !== undefined && <div data-weekly-target="true" className="absolute w-full border-t border-dashed border-amber-600" style={{ bottom: `${50 + p.metaRecorrenteCents / max * 46}%` }} />}
             <div className="absolute top-1/2 w-full border-t border-stone-300" />
             {p.valorCents !== null && <div data-negative={negativo} className={`absolute left-1/4 w-1/2 rounded-sm ${negativo ? "bg-red-500" : "bg-emerald-600"}`}
               style={{ height: `${Math.abs(p.valorCents) / max * 46}%`, ...(negativo ? { top: "50%" } : { bottom: "50%" }) }} />}
@@ -23,6 +24,8 @@ function Grafico({ titulo, periodos, mensal }: { titulo: string; periodos: reado
           <div className="text-xs font-medium">{rotulo}</div>
           {p.valorCents !== null && <div className={`text-sm font-semibold tabular-nums ${negativo ? "text-red-700" : "text-stone-800"}`}>{dinheiro(p.valorCents)}</div>}
           <div className="text-xs text-stone-500">{legenda}</div>
+          {!mensal && p.metaRecorrenteCents !== undefined && <div className="text-xs text-amber-800">Meta para se pagar: {dinheiro(p.metaRecorrenteCents)}</div>}
+          {!mensal && p.faltamCents !== undefined && <div className="text-xs">Faltam {dinheiro(p.faltamCents)} em tarifas EuNeném para cobrir a meta.</div>}
         </div>;
       })}
     </div>

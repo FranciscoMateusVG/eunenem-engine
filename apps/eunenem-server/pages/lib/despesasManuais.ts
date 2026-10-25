@@ -7,7 +7,7 @@
 // `vigenteDesde` ≤ dia da ocorrência: mudar o valor não reescreve o passado.
 
 import type { Intervalo } from "./receitaPainel.js";
-import { addMonthsToMonthStart, startOfMonth } from "./receitaPeriodo.js";
+import { addDays, addMonthsToMonthStart, startOfMonth } from "./receitaPeriodo.js";
 
 export const DIA_COBRANCA_MAX = 28;
 
@@ -128,4 +128,40 @@ export function parseValorBRL(entrada: string): number | null {
   }
   const cents = Number(inteiro.replace(/\./g, "")) * 100 + Number(decimal.padEnd(2, "0") || "0");
   return Number.isSafeInteger(cents) && cents > 0 ? cents : null;
+}
+
+/** Rateio da cobrança mensal, preservando o total exato. Vigências são pesos
+ * diários, não novos lançamentos. Restos vão aos primeiros dias do mês. */
+export function diasRecorrentesRateados(
+  despesas: readonly DespesaManual[],
+  intervalo: Intervalo,
+  cobrancasAte?: string,
+): DiaManual[] {
+  const result: DiaManual[] = [];
+  for (const d of despesas) {
+    if (d.recorrencia !== "mensal") continue;
+    for (let mes = startOfMonth(intervalo.de); mes < intervalo.ate; mes = addMonthsToMonthStart(mes, 1)) {
+      const fim = addMonthsToMonthStart(mes, 1);
+      const cobranca = datasDeCobranca(d, { de: mes, ate: fim })[0];
+      if (!cobranca || (cobrancasAte && cobranca > cobrancasAte)) continue;
+      const total = valorVigente(d.valores, cobranca);
+      if (total === null) continue;
+      const pesos: { dia: string; peso: bigint }[] = [];
+      for (let dia = mes; dia < fim; dia = addDays(dia, 1)) {
+        if (d.inicio && dia < d.inicio || d.fim && dia > d.fim) continue;
+        const peso = valorVigente(d.valores, dia);
+        if (peso !== null) pesos.push({ dia, peso: BigInt(peso) });
+      }
+      const soma = pesos.reduce((s, p) => s + p.peso, 0n);
+      if (soma === 0n) continue;
+      const partes = pesos.map(p => ({ dia: p.dia, valor: BigInt(total) * p.peso / soma }));
+      let resto = BigInt(total) - partes.reduce((s, p) => s + p.valor, 0n);
+      for (const p of partes) {
+        const cents = Number(p.valor + (resto > 0n ? 1n : 0n));
+        if (resto > 0n) resto--;
+        if (p.dia >= intervalo.de && p.dia < intervalo.ate) result.push({ dia: p.dia, manualCents: cents, ocorrencias: 1 });
+      }
+    }
+  }
+  return result;
 }
