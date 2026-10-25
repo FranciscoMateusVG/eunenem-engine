@@ -1,3 +1,4 @@
+import { loadReceitaComLucro } from "../admin-lucro.js";
 import { consultarRecuperacaoRepasse, recuperarRepasse, RecoveryInputSchema } from '../../../../src/use-cases/pagamentos/financeiro/consultar-recuperacao-repasse.js';
 import { CampanhaCompartilhamentoPostgres, EmailJaMembroCampanhaError } from '../../../../src/adapters/arrecadacao/campanha-compartilhamento.postgres.js';
 /**
@@ -84,7 +85,6 @@ import { loadCampaignAdministrators } from "../admin-campaign-administrators.js"
 import {
   InvalidReceitaPeriodoError,
   loadReceitaDashboard,
-  loadReceitaPainel,
   RECEITA_CAMPANHAS_LIMIT,
 } from "../admin-receita.js";
 import { GRANULARIDADES, isLocalDate } from "../../pages/lib/receitaPeriodo.js";
@@ -4356,7 +4356,13 @@ const ReceitaPainelSomaDiferencaSchema = z.object({
   canceladoCents: z.number().int(),
 });
 
+const LucroPeriodoSchema = z.object({
+  de: LocalDateSchema, ate: LocalDateSchema,
+  valorCents: z.number().int().nullable(),
+  estado: z.enum(["completo", "incompleto", "sem_dados", "futuro"]),
+});
 const ReceitaPainelSchema = z.object({
+  lucro: z.object({ meses: z.array(LucroPeriodoSchema), semanas: z.array(LucroPeriodoSchema) }),
   snapshotAt: z.string().datetime(),
   timezone: z.literal("America/Sao_Paulo"),
   hoje: LocalDateSchema,
@@ -4455,11 +4461,13 @@ const receitaRouter = t.router({
     }),
 
   painel: adminProcedure.output(ReceitaPainelSchema).query(async ({ ctx }) => {
-    const painel = await loadReceitaPainel(ctx.deps.db, {
+    const painel = await loadReceitaComLucro(ctx.deps.db, {
+      interAccountRef: ctx.deps.interFeeAccountRef,
       platformId: ID_PLATAFORMA_EUNENEM,
       now: ctx.deps.clock(),
     });
     return {
+      lucro: painel.lucro,
       snapshotAt: painel.snapshotAt.toISOString(),
       timezone: painel.timezone,
       hoje: painel.hoje,

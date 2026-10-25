@@ -457,3 +457,65 @@ describe('Despesas — acesso', () => {
     ).rejects.toMatchObject({ code: 'FORBIDDEN' });
   });
 });
+
+describe('Lucro líquido — composição dos painéis reais', () => {
+  it('não trata receita anterior à coleta como lucro; falhas ficam incompletas', async () => {
+    const campanha = await seed.campanha();
+    const p = await seed.pagamento({
+      campaignId: campanha,
+      taxaCents: 100,
+      criadoEm: sp('2026-08-15T12:00:00'),
+      provedor: 'stripe',
+    });
+    const { loadReceitaComLucro } = await import('../../apps/eunenem-server/server/admin-lucro.js');
+    const input = {
+      platformId: ID_PLATAFORMA_EUNENEM,
+      now: sp('2026-10-05T12:00:00'),
+      interAccountRef: 'acct_fixture',
+    };
+    const painel = await loadReceitaComLucro(testDb.db, input);
+    expect(painel.lucro.meses.find((m) => m.de === '2026-08-01')).toMatchObject({
+      valorCents: null,
+      estado: 'sem_dados',
+    });
+    const outubro = await cartao(campanha, sp('2026-10-01T12:00:00'));
+    await sync(outubro, 'failed');
+    expect((await loadReceitaComLucro(testDb.db, input)).lucro.meses.at(-1)).toMatchObject({
+      valorCents: 500,
+      estado: 'incompleto',
+    });
+    expect(p.idPagamento).toBeTruthy();
+  });
+  it('subtrai despesas observadas, conserva negativo e marca cobertura incompleta', async () => {
+    const campanha = await seed.campanha();
+    const p = await seed.pagamento({
+      campaignId: campanha,
+      taxaCents: 100,
+      adicionalCents: 50,
+      criadoEm: sp('2037-10-01T00:00:00'),
+      provedor: 'stripe',
+    });
+    await tarifa({
+      provider: 'stripe',
+      amountCents: 400,
+      occurredAt: sp('2037-10-01T00:00:00'),
+      paymentId: p.idPagamento,
+    });
+    await sync(p.idPagamento, 'confirmed');
+    const receita = await caller().admin.receita.painel();
+    const despesas = await caller().admin.despesas.painel();
+    const lucro = receita.lucro;
+    expect(lucro).toBeDefined();
+    expect(lucro.meses.at(-1)).toMatchObject({ valorCents: -250, estado: 'completo' });
+    expect(lucro.meses.at(-1).valorCents).toBe(
+      (receita.meses.at(-1)?.tarifas.resultadoCents ?? 0) -
+        (despesas.meses.at(-1)?.totalCents ?? 0),
+    );
+    expect(lucro.semanas[0]).toMatchObject({ valorCents: -250, estado: 'completo' });
+    await cartao(campanha, sp('2037-10-02T12:00:00'));
+    expect((await caller().admin.receita.painel()).lucro.meses.at(-1)).toMatchObject({
+      valorCents: 250,
+      estado: 'incompleto',
+    });
+  });
+});

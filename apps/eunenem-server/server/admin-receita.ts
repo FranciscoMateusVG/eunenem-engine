@@ -515,6 +515,11 @@ export async function emSnapshotDeLeitura<T>(
   db: Database,
   fn: (trx: Database, snapshotAt: Date) => Promise<T>,
 ): Promise<T> {
+  // Reuse the caller's read snapshot when composing read models.
+  if (db.isTransaction) {
+    const snapshot = await sql<{ snapshot_at: Date }>`SELECT now() AS snapshot_at`.execute(db);
+    return fn(db, new Date(snapshot.rows[0]!.snapshot_at));
+  }
   return db
     .transaction()
     .setIsolationLevel("repeatable read")
