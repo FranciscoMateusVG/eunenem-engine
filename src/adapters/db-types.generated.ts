@@ -205,6 +205,27 @@ export interface Convites {
   remetente: string;
 }
 
+export interface DespesasManuais {
+  categoria: string | null;
+  criado_em: Generated<Timestamp>;
+  data: Timestamp | null;
+  dia_cobranca: number | null;
+  encerrado_em: Timestamp | null;
+  fim: Timestamp | null;
+  id: Generated<string>;
+  id_plataforma: string;
+  inicio: Timestamp | null;
+  nome: string;
+  recorrencia: string;
+}
+
+export interface DespesasManuaisValores {
+  amount_cents: Int8;
+  criado_em: Generated<Timestamp>;
+  despesa_id: string;
+  vigente_desde: Timestamp;
+}
+
 export interface EmailFeedback {
   comentario: string | null;
   created_at: Generated<Timestamp>;
@@ -688,6 +709,8 @@ export interface DB {
   contribuicoes: Contribuicoes;
   convidados: Convidados;
   convites: Convites;
+  despesas_manuais: DespesasManuais;
+  despesas_manuais_valores: DespesasManuaisValores;
   email_feedback: EmailFeedback;
   eventos: Eventos;
   intencao_items: IntencaoItems;
