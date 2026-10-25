@@ -159,7 +159,7 @@ export function diasRecorrentesRateados(
       for (const p of partes) {
         const cents = Number(p.valor + (resto > 0n ? 1n : 0n));
         if (resto > 0n) resto--;
-        if (p.dia >= intervalo.de && p.dia < intervalo.ate) result.push({ dia: p.dia, manualCents: cents, ocorrencias: 1 });
+        if (p.dia >= intervalo.de && p.dia < intervalo.ate) result.push({ dia: p.dia, manualCents: cents, ocorrencias: p.dia === cobranca ? 1 : 0 });
       }
     }
   }

@@ -24,7 +24,7 @@ export function agregarLucro(receita: PainelAgregado, despesas: DespesasAgregado
       const d = despesas.semanas[i]!;
       const meta = d.metaRecorrenteCents ?? 0;
       return { ...combinar(r, d), metaRecorrenteCents: meta,
-        ...(r.estado === "atual" ? { faltamCents: Math.max(0, meta - r.tarifas.resultadoCents) } : {}) };
+        ...(r.estado === "atual" ? { faltamCents: Math.max(0, meta - (r.tarifas.resultadoCents - d.stripeCents - d.interCents)) } : {}) };
     }),
   };
 }

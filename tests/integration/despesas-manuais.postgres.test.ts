@@ -101,7 +101,8 @@ describe('Despesas manuais — ocorrência mensal no dia de cobrança (SP)', () 
     expect(mes(p, '2037-10-01').manualCents).toBe(10_000);
     expect(p.kpis.mesAtual.manualCents).toBe(10_000);
     expect(p.kpis.semanaAnterior.manualCents).toBe(999 + 1_292);
-    expect(p.kpis.semanaAtual.manualCents).toBe(2_261);
+    expect(p.kpis.semanaAtual.manualCents).toBe(323);
+    expect(p.kpis.semanaAtual.cobertura.manual.confirmados).toBe(0);
 
     // totalCents (consumido pelo lucro líquido) inclui a série manual.
     expect(p.kpis.mesAtual.totalCents).toBe(
@@ -282,7 +283,7 @@ describe('Despesas manuais — lucro líquido (aperture-imtk7) subtrai as manuai
     );
     expect(mes(despesas, '2037-09-01').totalCents).toBe(10_000);
     const semana = receita.lucro.semanas.find((s) => s.de === '2037-10-05');
-    expect(semana?.valorCents).toBe(-3_300 - 2_261);
+    expect(semana?.valorCents).toBe(-3_300 - 323);
   });
 });
 
@@ -325,14 +326,23 @@ describe('xog8g — rateio semanal', () => {
     const p = await painel();
     expect(mes(p, '2037-10-01').manualCents).toBe(31_000);
     expect(p.semanas[0]?.manualCents).toBe(4_000);
-    expect(p.semanas.reduce((s, x) => s + x.manualCents, 0)).toBe(31_000);
+    expect(p.semanas.reduce((s, x) => s + x.manualCents, 0)).toBe(5_000);
+    expect(p.semanas[0]?.cobertura.manual.confirmados).toBe(1);
   });
 });
 
 describe('xog8g — calendário e vigência com PG real', () => {
   it.each(['2037-02', '2037-04', '2037-10'])('fecha %s no centavo', async (month) => {
     await mensal('Resto', 10_001, 1, month + '-01');
-    const p = await caller({ now: new Date(month + '-28T15:00:00Z') }).admin.despesas.painel();
+    const p = await caller({
+      now: new Date(
+        month === '2037-02'
+          ? '2037-02-28T15:00:00Z'
+          : month === '2037-04'
+            ? '2037-04-30T15:00:00Z'
+            : '2037-10-31T15:00:00Z',
+      ),
+    }).admin.despesas.painel();
     expect(p.semanas.reduce((s, x) => s + x.manualCents, 0)).toBe(10_001);
     expect(mes(p, month + '-01').manualCents).toBe(10_001);
   });
@@ -344,7 +354,7 @@ describe('xog8g — calendário e vigência com PG real', () => {
     expect(antes.semanas.reduce((s, x) => s + (x.metaRecorrenteCents ?? 0), 0)).toBe(62_000);
     const depois = await caller({ now: new Date('2037-10-23T15:00:00Z') }).admin.despesas.painel();
     expect(mes(depois, '2037-10-01').manualCents).toBe(62_000);
-    expect(depois.semanas.reduce((s, x) => s + x.manualCents, 0)).toBe(62_000);
+    expect(depois.semanas.reduce((s, x) => s + x.manualCents, 0)).toBe(40_896);
     // 62000/47 =1319 remainder7; primeiros quatro dias recebem1320 cada.
     expect(depois.semanas[0]?.manualCents).toBe(5_280);
     const lucro = await caller().admin.receita.painel();

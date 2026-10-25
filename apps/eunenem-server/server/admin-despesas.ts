@@ -283,7 +283,7 @@ export async function loadDespesasPainel(
     const manuais = diasManuais(cadastros, intervaloReal);
     const semanaManuais = [
       ...diasManuais(cadastros.filter(d => d.recorrencia === "unica"), intervaloReal),
-      ...diasRecorrentesRateados(cadastros, janela, grade.hoje),
+      ...diasRecorrentesRateados(cadastros, janela, grade.hoje).filter(d => d.dia <= grade.hoje),
     ];
     const metas = diasRecorrentesRateados(cadastros, janela);
     const agregado = agregarDespesas(grade, dias, diasCobertura, manuais, semanaManuais, metas);
