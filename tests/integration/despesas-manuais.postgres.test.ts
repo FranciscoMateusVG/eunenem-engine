@@ -267,6 +267,25 @@ describe('Despesas manuais — fim e vigência', () => {
   });
 });
 
+describe('Despesas manuais — lucro líquido (aperture-imtk7) subtrai as manuais', () => {
+  it('lucro do período = resultado das tarifas − total de Despesas, com as manuais dentro', async () => {
+    await mensal('Servidor', 10_000, 4, '2037-08-01');
+    await unica('Licença', 3_300, '2037-10-05');
+    const receita = await caller().admin.receita.painel();
+    const despesas = await painel();
+    const setembro = receita.lucro.meses.find((m) => m.de === '2037-09-01');
+    const receitaSetembro = receita.meses.find((m) => m.de === '2037-09-01');
+    expect(setembro?.estado).toBe('completo');
+    expect(setembro?.valorCents).toBe(
+      (receitaSetembro?.tarifas.resultadoCents ?? Number.NaN) -
+        mes(despesas, '2037-09-01').totalCents,
+    );
+    expect(mes(despesas, '2037-09-01').totalCents).toBe(10_000);
+    const semana = receita.lucro.semanas.find((s) => s.de === '2037-10-05');
+    expect(semana?.valorCents).toBe(-3_300);
+  });
+});
+
 describe('Despesas manuais — acesso', () => {
   it('bloqueia sem sessão (UNAUTHORIZED) e fora da allowlist (FORBIDDEN), em leitura e escrita', async () => {
     const entrada = {
