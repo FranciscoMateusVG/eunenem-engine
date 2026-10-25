@@ -11,7 +11,7 @@ import {
   type ProvedorDespesa,
   type StatusTarifa,
 } from "../pages/lib/despesasPainel.js";
-import { diasManuais } from "../pages/lib/despesasManuais.js";
+import { diasManuais, diasRecorrentesRateados } from "../pages/lib/despesasManuais.js";
 import { gradePainel } from "../pages/lib/receitaPainel.js";
 import { addDays, localDateInSaoPaulo, RECEITA_TIMEZONE } from "../pages/lib/receitaPeriodo.js";
 import { carregarDespesasManuais } from "./admin-despesas-manuais.js";
@@ -274,12 +274,19 @@ export async function loadDespesasPainel(
       status: toStatus(row.status),
       pagamentos: naoNegativo(row.pagamentos, "cobertura.pagamentos"),
     }));
-    const manuais = diasManuais(await carregarDespesasManuais(trx, platformId), {
+    const cadastros = await carregarDespesasManuais(trx, platformId);
+    const intervaloReal = {
       de: janela.de,
       // Cobrança futura ainda não é despesa.
       ate: addDays(grade.hoje, 1) < janela.ate ? addDays(grade.hoje, 1) : janela.ate,
-    });
-    const agregado = agregarDespesas(grade, dias, diasCobertura, manuais);
+    };
+    const manuais = diasManuais(cadastros, intervaloReal);
+    const semanaManuais = [
+      ...diasManuais(cadastros.filter(d => d.recorrencia === "unica"), intervaloReal),
+      ...diasRecorrentesRateados(cadastros, janela, grade.hoje).filter(d => d.dia <= grade.hoje),
+    ];
+    const metas = diasRecorrentesRateados(cadastros, janela);
+    const agregado = agregarDespesas(grade, dias, diasCobertura, manuais, semanaManuais, metas);
 
     const leiturasRes = await sql<{
       stripe_sync_em: Date | null;

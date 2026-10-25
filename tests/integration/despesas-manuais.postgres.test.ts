@@ -41,13 +41,13 @@ afterAll(async () => {
 
 beforeEach(limpar);
 
-function caller(opts: { sessao?: boolean; allowlist?: string[] } = {}) {
+function caller(opts: { sessao?: boolean; allowlist?: string[]; now?: Date } = {}) {
   const auth = adminAuthOverrides();
   const deps = {
     ...auth.depsOverrides,
     ...(opts.allowlist ? { adminAllowedEmails: new Set(opts.allowlist) } : {}),
     db: testDb.db,
-    clock: () => NOW,
+    clock: () => opts.now ?? NOW,
     logPiiHashSalt: 'despesas-manuais-integration-salt',
     interFeeAccountRef: 'acct_fixture',
   } as unknown as ServerDeps;
@@ -100,8 +100,9 @@ describe('Despesas manuais — ocorrência mensal no dia de cobrança (SP)', () 
     // 04/10 (domingo) já aconteceu: outubro e semana anterior.
     expect(mes(p, '2037-10-01').manualCents).toBe(10_000);
     expect(p.kpis.mesAtual.manualCents).toBe(10_000);
-    expect(p.kpis.semanaAnterior.manualCents).toBe(10_000);
-    expect(p.kpis.semanaAtual.manualCents).toBe(0);
+    expect(p.kpis.semanaAnterior.manualCents).toBe(999 + 1_292);
+    expect(p.kpis.semanaAtual.manualCents).toBe(323);
+    expect(p.kpis.semanaAtual.cobertura.manual.confirmados).toBe(0);
 
     // totalCents (consumido pelo lucro líquido) inclui a série manual.
     expect(p.kpis.mesAtual.totalCents).toBe(
@@ -282,7 +283,7 @@ describe('Despesas manuais — lucro líquido (aperture-imtk7) subtrai as manuai
     );
     expect(mes(despesas, '2037-09-01').totalCents).toBe(10_000);
     const semana = receita.lucro.semanas.find((s) => s.de === '2037-10-05');
-    expect(semana?.valorCents).toBe(-3_300);
+    expect(semana?.valorCents).toBe(-3_300 - 323);
   });
 });
 
@@ -316,5 +317,53 @@ describe('Despesas manuais — acesso', () => {
       testDb.db,
     );
     expect(Number(n.rows[0]?.n)).toBe(0);
+  });
+});
+
+describe('xog8g — rateio semanal', () => {
+  it('distribui 31.000 centavos pelas semanas em vez de concentrar na cobrança', async () => {
+    await mensal('Rateio', 31_000, 4, '2037-10-01');
+    const p = await painel();
+    expect(mes(p, '2037-10-01').manualCents).toBe(31_000);
+    expect(p.semanas[0]?.manualCents).toBe(4_000);
+    expect(p.semanas.reduce((s, x) => s + x.manualCents, 0)).toBe(5_000);
+    expect(p.semanas[0]?.cobertura.manual.confirmados).toBe(1);
+  });
+});
+
+describe('xog8g — calendário e vigência com PG real', () => {
+  it.each(['2037-02', '2037-04', '2037-10'])('fecha %s no centavo', async (month) => {
+    await mensal('Resto', 10_001, 1, month + '-01');
+    const p = await caller({
+      now: new Date(
+        month === '2037-02'
+          ? '2037-02-28T15:00:00Z'
+          : month === '2037-04'
+            ? '2037-04-30T15:00:00Z'
+            : '2037-10-31T15:00:00Z',
+      ),
+    }).admin.despesas.painel();
+    expect(p.semanas.reduce((s, x) => s + x.manualCents, 0)).toBe(10_001);
+    expect(mes(p, month + '-01').manualCents).toBe(10_001);
+  });
+  it('vigências são pesos, preservando cobrança mensal e metas futuras', async () => {
+    const d = await mensal('Vigência', 31_000, 22, '2037-10-01');
+    await admin().alterarValor({ id: d.id, valorCents: 62_000, vigenteDesde: '2037-10-16' });
+    const antes = await painel();
+    expect(mes(antes, '2037-10-01').manualCents).toBe(0);
+    expect(antes.semanas.reduce((s, x) => s + (x.metaRecorrenteCents ?? 0), 0)).toBe(62_000);
+    const depois = await caller({ now: new Date('2037-10-23T15:00:00Z') }).admin.despesas.painel();
+    expect(mes(depois, '2037-10-01').manualCents).toBe(62_000);
+    expect(depois.semanas.reduce((s, x) => s + x.manualCents, 0)).toBe(40_896);
+    // 62000/47 =1319 remainder7; primeiros quatro dias recebem1320 cada.
+    expect(depois.semanas[0]?.manualCents).toBe(5_280);
+    const lucro = await caller().admin.receita.painel();
+    expect(
+      lucro.lucro.semanas.find((s) => s.estado === 'futuro')?.metaRecorrenteCents,
+    ).toBeGreaterThan(0);
+    expect(lucro.lucro.semanas.find((s) => s.estado === 'futuro')?.valorCents).toBeNull();
+    expect(
+      lucro.lucro.semanas.find((s) => s.faltamCents !== undefined)?.faltamCents,
+    ).toBeGreaterThan(0);
   });
 });
