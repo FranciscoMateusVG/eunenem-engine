@@ -87,8 +87,21 @@ import {
   loadReceitaPainel,
   RECEITA_CAMPANHAS_LIMIT,
 } from "../admin-receita.js";
-import { GRANULARIDADES, isLocalDate } from "../../pages/lib/receitaPeriodo.js";
+import {
+  GRANULARIDADES,
+  isLocalDate,
+  localDateInSaoPaulo,
+} from "../../pages/lib/receitaPeriodo.js";
 import { type CoberturaDespesas, loadDespesasPainel } from "../admin-despesas.js";
+import {
+  alterarValorDespesaManual,
+  criarDespesaManual,
+  DespesaManualInvalida,
+  DespesaManualJaEncerrada,
+  DespesaManualNaoEncontrada,
+  encerrarDespesaManual,
+  listarDespesasManuais,
+} from "../admin-despesas-manuais.js";
 import { carregarPreviaMensal, MesFuturoError } from "../nfse/previa-mensal.js";
 import {
   AdminPaymentAdministratorsSchema,
@@ -4636,13 +4649,23 @@ const ContagemCoberturaSchema = z.object({
 const DespesasValoresShape = {
   stripeCents: z.number().int().nonnegative(),
   interCents: z.number().int().nonnegative(),
+  /** Despesas recorrentes/manuais (aperture-0ngn4), sempre confirmadas. */
+  manualCents: z.number().int().nonnegative(),
+  /** Stripe + Inter + manuais. */
   totalCents: z.number().int().nonnegative(),
   naoVinculadas: z.object({
     count: z.number().int().nonnegative(),
     cents: z.number().int().nonnegative(),
   }),
-  /** Pagamentos do período (data do pagamento): confirmados/pendentes/falhos. */
-  cobertura: z.object({ stripe: ContagemCoberturaSchema, inter: ContagemCoberturaSchema }),
+  /**
+   * Pagamentos do período (data do pagamento): confirmados/pendentes/falhos.
+   * `manual`: ocorrências do período, todas confirmadas.
+   */
+  cobertura: z.object({
+    stripe: ContagemCoberturaSchema,
+    inter: ContagemCoberturaSchema,
+    manual: ContagemCoberturaSchema,
+  }),
 };
 
 const DespesasIntervaloSchema = z.object({
@@ -4686,7 +4709,130 @@ function toCoberturaDTO(
   return { ...cobertura, ultimaLeituraEm: cobertura.ultimaLeituraEm?.toISOString() ?? null };
 }
 
+// despesas.manuais.* — cadastro de despesas recorrentes/manuais
+// (aperture-0ngn4). Valor conhecido; nada é reescrito: mudar o valor cria
+// vigência nova, encerrar grava o fim uma vez.
+
+const NomeDespesaSchema = z.string().trim().min(1).max(120);
+const ValorCentsSchema = z.number().int().positive().max(100_000_000_00);
+
+const TipoDespesaManualSchema = z.discriminatedUnion("recorrencia", [
+  z.object({
+    recorrencia: z.literal("mensal"),
+    diaCobranca: z.number().int().min(1).max(28),
+    inicio: LocalDateSchema,
+    fim: LocalDateSchema.optional(),
+  }),
+  z.object({ recorrencia: z.literal("unica"), data: LocalDateSchema }),
+]);
+
+const DespesaManualSchema = z.object({
+  id: z.string().uuid(),
+  nome: z.string(),
+  categoria: z.string().nullable(),
+  recorrencia: z.enum(["mensal", "unica"]),
+  diaCobranca: z.number().int().nullable(),
+  inicio: LocalDateSchema.nullable(),
+  fim: LocalDateSchema.nullable(),
+  data: LocalDateSchema.nullable(),
+  valores: z.array(z.object({ vigenteDesde: LocalDateSchema, valorCents: z.number().int() })),
+  valorAtualCents: z.number().int().nonnegative(),
+});
+
+function erroDespesaManual(error: unknown): never {
+  if (error instanceof DespesaManualInvalida) {
+    throw new TRPCError({ code: "BAD_REQUEST", message: error.message });
+  }
+  if (error instanceof DespesaManualNaoEncontrada) {
+    throw new TRPCError({ code: "NOT_FOUND", message: error.message });
+  }
+  if (error instanceof DespesaManualJaEncerrada) {
+    throw new TRPCError({ code: "CONFLICT", message: error.message });
+  }
+  throw error;
+}
+
+const despesasManuaisRouter = t.router({
+  listar: adminProcedure
+    .output(z.object({ despesas: z.array(DespesaManualSchema) }))
+    .query(async ({ ctx }) => {
+      const despesas = await listarDespesasManuais(ctx.deps.db, {
+        platformId: ID_PLATAFORMA_EUNENEM,
+        hoje: localDateInSaoPaulo(ctx.deps.clock()),
+      });
+      return {
+        despesas: despesas.map((d) => ({
+          id: d.id,
+          nome: d.nome,
+          categoria: d.categoria,
+          recorrencia: d.recorrencia,
+          diaCobranca: d.diaCobranca,
+          inicio: d.inicio,
+          fim: d.fim,
+          data: d.data,
+          valores: [...d.valores],
+          valorAtualCents: d.valorAtualCents,
+        })),
+      };
+    }),
+
+  criar: adminProcedure
+    .input(
+      z.object({
+        nome: NomeDespesaSchema,
+        categoria: z.string().trim().max(60).optional(),
+        valorCents: ValorCentsSchema,
+        tipo: TipoDespesaManualSchema,
+      }),
+    )
+    .output(z.object({ id: z.string().uuid() }))
+    .mutation(async ({ ctx, input }) => {
+      try {
+        return await criarDespesaManual(ctx.deps.db, {
+          platformId: ID_PLATAFORMA_EUNENEM,
+          ...input,
+        });
+      } catch (error: unknown) {
+        erroDespesaManual(error);
+      }
+    }),
+
+  alterarValor: adminProcedure
+    .input(
+      z.object({
+        id: z.string().uuid(),
+        valorCents: ValorCentsSchema,
+        vigenteDesde: LocalDateSchema,
+      }),
+    )
+    .output(z.object({ ok: z.literal(true) }))
+    .mutation(async ({ ctx, input }) => {
+      try {
+        await alterarValorDespesaManual(ctx.deps.db, {
+          platformId: ID_PLATAFORMA_EUNENEM,
+          ...input,
+        });
+        return { ok: true as const };
+      } catch (error: unknown) {
+        erroDespesaManual(error);
+      }
+    }),
+
+  encerrar: adminProcedure
+    .input(z.object({ id: z.string().uuid(), fim: LocalDateSchema }))
+    .output(z.object({ ok: z.literal(true) }))
+    .mutation(async ({ ctx, input }) => {
+      try {
+        await encerrarDespesaManual(ctx.deps.db, { platformId: ID_PLATAFORMA_EUNENEM, ...input });
+        return { ok: true as const };
+      } catch (error: unknown) {
+        erroDespesaManual(error);
+      }
+    }),
+});
+
 const despesasRouter = t.router({
+  manuais: despesasManuaisRouter,
   painel: adminProcedure.output(DespesasPainelSchema).query(async ({ ctx }) => {
     const painel = await loadDespesasPainel(ctx.deps.db, {
       platformId: ID_PLATAFORMA_EUNENEM,
