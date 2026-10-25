@@ -1,3 +1,4 @@
+import { LucroGraficos } from "./LucroGraficos.js";
 import { useEffect, useRef } from "react";
 import { formatBRL } from "@/lib/formatBRL";
 import {
@@ -522,6 +523,7 @@ export function ReceitaPainel({ data }: { data: ReceitaPainelData }) {
         <ReceitaPorMes meses={data.meses} />
       </div>
       <ReceitaSemanasDoMes semanas={data.semanas} mes={data.kpis.mesAtual.de} />
+      {data.lucro && <LucroGraficos data={data.lucro} />}
       <ReceitaNotas />
     </>
   );
