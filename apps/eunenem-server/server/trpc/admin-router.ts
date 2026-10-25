@@ -4372,6 +4372,8 @@ const ReceitaPainelSomaDiferencaSchema = z.object({
 const LucroPeriodoSchema = z.object({
   de: LocalDateSchema, ate: LocalDateSchema,
   valorCents: z.number().int().nullable(),
+  metaRecorrenteCents: z.number().int().nonnegative().optional(),
+  faltamCents: z.number().int().nonnegative().optional(),
   estado: z.enum(["completo", "incompleto", "sem_dados", "futuro"]),
 });
 const ReceitaPainelSchema = z.object({
@@ -4659,6 +4661,7 @@ const DespesasValoresShape = {
   interCents: z.number().int().nonnegative(),
   /** Despesas recorrentes/manuais (aperture-0ngn4), sempre confirmadas. */
   manualCents: z.number().int().nonnegative(),
+  metaRecorrenteCents: z.number().int().nonnegative().optional(),
   /** Stripe + Inter + manuais. */
   totalCents: z.number().int().nonnegative(),
   naoVinculadas: z.object({

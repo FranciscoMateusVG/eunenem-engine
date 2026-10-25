@@ -13,7 +13,16 @@ it('renderiza negativo abaixo do zero, incompleto e ausência sem inventar lucro
           { de: '2026-08-01', ate: '2026-09-01', valorCents: null, estado: 'sem_dados' },
           { de: '2026-09-01', ate: '2026-10-01', valorCents: -250, estado: 'incompleto' },
         ],
-        semanas: [{ de: '2026-10-01', ate: '2026-10-05', valorCents: 300, estado: 'completo' }],
+        semanas: [
+          {
+            de: '2026-10-01',
+            ate: '2026-10-05',
+            valorCents: 300,
+            estado: 'completo',
+            metaRecorrenteCents: 500,
+            faltamCents: 200,
+          },
+        ],
       },
     }),
   );
@@ -24,4 +33,36 @@ it('renderiza negativo abaixo do zero, incompleto e ausência sem inventar lucro
   expect(html).toContain('2,50');
   expect(html).toContain('Lucro líquido por mês');
   expect(html).toContain('Lucro líquido por semana');
+  expect(html).toContain('Meta para se pagar:');
+  expect(html).not.toContain('data-weekly-target');
+  expect(html).toContain('até hoje');
+  expect(html).toContain('Faltam');
+  expect(html).toContain('semanas do mês corrente podem ser recalculadas');
+});
+
+it('não mostra faltam zero quando meta atingida ou inexistente', () => {
+  for (const [meta, text] of [
+    [500, 'Meta atingida ✓'],
+    [0, 'Sem custo fixo nesta semana'],
+  ] as const) {
+    const html = renderToStaticMarkup(
+      React.createElement(LucroGraficos, {
+        data: {
+          meses: [],
+          semanas: [
+            {
+              de: '2026-10-01',
+              ate: '2026-10-05',
+              valorCents: 300,
+              estado: 'completo',
+              metaRecorrenteCents: meta,
+              faltamCents: 0,
+            },
+          ],
+        },
+      }),
+    );
+    expect(html).toContain(text);
+    expect(html).not.toContain('Faltam');
+  }
 });
