@@ -136,7 +136,6 @@ function ColunaKpi({
   anterior,
   rotuloAnterior,
   detalhe,
-  divisor = false,
 }: {
   serie: Serie;
   rotulo: string;
@@ -145,7 +144,6 @@ function ColunaKpi({
   anterior: Bucket;
   rotuloAnterior: string;
   detalhe?: string;
-  divisor?: boolean;
 }) {
   const { valor, marca } = valorDoPeriodo(atual, serie);
   const completo = completudeDe(atual, serie) === "completo";
@@ -153,9 +151,7 @@ function ColunaKpi({
   return (
     <div
       data-testid={`despesas-kpi-${serie}`}
-      className={`flex min-w-0 flex-col gap-1 ${
-        divisor ? "border-t border-line pt-4 sm:border-t-0 sm:border-l sm:pt-0 sm:pl-5" : ""
-      }`}
+      className="@container flex min-w-0 flex-col gap-1 border-t border-line pt-3 [overflow-wrap:anywhere]"
     >
       <span className="flex items-center gap-1.5 text-[12px] text-ink-soft">
         {cor ? <Amostra cor={cor} /> : null}
@@ -164,13 +160,13 @@ function ColunaKpi({
       <p
         data-testid="despesas-kpi-valor"
         data-completo={completo}
-        className={`whitespace-nowrap text-[26px] font-semibold leading-[1.1] tracking-[-0.02em] tabular-nums ${
+        className={`text-[clamp(18px,10cqi,26px)] font-semibold leading-[1.1] tracking-[-0.02em] tabular-nums ${
           semValor ? "text-ink-mute" : "text-ink"
         }`}
       >
         {valor}
         {marca ? (
-          <span className="ml-1.5 text-[12px] font-normal tracking-normal text-ink-soft">
+          <span className="mt-1 block text-[12px] font-normal leading-normal tracking-normal text-ink-soft">
             {marca}
           </span>
         ) : null}
@@ -208,15 +204,15 @@ function CartaoKpi({
     <article
       data-testid={testId}
       aria-label={titulo}
-      className="flex flex-col gap-4 rounded-lg border border-line px-6 py-5"
+      className="flex min-w-0 flex-col gap-4 rounded-lg border border-line px-4 py-5 sm:px-6"
     >
-      <div className="flex items-baseline justify-between gap-3">
+      <div className="flex flex-wrap items-baseline justify-between gap-3">
         <h3 className="font-mono! text-[11px] font-semibold uppercase tracking-[0.12em]! text-ink-soft!">
           {titulo}
         </h3>
         <span className={MONO}>{faixa}</span>
       </div>
-      <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,12rem),1fr))] gap-5">
         <ColunaKpi
           serie="stripe"
           rotulo="Stripe (cartão)"
@@ -229,7 +225,6 @@ function CartaoKpi({
           rotulo="Inter (PIX)"
           cor={COR_INTER.forte}
           detalhe={resumoCobertura(atual.cobertura.inter, "PIX")}
-          divisor
           {...comum}
         />
         <ColunaKpi
@@ -237,10 +232,9 @@ function CartaoKpi({
           rotulo="Recorrentes/manuais"
           cor={COR_MANUAL.forte}
           detalhe={resumoManuais(atual.cobertura.manual)}
-          divisor
           {...comum}
         />
-        <ColunaKpi serie="total" rotulo="Total" cor={null} divisor {...comum} />
+        <ColunaKpi serie="total" rotulo="Total" cor={null} {...comum} />
       </div>
       <p
         data-testid={`${testId}-nao-vinculadas`}
