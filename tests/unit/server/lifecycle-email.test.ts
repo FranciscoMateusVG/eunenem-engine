@@ -105,10 +105,10 @@ describe('lifecycle emails — shared email-safe contract', () => {
   it('uses the approved contact channels', () => {
     for (const m of [all()[0], all()[2]]) {
       expect(m.html).toContain('href="mailto:oi@eunenem.com"');
-      expect(m.html).toContain('href="https://wa.me/5531996011432"');
-      expect(m.html).toContain('+55 31 99601-1432');
+      expect(m.html).toContain('href="https://wa.me/5511961080489"');
+      expect(m.html).toContain('+55 11 96108-0489');
       expect(m.text).toContain('oi@eunenem.com');
-      expect(m.text).toContain('+55 31 99601-1432');
+      expect(m.text).toContain('+55 11 96108-0489');
     }
     for (const m of all().filter((_, i) => i !== 1)) {
       expect(m.html).toContain('href="https://www.instagram.com/eu_nenem"');

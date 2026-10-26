@@ -1,3 +1,4 @@
+import { EUNENEM_SUPPORT_WHATSAPP } from "../../shared/support-contact.js";
 // aperture-vv3i — Painel routing convention (single source of truth).
 //
 // The router is hand-rolled (App.tsx resolveRoute + server.tsx status). This
@@ -17,8 +18,8 @@
 // aperture-7mqsg — EuNeném ATENDIMENTO WhatsApp (support), NOT guest/share
 // links. Single source for every support entry point (painel menu row,
 // landing floating button). No prefilled ?text= — the user writes the message.
-export const EUNENEM_SUPPORT_WHATSAPP_NUMBER_DISPLAY = "(31) 99601-1432";
-export const EUNENEM_SUPPORT_WHATSAPP_URL = "https://wa.me/5531996011432";
+export const EUNENEM_SUPPORT_WHATSAPP_NUMBER_DISPLAY = EUNENEM_SUPPORT_WHATSAPP.display;
+export const EUNENEM_SUPPORT_WHATSAPP_URL = EUNENEM_SUPPORT_WHATSAPP.url;
 
 export const PAINEL_SECTIONS = [
   "compartilhar",
@@ -142,7 +143,7 @@ export function menuItemHref(
       return paginaSharePath(slug, idCampanha, campanhaSlug);
     case "suporte":
       // External support channel — no in-app page in scope.
-      // aperture-7mqsg — EuNeném atendimento: (31) 99601-1432.
+      // aperture-7mqsg — EuNeném atendimento: (11) 96108-0489.
       return EUNENEM_SUPPORT_WHATSAPP_URL;
     default:
       return undefined; // e.g. `rifa` (soon) — not navigable yet.

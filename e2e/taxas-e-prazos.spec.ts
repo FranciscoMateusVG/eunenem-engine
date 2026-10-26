@@ -16,7 +16,7 @@ for (const width of [320, 375, 390, 430, 768, 1440]) {
     ).toHaveAttribute('href', '/faq');
     await expect(
       page.getByRole('main').getByRole('link', { name: 'Fale com a gente' }),
-    ).toHaveAttribute('href', 'https://wa.me/5531996011432');
+    ).toHaveAttribute('href', 'https://wa.me/5511961080489');
     await expect(
       page.getByRole('link', { name: 'Consulte também nossos Termos de Uso.' }),
     ).toHaveAttribute('href', '/termos-de-uso');

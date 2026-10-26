@@ -185,16 +185,16 @@ describe('7mqsg item 5 — "direto na conta"', () => {
 
 describe('7mqsg item 6 — support WhatsApp is the EuNeném atendimento number', () => {
   it('exposes the exact URL/number and the painel suporte row resolves to it', () => {
-    expect(EUNENEM_SUPPORT_WHATSAPP_URL).toBe('https://wa.me/5531996011432');
-    expect(EUNENEM_SUPPORT_WHATSAPP_NUMBER_DISPLAY).toBe('(31) 99601-1432');
-    expect(menuItemHref('qualquer-slug', 'suporte')).toBe('https://wa.me/5531996011432');
+    expect(EUNENEM_SUPPORT_WHATSAPP_URL).toBe('https://wa.me/5511961080489');
+    expect(EUNENEM_SUPPORT_WHATSAPP_NUMBER_DISPLAY).toBe('(11) 96108-0489');
+    expect(menuItemHref('qualquer-slug', 'suporte')).toBe('https://wa.me/5511961080489');
   });
   it('footer "whatsapp" entries (fale conosco + social icon) are atendimento links → support number', () => {
     const fale = LANDING_FOOTER_COLS.find((c) => c.title === 'fale conosco');
     const wa = fale?.links.find(([label]) => label === 'whatsapp');
-    expect(wa?.[1]).toBe('https://wa.me/5531996011432');
+    expect(wa?.[1]).toBe('https://wa.me/5511961080489');
     const social = LANDING_FOOTER_SOCIALS.find(([, label]) => label === 'WhatsApp');
-    expect(social?.[0]).toBe('https://wa.me/5531996011432');
+    expect(social?.[0]).toBe('https://wa.me/5511961080489');
     expect(src('pages/lib/mocks/landing.ts')).not.toMatch(/fale-com-a-gente/);
   });
   it('every atendimento surface uses the support number: /faq "falar conosco" + no legacy fale-com-a-gente left under pages/', () => {
@@ -216,7 +216,7 @@ describe('7mqsg item 6 — support WhatsApp is the EuNeném atendimento number',
   it('guest share links are untouched (whatsapp-invite still builds wa.me from the guest phone)', () => {
     const invite = src('pages/lib/whatsapp-invite.ts');
     expect(invite).toMatch(/https:\/\/wa\.me\/\$\{phone \?\? ''\}\?text=/);
-    expect(invite).not.toMatch(/5531996011432/);
+    expect(invite).not.toMatch(/5511961080489/);
     expect(src('pages/lib/painelRoutes.ts')).not.toMatch(/5531999999999/);
   });
 });
@@ -225,7 +225,7 @@ describe('7mqsg item 8 — homepage WhatsApp floating button', () => {
   it('is a plain accessible link to the support URL with no prefilled message and no nested button', () => {
     const el = WhatsAppFab() as unknown as { type: string; props: Record<string, unknown> };
     expect(el.type).toBe('a');
-    expect(el.props.href).toBe('https://wa.me/5531996011432');
+    expect(el.props.href).toBe('https://wa.me/5511961080489');
     expect(String(el.props.href)).not.toMatch(/text=/);
     expect(el.props['aria-label']).toBe(WHATSAPP_FAB_LABEL);
     expect(WHATSAPP_FAB_LABEL).toBe('Falar com a EuNeném pelo WhatsApp');
