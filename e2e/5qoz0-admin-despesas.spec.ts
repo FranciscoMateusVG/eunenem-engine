@@ -50,6 +50,25 @@ async function semOverflow(page: Page, onde: string) {
   expect(g.documento, `sem overflow horizontal em ${onde}`).toBeLessThanOrEqual(g.viewport);
 }
 
+async function kpisSemSobreposicao(page: Page) {
+  const problemas = await page
+    .locator('[data-testid="despesas-kpi-valor"]')
+    .evaluateAll((valores) =>
+      valores.flatMap((valor) => {
+        const coluna = valor.parentElement;
+        if (!coluna) return ['indicador sem coluna'];
+        const limite = coluna.getBoundingClientRect();
+        const range = document.createRange();
+        range.selectNodeContents(valor);
+        const fora = Array.from(range.getClientRects()).some(
+          (rect) => rect.left < limite.left - 1 || rect.right > limite.right + 1,
+        );
+        return fora || valor.scrollWidth > valor.clientWidth + 1 ? [valor.textContent] : [];
+      }),
+    );
+  expect(problemas, 'valores e avisos precisam caber na própria coluna').toEqual([]);
+}
+
 test('5qoz0: Despesas — KPIs por provedor, cobertura pendente e não vinculadas', async ({
   browser,
   baseURL,
@@ -183,6 +202,8 @@ test('5qoz0: Despesas — KPIs por provedor, cobertura pendente e não vinculada
 
     for (const viewport of [
       { width: 1280, height: 1400 },
+      { width: 1536, height: 1200 },
+      { width: 1920, height: 1200 },
       { width: 375, height: 812 },
     ]) {
       const tag = String(viewport.width);
@@ -244,6 +265,14 @@ test('5qoz0: Despesas — KPIs por provedor, cobertura pendente e não vinculada
 
         await page.screenshot({ path: testInfo.outputPath(`despesas-${tag}.png`), fullPage: true });
         await semOverflow(page, `/admin/pagamentos/despesas ${tag}`);
+        await kpisSemSobreposicao(page);
+        // Valores maiores e estados extensos também precisam caber sem invadir o vizinho.
+        await page.getByTestId('despesas-kpi-valor').evaluateAll((valores) => {
+          for (const valor of valores) {
+            if (valor.firstChild) valor.firstChild.textContent = 'R$ 9.999.999.999,99';
+          }
+        });
+        await kpisSemSobreposicao(page);
         expect(erros).toEqual([]);
       } finally {
         await context.close();
