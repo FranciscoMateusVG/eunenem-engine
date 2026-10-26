@@ -1,3 +1,4 @@
+import { EUNENEM_SUPPORT_WHATSAPP } from "../../shared/support-contact.js";
 /**
  * Automatic lifecycle emails (aperture-tykv8): welcome, list ready, D−5
  * reminder and gift received. The operator's four PDFs are the reference;
@@ -91,8 +92,8 @@ export interface RenderedLifecycleEmail {
 
 export const EUNENEM_CONTACT = {
   email: 'oi@eunenem.com',
-  whatsappDisplay: '+55 31 99601-1432',
-  whatsappUrl: 'https://wa.me/5531996011432',
+  whatsappDisplay: EUNENEM_SUPPORT_WHATSAPP.internationalDisplay,
+  whatsappUrl: EUNENEM_SUPPORT_WHATSAPP.url,
   instagramUrl: 'https://www.instagram.com/eu_nenem',
 } as const;
 

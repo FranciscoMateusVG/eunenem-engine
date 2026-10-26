@@ -36,7 +36,7 @@ describe('painel — email preferences entry points (aperture-fy9vy)', () => {
     expect(html).not.toContain('/email/descadastrar');
     expect(html).not.toContain('e-mails automáticos');
     expect(html).toContain('/painel/helena/perfil');
-    expect(html).toContain('https://wa.me/5531996011432');
+    expect(html).toContain('https://wa.me/5511961080489');
     expect(groups.flatMap((group) => group.items).some((item) => item.id === 'emails')).toBe(false);
     expect(menuItemHref('helena', 'emails', 'c1')).toBeUndefined();
   });
