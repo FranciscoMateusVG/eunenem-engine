@@ -2,12 +2,12 @@ import { sql } from 'kysely';
 import type { Database } from '../../../../src/adapters/database.js';
 import { cpfValido } from '../../../../src/domain/arrecadacao/value-objects/dados-recebedor.js';
 
-export interface TomadorMes { cpf: string; nome: string; resultadoCents: number; campanhas: string[] }
+export interface TomadorMes { cpf: string; nome: string; resultadoCents: number; campanhas: string[]; houveTroca: boolean }
 export interface PendenciaTomador { campanhaId: string; motivo: string; resultadoCents: number }
 
-/** Titular ATUAL, não um snapshot histórico. Nunca infere CPF do pagador. */
+/** Último recebedor cadastrado, não um snapshot histórico. Nunca infere CPF do pagador. */
 export async function carregarTomadoresMes(db: Database, platformId: string, de: string, ate: string) {
-  const rows = await sql<{ campanha_id: string; resultado: string; ativos: string; historicos: string; novos: string; cpf: string | null; nome: string | null }>`
+  const rows = await sql<{ campanha_id: string; resultado: string; historicos: string; cpf: string | null; nome: string | null }>`
     WITH valores AS (
       SELECT c.id AS campanha_id,
         SUM(CASE WHEN l.criado_em >= (${de}::date::timestamp AT TIME ZONE 'America/Sao_Paulo')
@@ -22,12 +22,13 @@ export async function carregarTomadoresMes(db: Database, platformId: string, de:
       GROUP BY c.id
     )
     SELECT v.campanha_id, v.resultado,
-      count(r.id) FILTER(WHERE r.is_active)::text AS ativos, count(r.id)::text AS historicos,
-      count(r.id) FILTER(WHERE r.criada_em >= (${de}::date::timestamp AT TIME ZONE 'America/Sao_Paulo'))::text AS novos,
-      max(r.cpf_titular) FILTER(WHERE r.is_active) AS cpf,
-      max(r.nome_titular) FILTER(WHERE r.is_active) AS nome
-    FROM valores v LEFT JOIN recebedores r ON r.campanha_id=v.campanha_id
-    GROUP BY v.campanha_id,v.resultado ORDER BY v.campanha_id
+      r.historicos, r.cpf, r.nome
+    FROM valores v LEFT JOIN LATERAL (
+      SELECT cpf_titular AS cpf, nome_titular AS nome, count(*) OVER()::text AS historicos
+      FROM recebedores WHERE campanha_id=v.campanha_id
+      ORDER BY criada_em DESC, id DESC LIMIT 1
+    ) r ON true
+    ORDER BY v.campanha_id
   `.execute(db);
   const grupos = new Map<string, TomadorMes>();
   const pendencias: PendenciaTomador[] = [];
@@ -37,14 +38,13 @@ export async function carregarTomadoresMes(db: Database, platformId: string, de:
     if (!Number.isSafeInteger(resultadoCents)) throw new Error('nfse_valor_invalido');
     const cpf = (r.cpf ?? '').replace(/\D/g, '');
     const nome = (r.nome ?? '').trim();
-    const motivo = Number(r.ativos) !== 1 ? 'recebedor_ausente_ou_ambiguo'
-      : Number(r.historicos) > 1 && Number(r.novos) > 0 ? 'possivel_troca_no_mes'
+    const motivo = !r.historicos ? 'recebedor_ausente_ou_ambiguo'
       : !cpfValido(cpf) ? 'cpf_ausente_ou_invalido'
       : !nome ? 'nome_ausente' : null;
     if (motivo) { pendencias.push({ campanhaId:r.campanha_id, motivo, resultadoCents }); continue; }
     const anterior = grupos.get(cpf);
     if (anterior && anterior.nome.toLocaleUpperCase('pt-BR') !== nome.toLocaleUpperCase('pt-BR')) conflitos.add(cpf);
-    grupos.set(cpf, { cpf, nome: anterior?.nome ?? nome, resultadoCents:(anterior?.resultadoCents ?? 0)+resultadoCents, campanhas:[...(anterior?.campanhas ?? []),r.campanha_id] });
+    grupos.set(cpf, { cpf, houveTroca: (anterior?.houveTroca ?? false) || Number(r.historicos) > 1, nome: anterior?.nome ?? nome, resultadoCents:(anterior?.resultadoCents ?? 0)+resultadoCents, campanhas:[...(anterior?.campanhas ?? []),r.campanha_id] });
   }
   for (const cpf of conflitos) {
     const g=grupos.get(cpf)!;

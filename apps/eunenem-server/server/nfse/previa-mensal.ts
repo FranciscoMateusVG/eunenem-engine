@@ -36,7 +36,7 @@ import {
  * escreve no banco. A base fiscal exclui o adicional do cartão. O total é lido em
  * Receita: `loadReceitaDashboard` com o mês calendário de São Paulo como
  * período (taxas registradas por criado_em − cancelamentos por cancelado_em).
- * Agrupamento por CPF do titular atual, no mesmo snapshot.
+ * Agrupamento por CPF do recebedor mais recente, no mesmo snapshot.
  *
  * Resultado ≤ 0 → sem DPS. Sem CNPJ/município → sem DPS (config incompleta).
  * Sem certificado → DPS gerada e NÃO assinada, sinalizada. Com certificado →
@@ -240,10 +240,10 @@ function camposDaDps(dps: DpsInput, config: NfseConfig, totTrib: TotTribResolvid
       grupo: 'Tomador',
       tag: 'toma',
       rotulo: 'Tomador',
-      valor: 'Titular atual identificado por CPF e nome',
+      valor: 'Recebedor mais recente identificado por CPF e nome',
       origem: 'fixo',
       aConfirmar: true,
-      nota: 'Uma DPS por CPF por mês. Titular atual; revisar pendências históricas.',
+      nota: 'Uma DPS por CPF por mês. Último cadastrado; indicação de troca na prévia.',
     },
 
     { grupo: serv, tag: 'cLocPrestacao', rotulo: 'Local da prestação (IBGE)', valor: dps.servico.cLocPrestacao, origem: 'env', aConfirmar: false, nota: null },
@@ -352,8 +352,8 @@ export function montarPreviaDps(input: {
     idDps,
     valorServico: formatarValorDps(resultadoCents),
     campos: [...camposDaDps(dps, config, totTrib),
-      { grupo:'Tomador',tag:'CPF',rotulo:'CPF do titular atual',valor:input.tomador.cpf,origem:'derivado',aConfirmar:true,nota:'Titular atual da campanha; revisão antes de emissão histórica.' },
-      { grupo:'Tomador',tag:'xNome',rotulo:'Nome do titular atual',valor:input.tomador.nome,origem:'derivado',aConfirmar:true,nota:null },
+      { grupo:'Tomador',tag:'CPF',rotulo:'CPF do recebedor mais recente',valor:input.tomador.cpf,origem:'derivado',aConfirmar:true,nota:'Último recebedor cadastrado da campanha; decisão do operador para a prévia histórica.' },
+      { grupo:'Tomador',tag:'xNome',rotulo:'Nome do recebedor mais recente',valor:input.tomador.nome,origem:'derivado',aConfirmar:true,nota:null },
       { grupo:'Serviço',tag:'cTribMun',rotulo:'Código municipal',valor:'003',origem:'fixo',aConfirmar:false,nota:'Orientação do contador.' },
       { grupo:'IBS/CBS',tag:'IBSCBS',rotulo:'Classificação IBS/CBS',valor:'finNFSe=0; indFinal=1; cIndOp=100301; indDest=0; CST=000; cClassTrib=000001',origem:'fixo',aConfirmar:false,nota:'Alíquotas calculadas pelo Sistema Nacional, não informadas na DPS.' },
     ],
@@ -419,7 +419,7 @@ export type AvisoPrevia =
 export interface PreviaMensal {
   readonly titularConsultadoEm: Date;
   readonly pendencias: readonly PendenciaTomador[];
-  readonly notas: readonly { cpf: string; nome: string; resultadoCents: number; dps: PreviaMensal['dps'] }[];
+  readonly notas: readonly { cpf: string; nome: string; resultadoCents: number; houveTroca: boolean; dps: PreviaMensal['dps'] }[];
   readonly mes: string;
   readonly rotulo: string;
   readonly situacao: SituacaoMes;
@@ -514,7 +514,7 @@ async function previaMensal(
   for (const [i, tomador] of titulares.tomadores.entries()) {
     const gerada = montarPreviaDps({ mes, resultadoCents: tomador.resultadoCents, config, now, tomador, ordinal:i+1 });
     const dpsNota = gerada.status === 'gerada' ? { ...gerada, ...assinarPrevia(gerada.xml, gerada.idDps, config) } : gerada;
-    notas.push({ cpf:tomador.cpf, nome:tomador.nome, resultadoCents:tomador.resultadoCents, dps:dpsNota });
+    notas.push({ houveTroca:tomador.houveTroca, cpf:tomador.cpf, nome:tomador.nome, resultadoCents:tomador.resultadoCents, dps:dpsNota });
   }
   if ((notas.length > 0 || titulares.pendencias.length === 0) && notas.every(n => n.resultadoCents <= 0)) avisos.push('resultado_nao_positivo');
   for (const nota of notas) {

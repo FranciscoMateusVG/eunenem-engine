@@ -717,7 +717,7 @@ describe('besta — uma DPS por titular atual no mês', () => {
   });
 });
 
-it('besta: separa CPFs, bloqueia checksum inválido e possível troca no mês', async () => {
+it('besta: separa CPFs, bloqueia checksum inválido e usa último recebedor no mês', async () => {
   const cs = await Promise.all([
     seed.campanha(),
     seed.campanha(),
@@ -744,16 +744,17 @@ it('besta: separa CPFs, bloqueia checksum inválido e possível troca no mês', 
   expect(new Set(p.notas.map((n) => (n.dps.status === 'gerada' ? n.dps.idDps : null))).size).toBe(
     2,
   );
-  expect(p.pendencias.map((x) => x.motivo).sort()).toEqual([
-    'cpf_ausente_ou_invalido',
-    'possivel_troca_no_mes',
-  ]);
+  expect(p.pendencias.map((x) => x.motivo).sort()).toEqual(['cpf_ausente_ou_invalido']);
+  expect(p.notas.find((n) => n.cpf === '52998224725')).toMatchObject({
+    resultadoCents: 200,
+    houveTroca: true,
+  });
   for (const n of p.notas) {
     expect(n.dps.status).toBe('gerada');
     if (n.dps.status === 'gerada') expect(validateDps(n.dps.xml).ok).toBe(true);
   }
 });
-it('besta: separa CPFs, bloqueia checksum inválido e troca posterior ao mês', async () => {
+it('besta: separa CPFs, bloqueia checksum inválido e usa último recebedor após o mês', async () => {
   const cs = await Promise.all([
     seed.campanha(),
     seed.campanha(),
@@ -780,12 +781,40 @@ it('besta: separa CPFs, bloqueia checksum inválido e troca posterior ao mês', 
   expect(new Set(p.notas.map((n) => (n.dps.status === 'gerada' ? n.dps.idDps : null))).size).toBe(
     2,
   );
-  expect(p.pendencias.map((x) => x.motivo).sort()).toEqual([
-    'cpf_ausente_ou_invalido',
-    'possivel_troca_no_mes',
-  ]);
+  expect(p.pendencias.map((x) => x.motivo).sort()).toEqual(['cpf_ausente_ou_invalido']);
+  expect(p.notas.find((n) => n.cpf === '52998224725')).toMatchObject({
+    resultadoCents: 200,
+    houveTroca: true,
+  });
   for (const n of p.notas) {
     expect(n.dps.status).toBe('gerada');
     if (n.dps.status === 'gerada') expect(validateDps(n.dps.xml).ok).toBe(true);
+  }
+});
+
+it('2w3pg: último cadastrado posterior à competência prevalece sobre antigo ativo', async () => {
+  const id = await seed.campanha();
+  await seed.taxa({ campaignId: id, taxaCents: 321, criadoEm: new Date('2032-09-10T15:00:00Z') });
+  await sql`UPDATE recebedores SET criada_em='2032-08-01T15:00:00Z' WHERE campanha_id=${id}::uuid`.execute(
+    testDb.db,
+  );
+  await sql`INSERT INTO recebedores(id,campanha_id,metodo,nome_titular,cpf_titular,tipo_chave_pix,chave_pix,is_active,criada_em)
+    VALUES(${randomUUID()}::uuid,${id}::uuid,'pix','Novo sintético','11144477735','cpf','11144477735',false,'2032-10-05T15:00:00Z')`.execute(
+    testDb.db,
+  );
+  const p = await caller().admin.notaFiscal.previaMensal({ mes: '2032-09' });
+  expect(p.pendencias).toEqual([]);
+  expect(p.notas).toHaveLength(1);
+  expect(p.notas[0]).toMatchObject({
+    cpf: '11144477735',
+    nome: 'Novo sintético',
+    resultadoCents: 321,
+    houveTroca: true,
+  });
+  const dps = p.notas[0].dps;
+  expect(dps.status).toBe('gerada');
+  if (dps.status === 'gerada') {
+    expect(dps.xml).toContain('<CPF>11144477735</CPF>');
+    expect(validateDps(dps.xml).ok).toBe(true);
   }
 });

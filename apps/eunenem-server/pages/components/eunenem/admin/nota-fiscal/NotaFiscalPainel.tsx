@@ -78,11 +78,12 @@ export function NotaFiscalPainel({ data }: { data: NotaFiscalPrevia }) {
       <ReceitaPorMeioProvedor rows={data.porMeioProvedor} soma={somaMeios} />
       <ProblemasDeConfiguracao problemas={data.configuracao.problemas} />
       <p className="text-sm">Base fiscal: comissão cobrada do recebedor, menos cancelamentos. Não inclui o adicional do cartão cobrado do pagador.</p>
-      <p className="text-sm">Titular atual da campanha — consultado em {formatInstante(data.titularConsultadoEm)}. Não representa um histórico de titulares.</p>
+      <p className="text-sm">Recebedor mais recente da campanha — consultado em {formatInstante(data.titularConsultadoEm)}. Não representa um histórico de titulares.</p>
       <Conciliacao data={data} />
       {data.pendencias.length > 0 && <section aria-label="Pendências de tomador"><h2>Pendências para revisão manual</h2><ul>{data.pendencias.map(p => <li key={p.campanhaId}>Campanha {p.campanhaId}: {MOTIVOS_PENDENCIA[p.motivo] ?? 'Pendência para revisão manual'} — {formatBRL(p.resultadoCents)}. Nenhuma DPS gerada.</li>)}</ul></section>}
       {data.notas.map(n => <section key={n.cpf} className="rounded border p-4">
         <h2>Tomador: {n.nome} · CPF {n.cpf}</h2>
+        {n.houveTroca && <p>Recebedor mais recente da campanha (houve troca)</p>}
         <p>Líquido do recebedor: {formatBRL(n.resultadoCents)}</p>
         <SecaoDps dps={n.dps} mes={data.mes} />
       </section>)}
