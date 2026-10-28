@@ -42,7 +42,7 @@ describe('parseNfseConfig', () => {
       { variavel: 'NFSE_PRESTADOR_CNPJ', motivo: 'ausente' },
       { variavel: 'NFSE_MUNICIPIO_IBGE', motivo: 'ausente' },
     ]);
-    expect(cfg.cTribNac).toEqual({ valor: '100501', origem: 'default' });
+    expect(cfg.cTribNac).toEqual({ valor: '100202', origem: 'default' });
     expect(cfg.ambiente).toEqual({ valor: '2', origem: 'default' });
     expect(cfg.opSimpNac).toEqual({ valor: '1', origem: 'default' });
     expect(cfg.regApTribSN).toEqual({ valor: null, origem: 'default' });
@@ -50,7 +50,7 @@ describe('parseNfseConfig', () => {
     expect(cfg.tribISSQN).toEqual({ valor: '1', origem: 'default' });
     expect(cfg.tpRetISSQN).toEqual({ valor: '1', origem: 'default' });
     expect(cfg.pAliq).toEqual({ valor: null, origem: 'default' });
-    expect(cfg.inscricaoMunicipal).toEqual({ valor: null, origem: 'default' });
+    expect(cfg.inscricaoMunicipal).toEqual({ valor: '12306200019', origem: 'default' });
     expect(cfg.cNBS).toEqual({ valor: null, origem: 'default' });
     expect(cfg.descricaoServico.origem).toBe('default');
   });
@@ -93,7 +93,7 @@ describe('parseNfseConfig', () => {
     });
     expect(cfg.prestadorCnpj).toBeNull();
     expect(cfg.municipioIbge).toBeNull();
-    expect(cfg.cTribNac).toEqual({ valor: '100501', origem: 'default' });
+    expect(cfg.cTribNac).toEqual({ valor: '100202', origem: 'default' });
     expect(cfg.tpRetISSQN).toEqual({ valor: '1', origem: 'default' });
     expect(cfg.problemas).toEqual([
       { variavel: 'NFSE_PRESTADOR_CNPJ', motivo: 'invalido' },
@@ -124,7 +124,10 @@ describe('parseNfseConfig', () => {
     'a;b;c',
   ])('NFSE_P_TOT_TRIB %j é inválido', (v) => {
     const cfg = parseNfseConfig({ NFSE_P_TOT_TRIB: v });
-    expect(cfg.pTotTrib).toEqual({ valor: null, origem: 'default' });
+    expect(cfg.pTotTrib).toEqual({
+      valor: { fed: '11.33', est: '0.00', mun: '3.00' },
+      origem: 'default',
+    });
     expect(cfg.problemas).toContainEqual({ variavel: 'NFSE_P_TOT_TRIB', motivo: 'invalido' });
   });
 

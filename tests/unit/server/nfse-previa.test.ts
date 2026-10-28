@@ -37,6 +37,7 @@ describe('situacaoDoMes', () => {
 describe('montarPreviaDps', () => {
   it.each([0, -500])('resultado %i → sem_valor, sem DPS', (resultadoCents) => {
     const previa = montarPreviaDps({
+      tomador: { cpf: '52998224725', nome: 'Titular sintético' },
       mes: '2026-09',
       resultadoCents,
       config: parseNfseConfig(ENV_MINIMO),
@@ -47,6 +48,7 @@ describe('montarPreviaDps', () => {
 
   it('sem CNPJ/município → config_incompleta listando só as variáveis que bloqueiam', () => {
     const previa = montarPreviaDps({
+      tomador: { cpf: '52998224725', nome: 'Titular sintético' },
       mes: '2026-09',
       resultadoCents: 100,
       config: parseNfseConfig({ NFSE_MUNICIPIO_IBGE: '2611606', NFSE_TP_RET_ISSQN: '9' }),
@@ -57,6 +59,7 @@ describe('montarPreviaDps', () => {
 
   it('gerada: XML, Id, valor formatado; série/número de prévia', () => {
     const previa = montarPreviaDps({
+      tomador: { cpf: '52998224725', nome: 'Titular sintético' },
       mes: '2026-09',
       resultadoCents: 123456,
       config: parseNfseConfig(ENV_MINIMO),
@@ -66,16 +69,17 @@ describe('montarPreviaDps', () => {
     expect(previa.idDps).toBe('DPS2611606211222333000181999990' + '20260999999999');
     expect(previa.valorServico).toBe('1234.56');
     expect(previa.xml).toContain(
-      '<serie>99999</serie><nDPS>20260999999999</nDPS><dCompet>2026-09-01</dCompet>',
+      '<serie>99999</serie><nDPS>20260999999999</nDPS><dCompet>2026-09-30</dCompet>',
     );
     expect(previa.xml).toContain('<dhEmi>2026-10-05T14:30:00-03:00</dhEmi>');
     expect(previa.xml).toContain('<vServ>1234.56</vServ>');
     expect(previa.xml).toContain('competência setembro/2026');
-    expect(previa.xml).not.toContain('<toma>');
+    expect(previa.xml).toContain('<toma>');
   });
 
   it('campos: valor vem do ledger e não é "a confirmar"; defaults fiscais são', () => {
     const previa = montarPreviaDps({
+      tomador: { cpf: '52998224725', nome: 'Titular sintético' },
       mes: '2026-09',
       resultadoCents: 500,
       config: parseNfseConfig(ENV_MINIMO),
@@ -94,16 +98,20 @@ describe('montarPreviaDps', () => {
       aConfirmar: false,
     });
     expect(por('cLocEmi')).toMatchObject({ valor: '2611606', origem: 'env', aConfirmar: false });
-    expect(por('cTribNac')).toMatchObject({ valor: '100501', origem: 'default', aConfirmar: true });
+    expect(por('cTribNac')).toMatchObject({
+      valor: '100202',
+      origem: 'default',
+      aConfirmar: false,
+    });
     expect(por('opSimpNac')).toMatchObject({ origem: 'default', aConfirmar: true });
     expect(por('tribISSQN')).toMatchObject({ origem: 'default', aConfirmar: true });
     expect(por('tpRetISSQN')).toMatchObject({ origem: 'default', aConfirmar: true });
     expect(por('xDescServ')).toMatchObject({ origem: 'default', aConfirmar: true });
     expect(por('tpAmb')).toMatchObject({ valor: '2', origem: 'default', aConfirmar: true });
     expect(por('dCompet')).toMatchObject({
-      valor: '2026-09-01',
+      valor: '2026-09-30',
       origem: 'derivado',
-      aConfirmar: true,
+      aConfirmar: false,
     });
     expect(por('toma')).toMatchObject({ origem: 'fixo', aConfirmar: true });
     expect(por('serie')).toMatchObject({ valor: '99999', origem: 'fixo', aConfirmar: false });
@@ -116,6 +124,7 @@ describe('montarPreviaDps', () => {
   describe('totTrib por regime (Anexo I E0710/E0712/E0713)', () => {
     function gerada(env: Record<string, string>) {
       const previa = montarPreviaDps({
+        tomador: { cpf: '52998224725', nome: 'Titular sintético' },
         mes: '2026-09',
         resultadoCents: 500,
         config: parseNfseConfig({ ...ENV_MINIMO, ...env }),
@@ -127,12 +136,11 @@ describe('montarPreviaDps', () => {
       return { previa, campo };
     }
 
-    it('não optante sem NFSE_P_TOT_TRIB: pendente, a confirmar, explica E0713', () => {
+    it('não optante usa percentuais aprovados pelo contador por padrão', () => {
       const { previa, campo } = gerada({});
-      expect(previa.totTribPendente).toBe(true);
+      expect(previa.totTribPendente).toBe(false);
       expect(campo.aConfirmar).toBe(true);
-      expect(campo.nota).toContain('E0713');
-      expect(campo.nota).toContain('NFSE_P_TOT_TRIB');
+      expect(previa.xml).toContain('<pTotTribFed>11.33</pTotTribFed>');
     });
 
     it('não optante com NFSE_P_TOT_TRIB: pTotTrib no XML, não pendente', () => {
@@ -163,6 +171,7 @@ describe('montarPreviaDps', () => {
 
   it('valores explícitos no env deixam de ser "a confirmar"', () => {
     const previa = montarPreviaDps({
+      tomador: { cpf: '52998224725', nome: 'Titular sintético' },
       mes: '2026-09',
       resultadoCents: 500,
       config: parseNfseConfig({ ...ENV_MINIMO, NFSE_CTRIB_NAC: '100202', NFSE_OP_SIMP_NAC: '3' }),
@@ -183,6 +192,7 @@ describe('montarPreviaDps', () => {
   it('nada na saída carrega a senha do certificado', () => {
     const senha = 'senha-que-nao-pode-vazar';
     const previa = montarPreviaDps({
+      tomador: { cpf: '52998224725', nome: 'Titular sintético' },
       mes: '2026-09',
       resultadoCents: 500,
       config: parseNfseConfig({
@@ -194,4 +204,15 @@ describe('montarPreviaDps', () => {
     });
     expect(JSON.stringify(previa)).not.toContain(senha);
   });
+});
+
+it('besta: não gera prévia positiva sem tomador', () => {
+  expect(
+    montarPreviaDps({
+      mes: '2026-09',
+      resultadoCents: 100,
+      config: parseNfseConfig(ENV_MINIMO),
+      now: NOW,
+    }),
+  ).toEqual({ status: 'config_incompleta', faltando: ['tomador_cpf_nome'] });
 });

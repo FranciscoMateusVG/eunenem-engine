@@ -28,7 +28,10 @@ const XML =
   '<?xml version="1.0" encoding="UTF-8"?><DPS xmlns="http://www.sped.fazenda.gov.br/nfse" versao="1.01"><infDPS Id="DPS261160621122233300018199999020260999999999"><vServ>1234.56</vServ></infDPS></DPS>';
 
 function previa(overrides: Partial<NotaFiscalPrevia> = {}): NotaFiscalPrevia {
-  return {
+  const result = {
+    titularConsultadoEm: '2026-10-28T15:00:00Z',
+    pendencias: [],
+    notas: [],
     mes: '2026-09',
     rotulo: 'setembro/2026',
     situacao: 'fechado',
@@ -68,10 +71,10 @@ function previa(overrides: Partial<NotaFiscalPrevia> = {}): NotaFiscalPrevia {
           grupo: 'Serviço',
           tag: 'cTribNac',
           rotulo: 'Código de tributação nacional',
-          valor: '100501',
+          valor: '100202',
           origem: 'default',
           aConfirmar: true,
-          nota: 'LC 116 item 10.05',
+          nota: 'LC 116 item 10.02',
         },
         {
           grupo: 'Valores e tributação',
@@ -87,6 +90,17 @@ function previa(overrides: Partial<NotaFiscalPrevia> = {}): NotaFiscalPrevia {
       assinatura: { status: 'nao_assinada', motivo: 'sem_certificado' },
     },
     ...overrides,
+  } as NotaFiscalPrevia;
+  return {
+    ...result,
+    notas: overrides.notas ?? [
+      {
+        cpf: '52998224725',
+        nome: 'Titular sintético',
+        resultadoCents: result.valor.resultadoDeTaxasCents,
+        dps: result.dps,
+      },
+    ],
   };
 }
 
@@ -101,7 +115,7 @@ function render(data: NotaFiscalPrevia): string {
 describe('NotaFiscalPainel', () => {
   it('mostra o valor do mês e o detalhamento', () => {
     const html = render(previa());
-    expect(html).toContain('Valor da nota de setembro/2026');
+    expect(html).toContain('Base fiscal das notas de setembro/2026');
     expect(html).toContain('R$ 1.234,56');
     expect(html).toContain('R$ 1.500,00');
     expect(html).toContain('R$ 265,44');
@@ -175,7 +189,7 @@ describe('NotaFiscalPainel', () => {
         dps: { status: 'config_incompleta', faltando: ['NFSE_PRESTADOR_CNPJ'] },
       }),
     );
-    expect(html).toContain('Sem DPS: faltam dados do prestador.');
+    expect(html).toContain('Sem DPS: configuração fiscal incompleta ou incompatível.');
     expect(html).toContain('<code class="font-mono">NFSE_PRESTADOR_CNPJ</code>');
   });
 
@@ -228,4 +242,52 @@ describe('notaFiscalMes', () => {
     expect(mesFromSearch('?mes=2026-13', now)).toBe('2026-09');
     expect(mesFromSearch('', now)).toBe('2026-09');
   });
+});
+
+it('besta: mostra titular atual/data, pendência e base sem adicional', () => {
+  const html = render(
+    previa({
+      notas: [],
+      pendencias: [
+        { campanhaId: 'campanha-fixture', motivo: 'cpf_ausente_ou_invalido', resultadoCents: 100 },
+      ],
+    }),
+  );
+  expect(html).toContain('Titular atual da campanha');
+  expect(html).toContain('Pendências para revisão manual');
+  expect(html).toContain('Nenhuma DPS gerada');
+  expect(html).not.toContain('Copiar XML');
+  expect(html).not.toContain('Mesmo número da tela Receita');
+  expect(html).toContain('Não inclui o adicional do cartão');
+});
+
+it('besta: concilia notas, pendências e líquidos não positivos sem esconder recebedores', () => {
+  const html = render(
+    previa({
+      notas: [
+        {
+          cpf: '52998224725',
+          nome: 'Titular sem saldo',
+          resultadoCents: -100,
+          dps: { status: 'sem_valor' },
+        },
+      ],
+      pendencias: [
+        { campanhaId: 'sintetica', motivo: 'possivel_troca_no_mes', resultadoCents: 200 },
+      ],
+    }),
+  );
+  expect(html).toContain('Conciliação da base fiscal');
+  expect(html).toContain('Líquidos não positivos');
+  expect(html).toContain('Titular sem saldo');
+  expect(html).toContain('Possível troca de titular desde o início da competência');
+  expect(html).not.toContain('possivel_troca_no_mes');
+  expect(html).toContain('Diferença');
+  const texto = html.replace(/<[^>]+>/g, '').replace(/(?:&nbsp;|\s)+/g, ' ');
+  expect(texto).toContain(
+    'DPS geradas: R$ 0,00 · Pendências: R$ 2,00 · Líquidos não positivos: -R$ 1,00',
+  );
+  expect(texto).toContain(
+    'Total conciliado: R$ 1,00 · Base fiscal: R$ 1.234,56 · Diferença: R$ 1.233,56',
+  );
 });
