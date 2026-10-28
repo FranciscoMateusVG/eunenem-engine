@@ -211,6 +211,8 @@ export interface DespesasManuais {
   data: Timestamp | null;
   dia_cobranca: number | null;
   encerrado_em: Timestamp | null;
+  excluida_em: Timestamp | null;
+  excluida_por: string | null;
   fim: Timestamp | null;
   id: Generated<string>;
   id_plataforma: string;

@@ -71,12 +71,14 @@ function DespesasManuaisSecao({ hoje }: { hoje: string }) {
       await Promise.all([
         utils.admin.despesas.manuais.listar.invalidate(),
         utils.admin.despesas.painel.invalidate(),
+        utils.admin.receita.painel.invalidate(),
       ]);
     },
   };
   const criar = trpc.admin.despesas.manuais.criar.useMutation(aoMudar);
   const alterarValor = trpc.admin.despesas.manuais.alterarValor.useMutation(aoMudar);
   const encerrar = trpc.admin.despesas.manuais.encerrar.useMutation(aoMudar);
+  const excluir = trpc.admin.despesas.manuais.excluir.useMutation(aoMudar);
 
   return (
     <section data-testid="despesas-manuais" className="flex flex-col gap-4">
@@ -85,7 +87,7 @@ function DespesasManuaisSecao({ hoje }: { hoje: string }) {
           Despesas recorrentes e manuais
         </h2>
         <span className="font-mono text-[11px] text-ink-mute">
-          mudar o valor vale a partir de uma data · o passado não muda
+          alterar/encerrar preservam o passado · excluir remove de todos os períodos
         </span>
       </div>
       <FormDespesaManual
@@ -103,10 +105,11 @@ function DespesasManuaisSecao({ hoje }: { hoje: string }) {
         <DespesasManuaisLista
           despesas={lista.data.despesas}
           hoje={hoje}
-          salvando={alterarValor.isPending || encerrar.isPending}
-          erro={alterarValor.error?.message ?? encerrar.error?.message ?? null}
+          salvando={alterarValor.isPending || encerrar.isPending || excluir.isPending}
+          erro={excluir.error?.message ?? alterarValor.error?.message ?? encerrar.error?.message ?? null}
           onAlterarValor={(input) => alterarValor.mutate(input)}
           onEncerrar={(input) => encerrar.mutate(input)}
+          onExcluir={(input) => excluir.mutate(input)}
         />
       ) : (
         <p role="status" className="font-mono text-[12px] text-ink-mute">

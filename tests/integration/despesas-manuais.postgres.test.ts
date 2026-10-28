@@ -1,3 +1,4 @@
+import { createRequire } from 'node:module';
 import { sql } from 'kysely';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { ServerDeps } from '../../apps/eunenem-server/server/auth/setup.js';
@@ -366,4 +367,94 @@ describe('xog8g — calendário e vigência com PG real', () => {
       lucro.lucro.semanas.find((s) => s.faltamCents !== undefined)?.faltamCents,
     ).toBeGreaterThan(0);
   });
+});
+
+const { fetchRequestHandler } = createRequire(
+  new URL('../../apps/eunenem-server/package.json', import.meta.url),
+)('@trpc/server/adapters/fetch') as {
+  fetchRequestHandler: (o: Record<string, unknown>) => Promise<Response>;
+};
+const atoresEsperados = new Map<string, string>();
+async function excluirHttp(id: string, adminPermitido = true, confirmar = true) {
+  const auth = adminAuthOverrides();
+  const deps = {
+    ...auth.depsOverrides,
+    db: testDb.db,
+    clock: () => NOW,
+    adminAllowedEmails: adminPermitido ? auth.depsOverrides.adminAllowedEmails : new Set(),
+    logPiiHashSalt: 'synthetic',
+  } as unknown as ServerDeps;
+  const req = new Request('http://localhost/api/trpc/admin.despesas.manuais.excluir', {
+    method: 'POST',
+    headers: { ...Object.fromEntries(auth.headers), 'content-type': 'application/json' },
+    body: JSON.stringify({ id, confirmar, actorId: '00000000-0000-4000-8000-000000000099' }),
+  });
+  const sessao = await auth.depsOverrides.authService.validarSessao('admin-test-session-token');
+  if (sessao) atoresEsperados.set(id, sessao.idUsuario);
+  return fetchRequestHandler({
+    endpoint: '/api/trpc',
+    req,
+    router: appRouter,
+    createContext: () => ({ deps, headers: req.headers, resHeaders: new Headers() }),
+  });
+}
+
+it('q1w45: HTTP soft-delete retira mensal/avulsa de todos os períodos, metas e lucro, preservando linhas', async () => {
+  const a = await mensal('Excluir mensal', 31000, 4, '2037-08-01');
+  const b = await unica('Excluir avulsa', 5000, '2037-09-02');
+  const antes = await caller().admin.receita.painel();
+  expect(mes(await painel(), '2037-09-01').manualCents).toBe(36000);
+  for (const id of [a.id, b.id]) expect((await excluirHttp(id)).status).toBe(200);
+  expect((await admin().listar()).despesas).toEqual([]);
+  const depois = await painel();
+  expect(depois.meses.every((x) => x.manualCents === 0)).toBe(true);
+  expect(depois.semanas.every((x) => x.manualCents === 0 && x.metaRecorrenteCents === 0)).toBe(
+    true,
+  );
+  const receita = await caller().admin.receita.painel();
+  const set = (r: typeof receita) =>
+    r.lucro.meses.find((x) => x.de === '2037-09-01')?.valorCents ?? Number.NaN;
+  expect(set(receita) - set(antes)).toBe(36000);
+  const rows = await sql<{
+    id: string;
+    excluida_em: Date;
+    excluida_por: string;
+  }>`SELECT id,excluida_em,excluida_por FROM despesas_manuais`.execute(testDb.db);
+  expect(rows.rows).toHaveLength(2);
+  expect(
+    rows.rows.every((x) => x.excluida_em && x.excluida_por === atoresEsperados.get(x.id)),
+  ).toBe(true);
+  expect((await sql`SELECT * FROM despesas_manuais_valores`.execute(testDb.db)).rows).toHaveLength(
+    2,
+  );
+  expect((await excluirHttp(a.id)).status).toBe(404);
+  await expect(
+    admin().alterarValor({ id: a.id, valorCents: 1, vigenteDesde: '2037-11-01' }),
+  ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+  await expect(admin().encerrar({ id: a.id, fim: '2037-11-01' })).rejects.toMatchObject({
+    code: 'NOT_FOUND',
+  });
+});
+it('q1w45: HTTP exige admin e confirmação; despesa permanece intacta', async () => {
+  const { id } = await mensal('Protegida', 1000, 1, '2037-08-01');
+  expect((await excluirHttp(id, false)).status).toBe(403);
+  expect((await excluirHttp(id, true, false)).status).toBe(400);
+  expect((await admin().listar()).despesas).toHaveLength(1);
+});
+
+it('q1w45: HTTP não exclui despesa de outra plataforma e concorrência preserva a primeira auditoria', async () => {
+  const { id } = await mensal('Concorrente', 1000, 1, '2037-08-01');
+  const responses = await Promise.all([excluirHttp(id), excluirHttp(id)]);
+  expect(responses.map((r) => r.status).sort()).toEqual([200, 404]);
+  const foreign = await mensal('Outra plataforma', 1000, 1, '2037-08-01');
+  await sql`UPDATE despesas_manuais SET id_plataforma='30000000-0000-4000-8000-000000000099' WHERE id=${foreign.id}::uuid`.execute(
+    testDb.db,
+  );
+  expect((await excluirHttp(foreign.id)).status).toBe(404);
+  const row = await sql<{
+    deleted: boolean;
+  }>`SELECT excluida_em IS NOT NULL AS deleted FROM despesas_manuais WHERE id=${foreign.id}::uuid`.execute(
+    testDb.db,
+  );
+  expect(row.rows[0]?.deleted).toBe(false);
 });

@@ -71,14 +71,14 @@ export async function carregarDespesasManuais(
       to_char(data, 'YYYY-MM-DD') AS data,
       criado_em
     FROM despesas_manuais
-    WHERE id_plataforma = ${platformId}::uuid
+    WHERE id_plataforma = ${platformId}::uuid AND excluida_em IS NULL
     ORDER BY criado_em, id
   `.execute(db);
   const valores = await sql<ValorRow>`
     SELECT v.despesa_id, to_char(v.vigente_desde, 'YYYY-MM-DD') AS vigente_desde, v.amount_cents
     FROM despesas_manuais_valores v
     JOIN despesas_manuais d ON d.id = v.despesa_id
-    WHERE d.id_plataforma = ${platformId}::uuid
+    WHERE d.id_plataforma = ${platformId}::uuid AND d.excluida_em IS NULL
     ORDER BY v.despesa_id, v.vigente_desde
   `.execute(db);
   const porDespesa = new Map<string, VigenciaValor[]>();
@@ -179,7 +179,7 @@ async function travar(trx: Database, platformId: string, id: string) {
       (SELECT to_char(MAX(v.vigente_desde), 'YYYY-MM-DD')
         FROM despesas_manuais_valores v WHERE v.despesa_id = d.id) AS ultima_vigencia
     FROM despesas_manuais d
-    WHERE d.id = ${id}::uuid AND d.id_plataforma = ${platformId}::uuid
+    WHERE d.id = ${id}::uuid AND d.id_plataforma = ${platformId}::uuid AND d.excluida_em IS NULL
     FOR UPDATE OF d
   `.execute(trx);
   const row = res.rows[0];
@@ -227,5 +227,15 @@ export async function encerrarDespesaManual(
       UPDATE despesas_manuais SET fim = ${input.fim}::date, encerrado_em = now()
       WHERE id = ${input.id}::uuid
     `.execute(trx);
+  });
+}
+
+
+/** O ator vem exclusivamente da sessão admin. Sem FK: auditoria sobrevive à remoção do usuário. */
+export async function excluirDespesaManual(db: Database, input: {platformId:string;id:string;actorId:string}):Promise<void> {
+  await db.transaction().execute(async trx=>{
+    await travar(trx,input.platformId,input.id);
+    await sql`UPDATE despesas_manuais SET excluida_em=now(),excluida_por=${input.actorId}::uuid
+      WHERE id=${input.id}::uuid AND id_plataforma=${input.platformId}::uuid`.execute(trx);
   });
 }
