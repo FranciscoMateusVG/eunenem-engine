@@ -484,6 +484,19 @@ describe('Migration round-trip', () => {
     //    this sequence must start at the LATEST migration and walk earlier.
     //    Adding a new migration on top REQUIRES prepending its down-step here.
 
+    // 068 additive soft-delete; down restores the original columns.
+    expect((await getColumn(db, 'despesas_manuais', 'excluida_em'))?.is_nullable).toBe('YES');
+    expect((await getColumn(db, 'despesas_manuais', 'excluida_por'))?.is_nullable).toBe('YES');
+    await expect(
+      sql`INSERT INTO despesas_manuais(id_plataforma,nome,recorrencia,data,excluida_em)
+      VALUES('30000000-0000-4000-8000-000000000068','Sintética','unica','2037-01-01',now())`.execute(
+        db,
+      ),
+    ).rejects.toThrow();
+    expect((await migrator.migrateDown()).error).toBeUndefined();
+    expect(await getColumn(db, 'despesas_manuais', 'excluida_em')).toBeUndefined();
+    expect(await getColumn(db, 'despesas_manuais', 'excluida_por')).toBeUndefined();
+
     // 067 despesas_manuais (aperture-0ngn4): CHECK coerente por tipo —
     // mensal exige dia 1–28 + início e nada de data; única só a data.
     const plataforma067 = '30000000-0000-4000-8000-000000000067';

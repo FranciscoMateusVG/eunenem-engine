@@ -96,6 +96,7 @@ import { type CoberturaDespesas, loadDespesasPainel } from "../admin-despesas.js
 import {
   alterarValorDespesaManual,
   criarDespesaManual,
+  excluirDespesaManual,
   DespesaManualInvalida,
   DespesaManualJaEncerrada,
   DespesaManualNaoEncontrada,
@@ -4774,6 +4775,16 @@ function erroDespesaManual(error: unknown): never {
 }
 
 const despesasManuaisRouter = t.router({
+  excluir: adminProcedure
+    .input(z.object({id:z.string().uuid(), confirmar:z.literal(true)}))
+    .output(z.object({ok:z.literal(true)}))
+    .mutation(async ({ctx,input})=>{
+      try {
+        await excluirDespesaManual(ctx.deps.db,{platformId:ID_PLATAFORMA_EUNENEM,id:input.id,actorId:ctx.adminUsuario.id});
+        return {ok:true as const};
+      } catch(error:unknown) {erroDespesaManual(error);}
+    }),
+
   listar: adminProcedure
     .output(z.object({ despesas: z.array(DespesaManualSchema) }))
     .query(async ({ ctx }) => {

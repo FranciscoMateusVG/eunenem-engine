@@ -263,6 +263,35 @@ test('5qoz0: Despesas — KPIs por provedor, cobertura pendente e não vinculada
         ).toHaveAttribute('data-completo', 'false');
         expect(hoje >= mes.de).toBe(true);
 
+        // q1w45: real form -> HTTP -> PG; cancel is inert, confirm soft-deletes.
+        const form = page.getByTestId('despesas-manuais-form');
+        await form.getByLabel('Única', { exact: true }).check();
+        await form.getByLabel('Nome', { exact: true }).fill(`Excluir sintética ${tag}`);
+        await form.getByLabel('Valor (R$)', { exact: true }).fill('10,00');
+        await form.getByLabel('Data da despesa', { exact: true }).fill(hoje);
+        await form.getByRole('button', { name: 'Cadastrar despesa' }).click();
+        const linha = page
+          .locator('li[data-testid^="despesa-manual-"]')
+          .filter({ hasText: `Excluir sintética ${tag}` });
+        await expect(linha).toBeVisible();
+        await expect(kpiMes.getByTestId('despesas-kpi-total')).toContainText(brl(1566));
+        await linha.getByRole('button', { name: 'Excluir', exact: true }).click();
+        const confirmacao = linha.getByRole('alertdialog', { name: 'Excluir despesa' });
+        await expect(confirmacao).toContainText('inclusive no passado');
+        await confirmacao.getByRole('button', { name: 'Cancelar', exact: true }).click();
+        await expect(linha).toBeVisible();
+        await linha.getByRole('button', { name: 'Excluir', exact: true }).click();
+        await confirmacao.getByRole('button', { name: 'Confirmar exclusão' }).click();
+        await expect(linha).toHaveCount(0);
+        await expect(kpiMes.getByTestId('despesas-kpi-total')).toContainText(brl(566));
+        const auditoria = await sql<{
+          deleted: boolean;
+          actor: boolean;
+        }>`SELECT excluida_em IS NOT NULL AS deleted,excluida_por IS NOT NULL AS actor FROM despesas_manuais WHERE nome=${`Excluir sintética ${tag}`}`.execute(
+          db,
+        );
+        expect(auditoria.rows).toEqual([{ deleted: true, actor: true }]);
+
         await page.screenshot({ path: testInfo.outputPath(`despesas-${tag}.png`), fullPage: true });
         await semOverflow(page, `/admin/pagamentos/despesas ${tag}`);
         await kpisSemSobreposicao(page);

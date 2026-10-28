@@ -237,6 +237,7 @@ describe('Despesas manuais — lista', () => {
         hoje: HOJE,
         onAlterarValor: () => {},
         onEncerrar: () => {},
+        onExcluir: () => {},
       }),
     );
     const servidor = texto(trecho(html, 'despesa-manual-a', '</li>'));
@@ -247,17 +248,20 @@ describe('Despesas manuais — lista', () => {
     expect(servidor).toContain('R$ 120,00 a partir de 01/11/2026');
     expect(servidor).toContain('Alterar valor');
     expect(servidor).toContain('Encerrar');
+    expect(servidor).toContain('Excluir');
 
     const dominio = texto(trecho(html, 'despesa-manual-b', '</li>'));
     expect(dominio).toContain('única · 30/09/2026');
     expect(dominio).toContain('R$ 11,00');
     expect(dominio).not.toContain('Alterar valor');
     expect(dominio).not.toContain('Encerrar');
+    expect(dominio).toContain('Excluir');
 
     const antiga = texto(trecho(html, 'despesa-manual-c', '</li>'));
     expect(antiga).toContain('até 30/09/2026');
     expect(antiga).toContain('encerrada');
     expect(antiga).not.toContain('Encerrar');
+    expect(antiga).toContain('Excluir');
   });
 
   it('sem despesas: diz isso', () => {
@@ -267,6 +271,7 @@ describe('Despesas manuais — lista', () => {
         hoje: HOJE,
         onAlterarValor: () => {},
         onEncerrar: () => {},
+        onExcluir: () => {},
       }),
     );
     expect(texto(html)).toContain('Nenhuma despesa recorrente ou manual cadastrada.');

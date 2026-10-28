@@ -229,7 +229,7 @@ export function FormDespesaManual({
   );
 }
 
-type Acao = { tipo: "valor" | "encerrar"; id: string } | null;
+type Acao = { tipo: "valor" | "encerrar" | "excluir"; id: string } | null;
 
 function FormAcao({
   rotulo,
@@ -301,6 +301,7 @@ export function DespesasManuaisLista({
   hoje,
   onAlterarValor,
   onEncerrar,
+  onExcluir,
   salvando = false,
   erro,
 }: {
@@ -308,6 +309,7 @@ export function DespesasManuaisLista({
   hoje: string;
   onAlterarValor: (input: { id: string; valorCents: number; vigenteDesde: string }) => void;
   onEncerrar: (input: { id: string; fim: string }) => void;
+  onExcluir: (input: { id: string; confirmar: true }) => void;
   salvando?: boolean;
   erro?: string | null;
 }) {
@@ -372,7 +374,14 @@ export function DespesasManuaisLista({
                   </span>
                 ) : null}
               </div>
-              {acao?.id === d.id ? (
+              <button type="button" className={BOTAO_SECUNDARIO} disabled={salvando} onClick={()=>setAcao({tipo:"excluir",id:d.id})}>Excluir</button>
+              {acao?.id === d.id && acao.tipo === "excluir" ? <div role="alertdialog" aria-label="Excluir despesa" className="rounded border border-red-200 p-3">
+                <p>Excluir {d.nome}? Ela deixará de contar em todos os períodos, inclusive no passado, no lucro e nas metas. Diferente de Encerrar, a exclusão remove também as cobranças anteriores dos cálculos.</p>
+                <button type="button" className={BOTAO_SECUNDARIO} disabled={salvando} onClick={()=>onExcluir({id:d.id,confirmar:true})}>{salvando ? "Excluindo…" : "Confirmar exclusão"}</button>
+                <button type="button" className={BOTAO_SECUNDARIO} disabled={salvando} onClick={()=>setAcao(null)}>Cancelar</button>
+                <Erro mensagem={erro} />
+              </div> : null}
+              {acao?.id === d.id && acao.tipo !== "excluir" ? (
                 <FormAcao
                   key={acao.tipo}
                   rotulo={acao.tipo === "valor" ? "Salvar novo valor" : "Encerrar despesa"}
