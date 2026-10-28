@@ -4546,7 +4546,7 @@ const NotaFiscalDpsSchema = z.discriminatedUnion("status", [
 const NotaFiscalPreviaSchema = z.object({
   titularConsultadoEm: z.string().datetime(),
   pendencias: z.array(z.object({ campanhaId:z.string(), motivo:z.string(), resultadoCents:z.number().int() })),
-  notas: z.array(z.object({ cpf:z.string(), nome:z.string(), resultadoCents:z.number().int(), dps:NotaFiscalDpsSchema })),
+  notas: z.array(z.object({ cpf:z.string(), nome:z.string(), resultadoCents:z.number().int(), houveTroca:z.boolean(), dps:NotaFiscalDpsSchema })),
   mes: MesSchema,
   rotulo: z.string(),
   situacao: z.enum(["fechado", "em_andamento"]),
