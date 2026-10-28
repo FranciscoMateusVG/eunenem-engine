@@ -98,7 +98,11 @@ describe('montarPreviaDps', () => {
       aConfirmar: false,
     });
     expect(por('cLocEmi')).toMatchObject({ valor: '2611606', origem: 'env', aConfirmar: false });
-    expect(por('cTribNac')).toMatchObject({ valor: '100202', origem: 'default', aConfirmar: true });
+    expect(por('cTribNac')).toMatchObject({
+      valor: '100202',
+      origem: 'default',
+      aConfirmar: false,
+    });
     expect(por('opSimpNac')).toMatchObject({ origem: 'default', aConfirmar: true });
     expect(por('tribISSQN')).toMatchObject({ origem: 'default', aConfirmar: true });
     expect(por('tpRetISSQN')).toMatchObject({ origem: 'default', aConfirmar: true });
@@ -107,7 +111,7 @@ describe('montarPreviaDps', () => {
     expect(por('dCompet')).toMatchObject({
       valor: '2026-09-30',
       origem: 'derivado',
-      aConfirmar: true,
+      aConfirmar: false,
     });
     expect(por('toma')).toMatchObject({ origem: 'fixo', aConfirmar: true });
     expect(por('serie')).toMatchObject({ valor: '99999', origem: 'fixo', aConfirmar: false });

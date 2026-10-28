@@ -218,14 +218,14 @@ function camposDaDps(dps: DpsInput, config: NfseConfig, totTrib: TotTribResolvid
       rotulo: 'Competência',
       valor: dps.dCompet,
       origem: 'derivado',
-      aConfirmar: true,
-      nota: 'Primeiro dia do mês. Confirmar com o contador se é este ou o último dia.',
+      aConfirmar: false,
+      nota: 'Último dia do mês, conforme orientação do contador.',
     },
     { grupo: id, tag: 'tpEmit', rotulo: 'Emitente', valor: '1', origem: 'fixo', aConfirmar: false, nota: '1 = prestador.' },
     { grupo: id, tag: 'cLocEmi', rotulo: 'Município emissor (IBGE)', valor: dps.cLocEmi, origem: 'env', aConfirmar: false, nota: null },
 
     { grupo: prest, tag: 'CNPJ', rotulo: 'CNPJ do prestador', valor: dps.prestador.cnpj, origem: 'env', aConfirmar: false, nota: null },
-    deConfig(prest, 'IM', 'Inscrição municipal', config.inscricaoMunicipal, 'Omitida. Defina NFSE_INSCRICAO_MUNICIPAL se o município exigir.'),
+    { ...deConfig(prest, 'IM', 'Inscrição municipal', config.inscricaoMunicipal, 'Inscrição informada pelo contador.'), aConfirmar: false },
     {
       ...deConfig(prest, 'opSimpNac', 'Situação no Simples Nacional', config.opSimpNac, null),
       nota:
@@ -246,13 +246,7 @@ function camposDaDps(dps: DpsInput, config: NfseConfig, totTrib: TotTribResolvid
     },
 
     { grupo: serv, tag: 'cLocPrestacao', rotulo: 'Local da prestação (IBGE)', valor: dps.servico.cLocPrestacao, origem: 'env', aConfirmar: false, nota: null },
-    deConfig(
-      serv,
-      'cTribNac',
-      'Código de tributação nacional',
-      config.cTribNac,
-      'LC 116 item 10.05, desdobro 01: agenciamento, corretagem ou intermediação de bens móveis ou imóveis, por quaisquer meios. Defina NFSE_CTRIB_NAC.',
-    ),
+    { ...deConfig(serv, 'cTribNac', 'Código de tributação nacional', config.cTribNac, 'LC 116 item 10.02, desdobro 02, indicado pelo contador.'), aConfirmar: false },
     {
       ...deConfig(serv, 'xDescServ', 'Descrição do serviço', config.descricaoServico, 'Texto padrão. Defina NFSE_DESCRICAO_SERVICO ({competencia} vira o mês).'),
       valor: dps.servico.xDescServ,
@@ -315,6 +309,7 @@ export function montarPreviaDps(input: {
     };
   }
 
+  if (config.cTribNac.valor !== '100202') return { status: 'config_incompleta', faltando: ['NFSE_CTRIB_NAC'] };
   if (!input.tomador || !cpfValido(input.tomador.cpf) || !input.tomador.nome.trim()) return { status:'config_incompleta', faltando:['tomador_cpf_nome'] };
   const competencia = competenciaDoMes(mes);
   const totTrib = resolverTotTrib(config);
@@ -461,10 +456,11 @@ export async function carregarPreviaMensal(
     try {
       span.setAttribute('nfse.mes', input.mes);
       const previa = await emSnapshotDeLeitura(db, trx => previaMensal(trx, input));
-      span.setAttribute('nfse.dps.status', previa.dps.status);
-      if (previa.dps.status === 'gerada') {
-        span.setAttribute('nfse.assinatura.status', previa.dps.assinatura.status);
-      }
+      const geradas = previa.notas.filter(n => n.dps.status === 'gerada');
+      const incompletas = previa.notas.filter(n => n.dps.status === 'config_incompleta');
+      span.setAttribute('nfse.dps.status', previa.pendencias.length || incompletas.length ? 'pendente' : geradas.length ? 'gerada' : 'sem_valor');
+      span.setAttribute('nfse.dps.geradas', geradas.length);
+      span.setAttribute('nfse.dps.pendencias', previa.pendencias.length + incompletas.length);
       return previa;
     } catch (error: unknown) {
       if (error instanceof Error) span.recordException(error);

@@ -189,7 +189,7 @@ describe('NotaFiscalPainel', () => {
         dps: { status: 'config_incompleta', faltando: ['NFSE_PRESTADOR_CNPJ'] },
       }),
     );
-    expect(html).toContain('Sem DPS: faltam dados do prestador.');
+    expect(html).toContain('Sem DPS: configuração fiscal incompleta ou incompatível.');
     expect(html).toContain('<code class="font-mono">NFSE_PRESTADOR_CNPJ</code>');
   });
 
@@ -259,4 +259,35 @@ it('besta: mostra titular atual/data, pendência e base sem adicional', () => {
   expect(html).not.toContain('Copiar XML');
   expect(html).not.toContain('Mesmo número da tela Receita');
   expect(html).toContain('Não inclui o adicional do cartão');
+});
+
+it('besta: concilia notas, pendências e líquidos não positivos sem esconder recebedores', () => {
+  const html = render(
+    previa({
+      notas: [
+        {
+          cpf: '52998224725',
+          nome: 'Titular sem saldo',
+          resultadoCents: -100,
+          dps: { status: 'sem_valor' },
+        },
+      ],
+      pendencias: [
+        { campanhaId: 'sintetica', motivo: 'possivel_troca_no_mes', resultadoCents: 200 },
+      ],
+    }),
+  );
+  expect(html).toContain('Conciliação da base fiscal');
+  expect(html).toContain('Líquidos não positivos');
+  expect(html).toContain('Titular sem saldo');
+  expect(html).toContain('Possível troca de titular desde o início da competência');
+  expect(html).not.toContain('possivel_troca_no_mes');
+  expect(html).toContain('Diferença');
+  const texto = html.replace(/<[^>]+>/g, '').replace(/(?:&nbsp;|\s)+/g, ' ');
+  expect(texto).toContain(
+    'DPS geradas: R$ 0,00 · Pendências: R$ 2,00 · Líquidos não positivos: -R$ 1,00',
+  );
+  expect(texto).toContain(
+    'Total conciliado: R$ 1,00 · Base fiscal: R$ 1.234,56 · Diferença: R$ 1.233,56',
+  );
 });

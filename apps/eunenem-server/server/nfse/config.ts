@@ -109,14 +109,7 @@ export interface NfseConfig {
   readonly problemas: readonly ProblemaConfig[];
 }
 
-/**
- * Default do código de tributação nacional: LC 116 item 10.05, desdobro 01
- * — "Agenciamento, corretagem ou intermediação de bens móveis ou imóveis, não
- * abrangidos em outros itens ou subitens, por quaisquer meios" (lista
- * nacional, anexo B v1.01). A receita é comissão de intermediação da
- * plataforma. O "1.05.01" do sandbox é licenciamento de software e não
- * descreve a atividade. A confirmar com o contador.
- */
+/** Código indicado pelo contador: LC 116 item 10.02, desdobro 02. */
 export const CTRIB_NAC_PADRAO = '100202';
 
 export const DESCRICAO_SERVICO_PADRAO =
@@ -254,7 +247,7 @@ export function parseNfseConfig(env: NfseEnv): NfseConfig {
   const tribISSQN = campo<TribISSQN, '1'>('NFSE_TRIB_ISSQN', TribISSQNSchema, '1');
   const tpRetISSQN = campo<TpRetISSQN, '1'>('NFSE_TP_RET_ISSQN', TpRetISSQNSchema, '1');
   const pAliq = campo<string | null, null>('NFSE_ALIQUOTA_ISS', AliquotaSchema, null);
-  const inscricaoMunicipal = campo<string | null, null>('NFSE_INSCRICAO_MUNICIPAL', InscricaoMunicipalSchema, null);
+  const inscricaoMunicipal = campo<string | null, string>('NFSE_INSCRICAO_MUNICIPAL', InscricaoMunicipalSchema, '12306200019');
   const cNBS = campo<string | null, null>('NFSE_CNBS', CNbsSchema, null);
   const pTotTrib = campo<PercentuaisTributos | null, PercentuaisTributos>('NFSE_P_TOT_TRIB', PTotTribSchema, { fed: '11.33', est: '0.00', mun: '3.00' });
   const pTotTribSN = campo<string | null, null>('NFSE_P_TOT_TRIB_SN', PTotTribSNSchema, null);

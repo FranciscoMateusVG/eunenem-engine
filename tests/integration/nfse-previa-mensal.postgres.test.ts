@@ -390,7 +390,7 @@ describe('DPS valida contra o XSD oficial (xmllint)', () => {
       env: {
         ...BASE_ENV,
         NFSE_AMBIENTE: '1',
-        NFSE_CTRIB_NAC: '010501',
+        NFSE_CTRIB_NAC: '100202',
         NFSE_OP_SIMP_NAC: '3',
         NFSE_REG_AP_TRIB_SN: '1',
         NFSE_REG_ESP_TRIB: '9',
@@ -657,12 +657,12 @@ describe('segredos do certificado nunca saem da procedure', () => {
   it('erros da procedure não carregam segredo', async () => {
     const pfx = gerarPfxDeTeste({ cnpj: CNPJ });
     const env = envComCert(pfx, 'base64');
-    for (const p of [
-      previa('2099-01', { env }),
-      previa('2032-03', { env, auth: 'nao_admin' }),
-      previa('2032-03', { env, auth: 'anon' }),
+    for (const executar of [
+      () => previa('2099-01', { env }),
+      () => previa('2032-03', { env, auth: 'nao_admin' }),
+      () => previa('2032-03', { env, auth: 'anon' }),
     ]) {
-      const e = await erroDe(p);
+      const e = await erroDe(executar());
       const texto = [e.message, e.stack ?? '', inspect(e, { depth: 5 }), JSON.stringify(e)].join(
         '\n',
       );
@@ -733,6 +733,42 @@ it('besta: separa CPFs, bloqueia checksum inválido e possível troca no mês', 
     testDb.db,
   );
   await sql`UPDATE recebedores SET criada_em='2032-09-05T15:00:00Z' WHERE campanha_id=${cs[3]}::uuid`.execute(
+    testDb.db,
+  );
+  await sql`INSERT INTO recebedores(id,campanha_id,metodo,nome_titular,cpf_titular,tipo_chave_pix,chave_pix,is_active,criada_em)
+    VALUES(${randomUUID()}::uuid,${cs[3]}::uuid,'pix','Anterior sintético','52998224725','cpf','52998224725',false,'2032-08-01T15:00:00Z')`.execute(
+    testDb.db,
+  );
+  const p = await caller().admin.notaFiscal.previaMensal({ mes: '2032-09' });
+  expect(p.notas).toHaveLength(2);
+  expect(new Set(p.notas.map((n) => (n.dps.status === 'gerada' ? n.dps.idDps : null))).size).toBe(
+    2,
+  );
+  expect(p.pendencias.map((x) => x.motivo).sort()).toEqual([
+    'cpf_ausente_ou_invalido',
+    'possivel_troca_no_mes',
+  ]);
+  for (const n of p.notas) {
+    expect(n.dps.status).toBe('gerada');
+    if (n.dps.status === 'gerada') expect(validateDps(n.dps.xml).ok).toBe(true);
+  }
+});
+it('besta: separa CPFs, bloqueia checksum inválido e troca posterior ao mês', async () => {
+  const cs = await Promise.all([
+    seed.campanha(),
+    seed.campanha(),
+    seed.campanha(),
+    seed.campanha(),
+  ]);
+  for (const id of cs)
+    await seed.taxa({ campaignId: id, taxaCents: 100, criadoEm: new Date('2032-09-10T15:00:00Z') });
+  await sql`UPDATE recebedores SET cpf_titular='11144477735',chave_pix='11144477735' WHERE campanha_id=${cs[1]}::uuid`.execute(
+    testDb.db,
+  );
+  await sql`UPDATE recebedores SET cpf_titular='11111111111' WHERE campanha_id=${cs[2]}::uuid`.execute(
+    testDb.db,
+  );
+  await sql`UPDATE recebedores SET criada_em='2032-10-05T15:00:00Z' WHERE campanha_id=${cs[3]}::uuid`.execute(
     testDb.db,
   );
   await sql`INSERT INTO recebedores(id,campanha_id,metodo,nome_titular,cpf_titular,tipo_chave_pix,chave_pix,is_active,criada_em)

@@ -23,7 +23,7 @@ export async function carregarTomadoresMes(db: Database, platformId: string, de:
     )
     SELECT v.campanha_id, v.resultado,
       count(r.id) FILTER(WHERE r.is_active)::text AS ativos, count(r.id)::text AS historicos,
-      count(r.id) FILTER(WHERE r.criada_em >= (${de}::date::timestamp AT TIME ZONE 'America/Sao_Paulo') AND r.criada_em < (${ate}::date::timestamp AT TIME ZONE 'America/Sao_Paulo'))::text AS novos,
+      count(r.id) FILTER(WHERE r.criada_em >= (${de}::date::timestamp AT TIME ZONE 'America/Sao_Paulo'))::text AS novos,
       max(r.cpf_titular) FILTER(WHERE r.is_active) AS cpf,
       max(r.nome_titular) FILTER(WHERE r.is_active) AS nome
     FROM valores v LEFT JOIN recebedores r ON r.campanha_id=v.campanha_id

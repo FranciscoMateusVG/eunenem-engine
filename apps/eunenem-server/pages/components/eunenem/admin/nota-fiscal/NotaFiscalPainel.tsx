@@ -79,14 +79,36 @@ export function NotaFiscalPainel({ data }: { data: NotaFiscalPrevia }) {
       <ProblemasDeConfiguracao problemas={data.configuracao.problemas} />
       <p className="text-sm">Base fiscal: comissão cobrada do recebedor, menos cancelamentos. Não inclui o adicional do cartão cobrado do pagador.</p>
       <p className="text-sm">Titular atual da campanha — consultado em {formatInstante(data.titularConsultadoEm)}. Não representa um histórico de titulares.</p>
-      {data.pendencias.length > 0 && <section aria-label="Pendências de tomador"><h2>Pendências para revisão manual</h2><ul>{data.pendencias.map(p => <li key={p.campanhaId}>Campanha {p.campanhaId}: {p.motivo} — {formatBRL(p.resultadoCents)}. Nenhuma DPS gerada.</li>)}</ul></section>}
+      <Conciliacao data={data} />
+      {data.pendencias.length > 0 && <section aria-label="Pendências de tomador"><h2>Pendências para revisão manual</h2><ul>{data.pendencias.map(p => <li key={p.campanhaId}>Campanha {p.campanhaId}: {MOTIVOS_PENDENCIA[p.motivo] ?? 'Pendência para revisão manual'} — {formatBRL(p.resultadoCents)}. Nenhuma DPS gerada.</li>)}</ul></section>}
       {data.notas.map(n => <section key={n.cpf} className="rounded border p-4">
         <h2>Tomador: {n.nome} · CPF {n.cpf}</h2>
+        <p>Líquido do recebedor: {formatBRL(n.resultadoCents)}</p>
         <SecaoDps dps={n.dps} mes={data.mes} />
       </section>)}
       {data.notas.length === 0 && data.pendencias.length === 0 && <p>Sem DPS: não há tomadores com taxas no mês.</p>}
     </div>
   );
+}
+
+const MOTIVOS_PENDENCIA: Record<string, string> = {
+  recebedor_ausente_ou_ambiguo: 'Recebedor ativo ausente ou ambíguo',
+  possivel_troca_no_mes: 'Possível troca de titular desde o início da competência',
+  cpf_ausente_ou_invalido: 'CPF ausente ou inválido',
+  nome_ausente: 'Nome do titular ausente',
+  nomes_divergentes_no_cpf: 'Nomes divergentes para o mesmo CPF',
+};
+
+function Conciliacao({ data }: { data: NotaFiscalPrevia }) {
+  const geradas = data.notas.filter(n => n.dps.status === "gerada").reduce((s,n) => s+n.resultadoCents,0);
+  const pendentes = data.pendencias.reduce((s,p) => s+p.resultadoCents,0) + data.notas.filter(n => n.dps.status === "config_incompleta").reduce((s,n) => s+n.resultadoCents,0);
+  const naoPositivos = data.notas.filter(n => n.dps.status === "sem_valor").reduce((s,n) => s+n.resultadoCents,0);
+  const base = data.valor.resultadoDeTaxasCents;
+  return <section aria-label="Conciliação da base fiscal" className="rounded border p-4">
+    <h2>Conciliação da base fiscal</h2>
+    <p>DPS geradas: {formatBRL(geradas)} · Pendências: {formatBRL(pendentes)} · Líquidos não positivos: {formatBRL(naoPositivos)}</p>
+    <p>Total conciliado: {formatBRL(geradas+pendentes+naoPositivos)} · Base fiscal: {formatBRL(base)} · Diferença: {formatBRL(base-geradas-pendentes-naoPositivos)}</p>
+  </section>;
 }
 
 function ValorDoMes({ data }: { data: NotaFiscalPrevia }) {
@@ -174,7 +196,8 @@ function SecaoDps({ dps, mes }: { dps: Dps; mes: string }) {
       ) : null}
       {dps.status === "config_incompleta" ? (
         <div className="rounded-md border border-red-200 bg-red-50 p-4 text-[13px] text-red-800">
-          <p className="font-semibold">Sem DPS: faltam dados do prestador.</p>
+          <p className="font-semibold">Sem DPS: configuração fiscal incompleta ou incompatível.</p>
+          {dps.faltando.includes("NFSE_CTRIB_NAC") && <p>O código nacional deve ser 100202 para o código municipal 003 indicado pelo contador.</p>}
           <p className="mt-1">
             Defina{" "}
             {dps.faltando.map((v, i) => (

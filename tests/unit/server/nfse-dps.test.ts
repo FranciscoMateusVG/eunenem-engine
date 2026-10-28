@@ -361,3 +361,23 @@ it('besta: DPS identifica tomador e usa códigos/percentuais/IBSCBS do contador'
   expect(previa.xml).toContain('</valores><IBSCBS><finNFSe>0</finNFSe>');
   expect(validateDps(previa.xml).ok).toBe(true);
 });
+
+it('besta: configuração nacional divergente não gera combinação municipal inválida', async () => {
+  const { montarPreviaDps } = await import(
+    '../../../apps/eunenem-server/server/nfse/previa-mensal.js'
+  );
+  const { parseNfseConfig } = await import('../../../apps/eunenem-server/server/nfse/config.js');
+  expect(
+    montarPreviaDps({
+      mes: '2026-09',
+      resultadoCents: 100,
+      now: new Date('2026-10-28T15:00:00Z'),
+      tomador: { cpf: '52998224725', nome: 'Sintético' },
+      config: parseNfseConfig({
+        NFSE_PRESTADOR_CNPJ: '12345678000195',
+        NFSE_MUNICIPIO_IBGE: '3106200',
+        NFSE_CTRIB_NAC: '100501',
+      }),
+    }),
+  ).toEqual({ status: 'config_incompleta', faltando: ['NFSE_CTRIB_NAC'] });
+});

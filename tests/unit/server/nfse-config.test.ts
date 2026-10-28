@@ -50,7 +50,7 @@ describe('parseNfseConfig', () => {
     expect(cfg.tribISSQN).toEqual({ valor: '1', origem: 'default' });
     expect(cfg.tpRetISSQN).toEqual({ valor: '1', origem: 'default' });
     expect(cfg.pAliq).toEqual({ valor: null, origem: 'default' });
-    expect(cfg.inscricaoMunicipal).toEqual({ valor: null, origem: 'default' });
+    expect(cfg.inscricaoMunicipal).toEqual({ valor: '12306200019', origem: 'default' });
     expect(cfg.cNBS).toEqual({ valor: null, origem: 'default' });
     expect(cfg.descricaoServico.origem).toBe('default');
   });
