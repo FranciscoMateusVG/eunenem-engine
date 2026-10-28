@@ -98,6 +98,7 @@ function previa(overrides: Partial<NotaFiscalPrevia> = {}): NotaFiscalPrevia {
         cpf: '52998224725',
         nome: 'Titular sintético',
         resultadoCents: result.valor.resultadoDeTaxasCents,
+        houveTroca: false,
         dps: result.dps,
       },
     ],
@@ -253,7 +254,7 @@ it('besta: mostra titular atual/data, pendência e base sem adicional', () => {
       ],
     }),
   );
-  expect(html).toContain('Titular atual da campanha');
+  expect(html).toContain('Recebedor mais recente da campanha');
   expect(html).toContain('Pendências para revisão manual');
   expect(html).toContain('Nenhuma DPS gerada');
   expect(html).not.toContain('Copiar XML');
@@ -269,6 +270,7 @@ it('besta: concilia notas, pendências e líquidos não positivos sem esconder r
           cpf: '52998224725',
           nome: 'Titular sem saldo',
           resultadoCents: -100,
+          houveTroca: false,
           dps: { status: 'sem_valor' },
         },
       ],
@@ -290,4 +292,13 @@ it('besta: concilia notas, pendências e líquidos não positivos sem esconder r
   expect(texto).toContain(
     'Total conciliado: R$ 1,00 · Base fiscal: R$ 1.234,56 · Diferença: R$ 1.233,56',
   );
+});
+
+it('2w3pg: DPS com troca exibe rastreio do recebedor mais recente', () => {
+  const base = previa();
+  const html = render({ ...base, notas: base.notas.map((n) => ({ ...n, houveTroca: true })) });
+  expect(html).toContain('Recebedor mais recente da campanha (houve troca)');
+  expect(
+    render({ ...base, notas: base.notas.map((n) => ({ ...n, houveTroca: false })) }),
+  ).not.toContain('(houve troca)');
 });
