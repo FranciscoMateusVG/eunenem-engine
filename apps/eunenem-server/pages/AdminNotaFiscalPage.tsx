@@ -10,8 +10,8 @@ import { trpc } from "@/lib/trpc.js";
 /**
  * /admin/pagamentos/nota-fiscal — PRÉVIA da NFS-e mensal (aperture-dh1k7).
  *
- * O operador escolhe um mês e vê a nota que seria emitida: valor (o mesmo
- * "Resultado de taxas" da Receita), detalhamento, campos da DPS e o XML.
+ * O operador escolhe um mês e vê uma prévia por CPF de recebedor,
+ * sem adicional de cartão, com pendências de identidade e XML.
  *
  * NÃO EXISTE ENVIO: nenhum botão desta página emite, envia ou cancela nota,
  * e nada é gravado. O mês vive na query string (`?mes=YYYY-MM`) e é lido no

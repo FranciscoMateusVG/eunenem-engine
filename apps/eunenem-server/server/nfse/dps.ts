@@ -8,9 +8,8 @@
  * "_"), `DPS` só leva `versao`, `subst` vazio não existe, e `regTrib`,
  * `tpRetISSQN` e `totTrib` são obrigatórios.
  *
- * O grupo `toma` é `minOccurs="0"` em TCInfDPS: a NFS-e mensal agregada é de
- * consumidor não identificado, então o grupo é omitido (nunca o CNPJ do
- * próprio prestador como tomador).
+ * O XSD admite toma opcional, mas a prévia EuNeném exige CPF/nome do
+ * recebedor. Nunca usa o prestador ou o pagador como tomador.
  *
  * A ordem dos elementos é a da `xs:sequence` do XSD — não reordenar.
  */
@@ -47,10 +46,13 @@ export interface DpsInput {
     readonly regApTribSN: RegApTribSN | null;
     readonly regEspTrib: RegEspTrib;
   };
+  readonly tomador?: { readonly cpf: string; readonly nome: string };
+  readonly ibscbs?: boolean;
   readonly servico: {
     readonly cLocPrestacao: string;
     /** 6 dígitos: item (2) + subitem (2) LC 116 + desdobro nacional (2). */
     readonly cTribNac: string;
+    readonly cTribMun?: string;
     readonly xDescServ: string;
     readonly cNBS: string | null;
   };
@@ -238,7 +240,7 @@ export function montarDpsXml(input: DpsInput): { readonly xml: string; readonly 
     el('locPrest', txt('cLocPrestacao', servico.cLocPrestacao)) +
       el(
         'cServ',
-        txt('cTribNac', servico.cTribNac) + txt('xDescServ', servico.xDescServ) + opcional('cNBS', servico.cNBS),
+        txt('cTribNac', servico.cTribNac) + opcional('cTribMun', servico.cTribMun ?? null) + txt('xDescServ', servico.xDescServ) + opcional('cNBS', servico.cNBS),
       ),
   );
 
@@ -265,8 +267,10 @@ export function montarDpsXml(input: DpsInput): { readonly xml: string; readonly 
     txt('tpEmit', '1') +
     txt('cLocEmi', input.cLocEmi) +
     prest +
+    (input.tomador ? el('toma', txt('CPF', input.tomador.cpf) + txt('xNome', input.tomador.nome)) : '') +
     serv +
     vals +
+    (input.ibscbs ? '<IBSCBS><finNFSe>0</finNFSe><indFinal>1</indFinal><cIndOp>100301</cIndOp><indDest>0</indDest><valores><trib><gIBSCBS><CST>000</CST><cClassTrib>000001</cClassTrib></gIBSCBS></trib></valores></IBSCBS>' : '') +
     '</infDPS>';
 
   return {
