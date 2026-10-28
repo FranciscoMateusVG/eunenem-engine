@@ -1,8 +1,9 @@
-import { randomBytes } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { inspect } from 'node:util';
+import { sql } from 'kysely';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { loadReceitaDashboard } from '../../apps/eunenem-server/server/admin-receita.js';
 import type { ServerDeps } from '../../apps/eunenem-server/server/auth/setup.js';
@@ -32,7 +33,26 @@ let seed: ReceitaLedgerSeed;
 
 beforeAll(async () => {
   testDb = await createTestDatabase();
-  seed = new ReceitaLedgerSeed(testDb.db);
+  seed = new (class extends ReceitaLedgerSeed {
+    ids: string[] = [];
+    override async campanha(platformId = ID_PLATAFORMA_EUNENEM) {
+      const id = await super.campanha(platformId);
+      this.ids.push(id);
+      await sql`INSERT INTO recebedores(id,campanha_id,metodo,nome_titular,cpf_titular,tipo_chave_pix,chave_pix,is_active,criada_em)
+        VALUES(${randomUUID()}::uuid,${id}::uuid,'pix','Titular sintético','52998224725','cpf','52998224725',true,'2031-01-01T15:00:00Z')`.execute(
+        testDb.db,
+      );
+      return id;
+    }
+    override async wipe() {
+      if (this.ids.length)
+        await sql`DELETE FROM recebedores WHERE campanha_id IN (${sql.join(this.ids)})`.execute(
+          testDb.db,
+        );
+      this.ids = [];
+      await super.wipe();
+    }
+  })(testDb.db);
 }, 60_000);
 
 beforeEach(async () => {
@@ -166,8 +186,10 @@ function caller(input: { env?: NfseEnv; now?: Date; auth?: 'admin' | 'anon' | 'n
   return appRouter.createCaller(ctx);
 }
 
-const previa = (mes: string, opts: Parameters<typeof caller>[0] = {}) =>
-  caller(opts).admin.notaFiscal.previaMensal({ mes });
+const previa = async (mes: string, opts: Parameters<typeof caller>[0] = {}) => {
+  const p = await caller(opts).admin.notaFiscal.previaMensal({ mes });
+  return { ...p, dps: p.notas[0]?.dps ?? p.dps };
+};
 
 /** TRPCError do caller (o pacote @trpc/server só existe em apps/eunenem-server). */
 type ErroTrpc = Error & { readonly code: string };
@@ -236,7 +258,7 @@ describe('valor da prévia = Resultado de taxas da Receita (mesmo mês, SP)', ()
     const mar = await previa('2032-03');
     if (mar.dps.status !== 'gerada') throw new Error(mar.dps.status);
     // "DPS" + cLocEmi (7) + tipo (1 = CPF, 2 = CNPJ) + inscrição (14) + série (5) + nDPS (15).
-    expect(mar.dps.idDps).toBe(`DPS${IBGE}2${CNPJ}99999020320399999999`);
+    expect(mar.dps.idDps).toBe(`DPS${IBGE}2${CNPJ}99999020320300000001`);
     expect(mar.dps.xml).toContain(`<infDPS Id="${mar.dps.idDps}">`);
   });
 
@@ -427,7 +449,7 @@ describe('DPS valida contra o XSD oficial (xmllint)', () => {
       expect(validateDps(p.dps.xml)).toEqual({ ok: true, errors: [] });
     }
     const padrao = await previa('2032-03');
-    expect(padrao.avisos).toContain('tot_trib_pendente');
+    expect(padrao.avisos).not.toContain('tot_trib_pendente');
   });
 
   it('assinada', async () => {
@@ -658,4 +680,76 @@ describe('segredos do certificado nunca saem da procedure', () => {
     ].join('\n');
     semSegredos(texto, pfx, 'config');
   });
+});
+
+describe('besta — uma DPS por titular atual no mês', () => {
+  it('consolida CPF entre campanhas e separa pendência sem tomador', async () => {
+    const { sql } = await import('kysely');
+    const { randomUUID } = await import('node:crypto');
+    const campanhas = await Promise.all([seed.campanha(), seed.campanha(), seed.campanha()]);
+    for (const id of campanhas)
+      await seed.taxa({
+        campaignId: id,
+        taxaCents: 100,
+        criadoEm: new Date('2032-09-10T15:00:00Z'),
+      });
+    await sql`DELETE FROM recebedores WHERE campanha_id IN (${sql.join(campanhas)})`.execute(
+      testDb.db,
+    );
+    for (const id of campanhas.slice(0, 2))
+      await sql`
+      INSERT INTO recebedores (id,campanha_id,metodo,nome_titular,cpf_titular,tipo_chave_pix,chave_pix,is_active,criada_em)
+      VALUES (${randomUUID()}::uuid,${id}::uuid,'pix','Titular sintético','52998224725','cpf','52998224725',true,'2032-08-01T15:00:00Z')
+    `.execute(testDb.db);
+    try {
+      const p = await caller().admin.notaFiscal.previaMensal({ mes: '2032-09' });
+      const notas = p.notas;
+      expect(notas).toHaveLength(1);
+      expect(notas[0].dps.xml).toContain('<vServ>2.00</vServ>');
+      expect(notas[0].dps.xml).toContain('<CPF>52998224725</CPF>');
+      expect(p.pendencias).toHaveLength(1);
+      expect(p.dps?.status).not.toBe('gerada');
+    } finally {
+      await sql`DELETE FROM recebedores WHERE campanha_id IN (${sql.join(campanhas)})`.execute(
+        testDb.db,
+      );
+    }
+  });
+});
+
+it('besta: separa CPFs, bloqueia checksum inválido e possível troca no mês', async () => {
+  const cs = await Promise.all([
+    seed.campanha(),
+    seed.campanha(),
+    seed.campanha(),
+    seed.campanha(),
+  ]);
+  for (const id of cs)
+    await seed.taxa({ campaignId: id, taxaCents: 100, criadoEm: new Date('2032-09-10T15:00:00Z') });
+  await sql`UPDATE recebedores SET cpf_titular='11144477735',chave_pix='11144477735' WHERE campanha_id=${cs[1]}::uuid`.execute(
+    testDb.db,
+  );
+  await sql`UPDATE recebedores SET cpf_titular='11111111111' WHERE campanha_id=${cs[2]}::uuid`.execute(
+    testDb.db,
+  );
+  await sql`UPDATE recebedores SET criada_em='2032-09-05T15:00:00Z' WHERE campanha_id=${cs[3]}::uuid`.execute(
+    testDb.db,
+  );
+  await sql`INSERT INTO recebedores(id,campanha_id,metodo,nome_titular,cpf_titular,tipo_chave_pix,chave_pix,is_active,criada_em)
+    VALUES(${randomUUID()}::uuid,${cs[3]}::uuid,'pix','Anterior sintético','52998224725','cpf','52998224725',false,'2032-08-01T15:00:00Z')`.execute(
+    testDb.db,
+  );
+  const p = await caller().admin.notaFiscal.previaMensal({ mes: '2032-09' });
+  expect(p.notas).toHaveLength(2);
+  expect(new Set(p.notas.map((n) => (n.dps.status === 'gerada' ? n.dps.idDps : null))).size).toBe(
+    2,
+  );
+  expect(p.pendencias.map((x) => x.motivo).sort()).toEqual([
+    'cpf_ausente_ou_invalido',
+    'possivel_troca_no_mes',
+  ]);
+  for (const n of p.notas) {
+    expect(n.dps.status).toBe('gerada');
+    if (n.dps.status === 'gerada') expect(validateDps(n.dps.xml).ok).toBe(true);
+  }
 });

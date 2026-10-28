@@ -104,6 +104,10 @@ test('uj78j: prévia da NFS-e mensal no admin', async ({ browser, baseURL }, tes
 
     const seed = new ReceitaLedgerSeed(db);
     const campanha = await seed.campanha();
+    await sql`INSERT INTO recebedores(id,campanha_id,metodo,nome_titular,cpf_titular,tipo_chave_pix,chave_pix,is_active,criada_em)
+      VALUES(${randomUUID()}::uuid,${campanha}::uuid,'pix','Titular sintético','52998224725','cpf','52998224725',true,'2020-01-01T15:00:00Z')`.execute(
+      db,
+    );
     // m1, primeiro instante em SP.
     await seed.taxa({ campaignId: campanha, taxaCents: 12_345, criadoEm: inicioSP(m1) });
     // m1, último minuto em SP (já é o dia 1 seguinte em UTC).
@@ -182,7 +186,9 @@ test('uj78j: prévia da NFS-e mensal no admin', async ({ browser, baseURL }, tes
 
         // ── (2) Valor = Resultado de taxas de m1, com bordas de SP ─────────
         await expect(page.getByTestId('nf-valor')).toHaveText(brl(VALOR_M1));
-        await expect(page.getByRole('heading', { name: /^Valor da nota de / })).toBeVisible();
+        await expect(
+          page.getByRole('heading', { name: /^Base fiscal das notas de / }),
+        ).toBeVisible();
 
         // ── (3) DPS assinada; o XML exibido valida e a assinatura confere ──
         await expect(page.getByTestId('nf-assinatura')).toContainText('assinada');

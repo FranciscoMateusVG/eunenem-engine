@@ -1,3 +1,6 @@
+import { cpfValido } from '../../../../src/domain/arrecadacao/value-objects/dados-recebedor.js';
+import { carregarTomadoresMes, type PendenciaTomador } from './tomadores.js';
+import { emSnapshotDeLeitura } from '../admin-receita.js';
 import { SpanStatusCode, trace } from '@opentelemetry/api';
 import type { Database } from '../../../../src/adapters/database.js';
 import { localDateInSaoPaulo } from '../../pages/lib/receitaPeriodo.js';
@@ -29,10 +32,10 @@ import {
  * Prévia (dry run) da NFS-e mensal da EuNeném — aperture-dh1k7.
  *
  * SÓ LEITURA. Nada aqui envia, emite ou cancela no Sistema Nacional, e nada
- * escreve no banco. O valor do mês é o MESMO "Resultado de taxas" da tela
+ * escreve no banco. A base fiscal exclui o adicional do cartão. O total é lido em
  * Receita: `loadReceitaDashboard` com o mês calendário de São Paulo como
  * período (taxas registradas por criado_em − cancelamentos por cancelado_em).
- * Nenhum SQL novo.
+ * Agrupamento por CPF do titular atual, no mesmo snapshot.
  *
  * Resultado ≤ 0 → sem DPS. Sem CNPJ/município → sem DPS (config incompleta).
  * Sem certificado → DPS gerada e NÃO assinada, sinalizada. Com certificado →
@@ -113,7 +116,7 @@ function resolverTotTrib(config: NfseConfig): TotTribResolvido {
       pendente: false,
       campo: {
         valor: `pTotTrib=${p.valor.fed}/${p.valor.est}/${p.valor.mun}`,
-        origem: 'env',
+        origem: p.origem,
         aConfirmar: regime.origem === 'default',
         nota: 'Percentuais aproximados federal/estadual/municipal (Lei 12.741/2012).',
       },
@@ -236,10 +239,10 @@ function camposDaDps(dps: DpsInput, config: NfseConfig, totTrib: TotTribResolvid
       grupo: 'Tomador',
       tag: 'toma',
       rotulo: 'Tomador',
-      valor: '(omitido: consumidor não identificado)',
+      valor: 'Titular atual identificado por CPF e nome',
       origem: 'fixo',
       aConfirmar: true,
-      nota: 'Grupo opcional no leiaute 1.01. Nota agregada do mês, sem tomador identificado.',
+      nota: 'Uma DPS por CPF por mês. Titular atual; revisar pendências históricas.',
     },
 
     { grupo: serv, tag: 'cLocPrestacao', rotulo: 'Local da prestação (IBGE)', valor: dps.servico.cLocPrestacao, origem: 'env', aConfirmar: false, nota: null },
@@ -263,7 +266,7 @@ function camposDaDps(dps: DpsInput, config: NfseConfig, totTrib: TotTribResolvid
       valor: formatarValorDps(dps.valores.vServCents),
       origem: 'ledger',
       aConfirmar: false,
-      nota: 'Resultado de taxas do mês: o mesmo número da tela Receita.',
+      nota: 'Comissão do recebedor menos cancelamentos; adicional de cartão excluído.',
     },
     deConfig(val, 'tribISSQN', 'Tributação do ISSQN', config.tribISSQN, '1 = operação tributável. Defina NFSE_TRIB_ISSQN.'),
     deConfig(val, 'tpRetISSQN', 'Retenção do ISSQN', config.tpRetISSQN, '1 = não retido. Defina NFSE_TP_RET_ISSQN.'),
@@ -292,6 +295,8 @@ export type PreviaDps =
 const VARIAVEIS_BLOQUEANTES: readonly NfseVariavel[] = ['NFSE_PRESTADOR_CNPJ', 'NFSE_MUNICIPIO_IBGE'];
 
 export function montarPreviaDps(input: {
+  readonly tomador?: { readonly cpf: string; readonly nome: string };
+  readonly ordinal?: number;
   readonly mes: string;
   readonly resultadoCents: number;
   readonly config: NfseConfig;
@@ -310,6 +315,7 @@ export function montarPreviaDps(input: {
     };
   }
 
+  if (!input.tomador || !cpfValido(input.tomador.cpf) || !input.tomador.nome.trim()) return { status:'config_incompleta', faltando:['tomador_cpf_nome'] };
   const competencia = competenciaDoMes(mes);
   const totTrib = resolverTotTrib(config);
   const dps: DpsInput = {
@@ -317,8 +323,8 @@ export function montarPreviaDps(input: {
     dhEmi: dhEmiSaoPaulo(now),
     verAplic: VER_APLIC_PREVIA,
     serie: SERIE_DPS_PREVIA,
-    nDPS: numeroDpsPrevia(mes),
-    dCompet: competencia.de,
+    nDPS: input.ordinal ? `${mes.replace('-', '')}${String(input.ordinal).padStart(8, '0')}` : numeroDpsPrevia(mes),
+    dCompet: competencia.ultimoDia,
     cLocEmi: municipioIbge,
     prestador: {
       cnpj: prestadorCnpj,
@@ -327,9 +333,12 @@ export function montarPreviaDps(input: {
       regApTribSN: config.regApTribSN.valor,
       regEspTrib: config.regEspTrib.valor,
     },
+    tomador: input.tomador,
+    ibscbs: true,
     servico: {
       cLocPrestacao: municipioIbge,
       cTribNac: config.cTribNac.valor,
+      cTribMun: '003',
       xDescServ: descricaoDoServico(config.descricaoServico.valor, competencia.rotulo),
       cNBS: config.cNBS.valor,
     },
@@ -346,7 +355,12 @@ export function montarPreviaDps(input: {
     status: 'gerada',
     idDps,
     valorServico: formatarValorDps(resultadoCents),
-    campos: camposDaDps(dps, config, totTrib),
+    campos: [...camposDaDps(dps, config, totTrib),
+      { grupo:'Tomador',tag:'CPF',rotulo:'CPF do titular atual',valor:input.tomador.cpf,origem:'derivado',aConfirmar:true,nota:'Titular atual da campanha; revisão antes de emissão histórica.' },
+      { grupo:'Tomador',tag:'xNome',rotulo:'Nome do titular atual',valor:input.tomador.nome,origem:'derivado',aConfirmar:true,nota:null },
+      { grupo:'Serviço',tag:'cTribMun',rotulo:'Código municipal',valor:'003',origem:'fixo',aConfirmar:false,nota:'Orientação do contador.' },
+      { grupo:'IBS/CBS',tag:'IBSCBS',rotulo:'Classificação IBS/CBS',valor:'finNFSe=0; indFinal=1; cIndOp=100301; indDest=0; CST=000; cClassTrib=000001',origem:'fixo',aConfirmar:false,nota:'Alíquotas calculadas pelo Sistema Nacional, não informadas na DPS.' },
+    ],
     xml,
     totTribPendente: totTrib.pendente,
   };
@@ -407,6 +421,9 @@ export type AvisoPrevia =
   | 'tot_trib_pendente';
 
 export interface PreviaMensal {
+  readonly titularConsultadoEm: Date;
+  readonly pendencias: readonly PendenciaTomador[];
+  readonly notas: readonly { cpf: string; nome: string; resultadoCents: number; dps: PreviaMensal['dps'] }[];
   readonly mes: string;
   readonly rotulo: string;
   readonly situacao: SituacaoMes;
@@ -443,7 +460,7 @@ export async function carregarPreviaMensal(
   return tracer.startActiveSpan('nfse.previaMensal', async (span) => {
     try {
       span.setAttribute('nfse.mes', input.mes);
-      const previa = await previaMensal(db, input);
+      const previa = await emSnapshotDeLeitura(db, trx => previaMensal(trx, input));
       span.setAttribute('nfse.dps.status', previa.dps.status);
       if (previa.dps.status === 'gerada') {
         span.setAttribute('nfse.assinatura.status', previa.dps.assinatura.status);
@@ -481,7 +498,7 @@ async function previaMensal(
 
   const avisos: AvisoPrevia[] = [];
   if (situacao === 'em_andamento') avisos.push('mes_em_andamento');
-  if (card.resultadoDeTaxasCents <= 0) avisos.push('resultado_nao_positivo');
+
   if (config.problemas.length > 0) avisos.push('config_com_problemas');
   const inc = dashboard.inconsistencias;
   if (inc.estornadoSemCancelamento.count > 0 || inc.canceladoSemEstorno.count > 0) {
@@ -492,22 +509,30 @@ async function previaMensal(
     avisos.push('detalhamento_nao_concilia');
   }
 
-  const previa = montarPreviaDps({ mes, resultadoCents: card.resultadoDeTaxasCents, config, now });
-  let dps: PreviaMensal['dps'];
-  if (previa.status === 'gerada') {
-    const { xml, assinatura } = assinarPrevia(previa.xml, previa.idDps, config);
-    if (previa.totTribPendente) avisos.push('tot_trib_pendente');
-    if (assinatura.status === 'nao_assinada') avisos.push('xml_nao_assinado');
-    if (assinatura.status === 'assinada') {
-      if (!assinatura.certificadoConfereComPrestador) avisos.push('certificado_de_outro_cnpj');
-      if (assinatura.certificadoValidoAte.getTime() < now.getTime()) avisos.push('certificado_vencido');
-    }
-    dps = { ...previa, xml, assinatura };
-  } else {
-    dps = previa;
+  const titulares = await carregarTomadoresMes(db, platformId, competencia.de, competencia.ate);
+  const notas: PreviaMensal['notas'][number][] = [];
+  for (const [i, tomador] of titulares.tomadores.entries()) {
+    const gerada = montarPreviaDps({ mes, resultadoCents: tomador.resultadoCents, config, now, tomador, ordinal:i+1 });
+    const dpsNota = gerada.status === 'gerada' ? { ...gerada, ...assinarPrevia(gerada.xml, gerada.idDps, config) } : gerada;
+    notas.push({ cpf:tomador.cpf, nome:tomador.nome, resultadoCents:tomador.resultadoCents, dps:dpsNota });
   }
+  if ((notas.length > 0 || titulares.pendencias.length === 0) && notas.every(n => n.resultadoCents <= 0)) avisos.push('resultado_nao_positivo');
+  for (const nota of notas) {
+    if (nota.dps.status !== 'gerada') continue;
+    if (nota.dps.totTribPendente) avisos.push('tot_trib_pendente');
+    const a = nota.dps.assinatura;
+    if(a.status === 'nao_assinada') avisos.push('xml_nao_assinado');
+    else {
+      if(!a.certificadoConfereComPrestador) avisos.push('certificado_de_outro_cnpj');
+      if(a.certificadoValidoAte.getTime() < now.getTime()) avisos.push('certificado_vencido');
+    }
+  }
+  const dps = { status: 'sem_valor' as const }; // DTO legado: jamais nota agregada.
 
   return {
+    titularConsultadoEm: now,
+    pendencias: titulares.pendencias,
+    notas,
     mes,
     rotulo: competencia.rotulo,
     situacao,
@@ -526,7 +551,7 @@ async function previaMensal(
     adicionalCartao: card.adicionalCartao,
     inconsistencias: dashboard.inconsistencias,
     configuracao: { problemas: config.problemas },
-    avisos,
+    avisos: [...new Set(avisos)],
     dps,
   };
 }

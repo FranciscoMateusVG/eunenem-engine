@@ -28,7 +28,10 @@ const XML =
   '<?xml version="1.0" encoding="UTF-8"?><DPS xmlns="http://www.sped.fazenda.gov.br/nfse" versao="1.01"><infDPS Id="DPS261160621122233300018199999020260999999999"><vServ>1234.56</vServ></infDPS></DPS>';
 
 function previa(overrides: Partial<NotaFiscalPrevia> = {}): NotaFiscalPrevia {
-  return {
+  const result = {
+    titularConsultadoEm: '2026-10-28T15:00:00Z',
+    pendencias: [],
+    notas: [],
     mes: '2026-09',
     rotulo: 'setembro/2026',
     situacao: 'fechado',
@@ -68,10 +71,10 @@ function previa(overrides: Partial<NotaFiscalPrevia> = {}): NotaFiscalPrevia {
           grupo: 'Serviço',
           tag: 'cTribNac',
           rotulo: 'Código de tributação nacional',
-          valor: '100501',
+          valor: '100202',
           origem: 'default',
           aConfirmar: true,
-          nota: 'LC 116 item 10.05',
+          nota: 'LC 116 item 10.02',
         },
         {
           grupo: 'Valores e tributação',
@@ -87,6 +90,17 @@ function previa(overrides: Partial<NotaFiscalPrevia> = {}): NotaFiscalPrevia {
       assinatura: { status: 'nao_assinada', motivo: 'sem_certificado' },
     },
     ...overrides,
+  } as NotaFiscalPrevia;
+  return {
+    ...result,
+    notas: overrides.notas ?? [
+      {
+        cpf: '52998224725',
+        nome: 'Titular sintético',
+        resultadoCents: result.valor.resultadoDeTaxasCents,
+        dps: result.dps,
+      },
+    ],
   };
 }
 
@@ -101,7 +115,7 @@ function render(data: NotaFiscalPrevia): string {
 describe('NotaFiscalPainel', () => {
   it('mostra o valor do mês e o detalhamento', () => {
     const html = render(previa());
-    expect(html).toContain('Valor da nota de setembro/2026');
+    expect(html).toContain('Base fiscal das notas de setembro/2026');
     expect(html).toContain('R$ 1.234,56');
     expect(html).toContain('R$ 1.500,00');
     expect(html).toContain('R$ 265,44');
@@ -228,4 +242,21 @@ describe('notaFiscalMes', () => {
     expect(mesFromSearch('?mes=2026-13', now)).toBe('2026-09');
     expect(mesFromSearch('', now)).toBe('2026-09');
   });
+});
+
+it('besta: mostra titular atual/data, pendência e base sem adicional', () => {
+  const html = render(
+    previa({
+      notas: [],
+      pendencias: [
+        { campanhaId: 'campanha-fixture', motivo: 'cpf_ausente_ou_invalido', resultadoCents: 100 },
+      ],
+    }),
+  );
+  expect(html).toContain('Titular atual da campanha');
+  expect(html).toContain('Pendências para revisão manual');
+  expect(html).toContain('Nenhuma DPS gerada');
+  expect(html).not.toContain('Copiar XML');
+  expect(html).not.toContain('Mesmo número da tela Receita');
+  expect(html).toContain('Não inclui o adicional do cartão');
 });

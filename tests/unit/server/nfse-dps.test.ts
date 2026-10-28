@@ -330,3 +330,34 @@ describe('montarDpsXml', () => {
     expect(montarDpsXml(input())).toEqual(montarDpsXml(input()));
   });
 });
+
+it('besta: DPS identifica tomador e usa códigos/percentuais/IBSCBS do contador', async () => {
+  const { montarPreviaDps } = await import(
+    '../../../apps/eunenem-server/server/nfse/previa-mensal.js'
+  );
+  const { parseNfseConfig } = await import('../../../apps/eunenem-server/server/nfse/config.js');
+  const { validateDps } = await import('../../helpers/nfse-xsd.js');
+  const previa = montarPreviaDps({
+    mes: '2026-09',
+    resultadoCents: 10000,
+    now: new Date('2026-10-28T15:00:00Z'),
+    config: parseNfseConfig({
+      NFSE_PRESTADOR_CNPJ: '12345678000195',
+      NFSE_MUNICIPIO_IBGE: '3106200',
+    }),
+    tomador: { cpf: '52998224725', nome: 'Titular sintético' },
+    ordinal: 1,
+  } as Parameters<typeof montarPreviaDps>[0]);
+  expect(previa.status).toBe('gerada');
+  if (previa.status !== 'gerada') return;
+  expect(previa.xml).toContain(
+    '<toma><CPF>52998224725</CPF><xNome>Titular sintético</xNome></toma>',
+  );
+  expect(previa.xml).toContain('<cTribNac>100202</cTribNac><cTribMun>003</cTribMun>');
+  expect(previa.xml).toContain('<pTotTribFed>11.33</pTotTribFed>');
+  expect(previa.xml).toContain('<pTotTribEst>0.00</pTotTribEst>');
+  expect(previa.xml).toContain('<pTotTribMun>3.00</pTotTribMun>');
+  expect(previa.xml).toContain('<dCompet>2026-09-30</dCompet>');
+  expect(previa.xml).toContain('</valores><IBSCBS><finNFSe>0</finNFSe>');
+  expect(validateDps(previa.xml).ok).toBe(true);
+});

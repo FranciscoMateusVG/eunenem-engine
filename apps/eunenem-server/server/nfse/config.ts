@@ -117,7 +117,7 @@ export interface NfseConfig {
  * plataforma. O "1.05.01" do sandbox é licenciamento de software e não
  * descreve a atividade. A confirmar com o contador.
  */
-export const CTRIB_NAC_PADRAO = '100501';
+export const CTRIB_NAC_PADRAO = '100202';
 
 export const DESCRICAO_SERVICO_PADRAO =
   'Comissão de intermediação de pagamentos da plataforma EuNeném - competência {competencia}.';
@@ -256,7 +256,7 @@ export function parseNfseConfig(env: NfseEnv): NfseConfig {
   const pAliq = campo<string | null, null>('NFSE_ALIQUOTA_ISS', AliquotaSchema, null);
   const inscricaoMunicipal = campo<string | null, null>('NFSE_INSCRICAO_MUNICIPAL', InscricaoMunicipalSchema, null);
   const cNBS = campo<string | null, null>('NFSE_CNBS', CNbsSchema, null);
-  const pTotTrib = campo<PercentuaisTributos | null, null>('NFSE_P_TOT_TRIB', PTotTribSchema, null);
+  const pTotTrib = campo<PercentuaisTributos | null, PercentuaisTributos>('NFSE_P_TOT_TRIB', PTotTribSchema, { fed: '11.33', est: '0.00', mun: '3.00' });
   const pTotTribSN = campo<string | null, null>('NFSE_P_TOT_TRIB_SN', PTotTribSNSchema, null);
   const descricaoServico = campo('NFSE_DESCRICAO_SERVICO', DescricaoSchema, DESCRICAO_SERVICO_PADRAO);
 

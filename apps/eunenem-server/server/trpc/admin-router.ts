@@ -4544,6 +4544,9 @@ const NotaFiscalDpsSchema = z.discriminatedUnion("status", [
 ]);
 
 const NotaFiscalPreviaSchema = z.object({
+  titularConsultadoEm: z.string().datetime(),
+  pendencias: z.array(z.object({ campanhaId:z.string(), motivo:z.string(), resultadoCents:z.number().int() })),
+  notas: z.array(z.object({ cpf:z.string(), nome:z.string(), resultadoCents:z.number().int(), dps:NotaFiscalDpsSchema })),
   mes: MesSchema,
   rotulo: z.string(),
   situacao: z.enum(["fechado", "em_andamento"]),
@@ -4613,6 +4616,13 @@ const notaFiscalRouter = t.router({
       const { dps } = previa;
       return {
         ...previa,
+        titularConsultadoEm: previa.titularConsultadoEm.toISOString(),
+        pendencias: [...previa.pendencias],
+        notas: previa.notas.map(n => ({ ...n, dps: n.dps.status === "sem_valor" ? n.dps : n.dps.status === "config_incompleta" ? { ...n.dps, faltando:[...n.dps.faltando] } : {
+          ...n.dps, campos:[...n.dps.campos], assinatura:n.dps.assinatura.status !== "assinada" ? n.dps.assinatura : {
+            ...n.dps.assinatura, certificadoValidoAte:n.dps.assinatura.certificadoValidoAte.toISOString()
+          }
+        }})),
         snapshotAt: previa.snapshotAt.toISOString(),
         porMeioProvedor: [...previa.porMeioProvedor],
         configuracao: { problemas: [...previa.configuracao.problemas] },
