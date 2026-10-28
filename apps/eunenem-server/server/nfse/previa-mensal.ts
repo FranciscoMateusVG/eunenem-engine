@@ -11,6 +11,7 @@ import {
 } from '../admin-receita.js';
 import { assinarDps, carregarCertificado } from './assinatura.js';
 import {
+  CTRIB_NAC_PADRAO,
   type CampoConfig,
   descricaoDoServico,
   type NfseConfig,
@@ -309,7 +310,7 @@ export function montarPreviaDps(input: {
     };
   }
 
-  if (config.cTribNac.valor !== '100202') return { status: 'config_incompleta', faltando: ['NFSE_CTRIB_NAC'] };
+  if (config.cTribNac.valor !== CTRIB_NAC_PADRAO) return { status: 'config_incompleta', faltando: ['NFSE_CTRIB_NAC'] };
   if (!input.tomador || !cpfValido(input.tomador.cpf) || !input.tomador.nome.trim()) return { status:'config_incompleta', faltando:['tomador_cpf_nome'] };
   const competencia = competenciaDoMes(mes);
   const totTrib = resolverTotTrib(config);
@@ -455,6 +456,9 @@ export async function carregarPreviaMensal(
   return tracer.startActiveSpan('nfse.previaMensal', async (span) => {
     try {
       span.setAttribute('nfse.mes', input.mes);
+      // Rejeitar competência inválida/futura antes de adquirir conexão/snapshot.
+      situacaoDoMes(input.mes, input.now);
+      competenciaDoMes(input.mes);
       const previa = await emSnapshotDeLeitura(db, trx => previaMensal(trx, input));
       const geradas = previa.notas.filter(n => n.dps.status === 'gerada');
       const incompletas = previa.notas.filter(n => n.dps.status === 'config_incompleta');
