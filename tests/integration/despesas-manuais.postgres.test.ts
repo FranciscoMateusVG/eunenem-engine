@@ -412,7 +412,8 @@ it('q1w45: HTTP soft-delete retira mensal/avulsa de todos os períodos, metas e 
     true,
   );
   const receita = await caller().admin.receita.painel();
-  const set = (r: typeof receita) => r.lucro.meses.find((x) => x.de === '2037-09-01')!.valorCents!;
+  const set = (r: typeof receita) =>
+    r.lucro.meses.find((x) => x.de === '2037-09-01')?.valorCents ?? Number.NaN;
   expect(set(receita) - set(antes)).toBe(36000);
   const rows = await sql<{
     id: string;
