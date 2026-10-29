@@ -62,13 +62,9 @@ export const PERFIL_DEMO: PerfilSnapshot = {
 export const PERFIL_RELATIONS: PerfilRelation[] = [
   { value: "Mãe", label: "Mãe" },
   { value: "Pai", label: "Pai" },
-  { value: "Madrinha", label: "Madrinha" },
-  { value: "Padrinho", label: "Padrinho" },
-  { value: "Avó", label: "Avó" },
-  { value: "Avô", label: "Avô" },
-  { value: "Tia", label: "Tia" },
-  { value: "Tio", label: "Tio" },
-  { value: "Outro", label: "Outro" },
+  { value: "Mãe e Pai", label: "Mãe e Pai" },
+  { value: "Mamães", label: "Mamães" },
+  { value: "Papais", label: "Papais" },
 ];
 
 /** Event-type options. */

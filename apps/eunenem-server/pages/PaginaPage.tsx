@@ -168,8 +168,8 @@ export function PaginaPage({
               fotoHistoria={data?.fotoHistoriaUrl ?? null}
               editable={false}
             />
-            <Marketplace slug={slug} ownerEditHref={ownerEditHref} />
-            <HowTo />
+            <Marketplace slug={slug} ownerEditHref={ownerEditHref} relacao={data?.relacao} />
+            <HowTo relacao={data?.relacao} />
             <Messages slug={slug} />
           </main>
           <Footer />

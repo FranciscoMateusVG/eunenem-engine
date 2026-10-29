@@ -1,6 +1,6 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { artigoPosse } from "@/lib/concordancia";
+import { artigoPosse, concordanciaResponsaveis } from "@/lib/concordancia";
 import { BottleDoodle, FlowerDoodle } from "./Doodles";
 import { GiftCard } from "./GiftCard";
 import { GiftCheckoutModal } from "./GiftCheckoutModal";
@@ -30,6 +30,7 @@ import { groupVisitorGifts, type VisitorGift } from "@/lib/visitorGift";
 
 interface MarketplaceProps {
   slug: string;
+  relacao?: string | null;
   /**
    * aperture-4e1qo — owner shortcut to the painel editor of THIS campanha.
    * PaginaPage computes it from the server-resolved projection
@@ -71,8 +72,9 @@ export function OwnerEditListaLink({ href, className }: { href: string; classNam
   );
 }
 
-export function Marketplace({ slug, ownerEditHref = null }: MarketplaceProps) {
+export function Marketplace({ slug, ownerEditHref = null, relacao }: MarketplaceProps) {
   const { tweaks } = useTweaks();
+  const responsaveis = concordanciaResponsaveis(relacao);
   const { data, isLoading, isError } = usePaginaListaPresentes(slug);
   const [selectedGift, setSelectedGift] = useState<VisitorGift | null>(null);
 
@@ -189,7 +191,7 @@ export function Marketplace({ slug, ownerEditHref = null }: MarketplaceProps) {
               marginRight: "auto",
             }}
           >
-            Cada presente vira dinheiro direto na conta dos papais — sem
+            Cada presente vira dinheiro direto na conta {responsaveis.posse} — sem
             caixinha de loja, sem mensalidade. Você paga com Pix ou
             cartão, em checkout seguro.
           </p>
