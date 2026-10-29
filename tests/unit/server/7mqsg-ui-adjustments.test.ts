@@ -178,7 +178,7 @@ describe('7mqsg item 4 — no invented "primeira ecografia" caption', () => {
 describe('7mqsg item 5 — "direto na conta"', () => {
   it('Marketplace copy says direto na conta, not direto no Pix', () => {
     const mk = src('pages/components/eunenem/Marketplace.tsx');
-    expect(mk).toMatch(/direto na conta dos papais/);
+    expect(mk).toContain('direto na conta {responsaveis.posse}');
     expect(mk).not.toMatch(/direto no Pix/i);
   });
 });

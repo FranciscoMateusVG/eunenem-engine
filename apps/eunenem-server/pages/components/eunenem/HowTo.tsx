@@ -1,4 +1,5 @@
 
+import { concordanciaResponsaveis } from "@/lib/concordancia";
 import { useState } from "react";
 import { HeartDoodle, StarDoodle } from "./Doodles";
 
@@ -18,42 +19,45 @@ interface Step {
   desc: string;
 }
 
-const STEPS: Step[] = [
-  {
-    n: 1,
-    emoji: "🎁",
-    color: "var(--pink)",
-    rot: -3,
-    title: "Escolha um presente",
-    desc: 'Navegue pela listinha e clique em "Presentear". Pode ser um ou mais presentes.',
-  },
-  {
-    n: 2,
-    emoji: "💳",
-    color: "var(--blue)",
-    rot: -4,
-    title: "Pague com Pix ou cartão",
-    desc: "Checkout seguro, em poucos cliques. Pagamento processado por parceiro certificado.",
-  },
+function stepsFor(relacao?: string | null): Step[] {
+  const responsaveis = concordanciaResponsaveis(relacao);
+  return [
     {
-    n: 3,
-    emoji: "✏️",
-    color: "var(--green)",
-    rot: 4,
-    title: "Deixe uma mensagem",
-    desc: "Escreva um recadinho carinhoso pros papais e pro bebê lerem no mural.",
-  },
-  {
-    n: 4,
-    emoji: "✨",
-    color: "var(--lilac)",
-    rot: 3,
-    title: "Pronto",
-    desc: "O valor chega na conta dos papais. Eles compram o presente do jeito que fica melhor.",
-  },
-];
+      n: 1,
+      emoji: "🎁",
+      color: "var(--pink)",
+      rot: -3,
+      title: "Escolha um presente",
+      desc: 'Navegue pela listinha e clique em "Presentear". Pode ser um ou mais presentes.',
+    },
+    {
+      n: 2,
+      emoji: "💳",
+      color: "var(--blue)",
+      rot: -4,
+      title: "Pague com Pix ou cartão",
+      desc: "Checkout seguro, em poucos cliques. Pagamento processado por parceiro certificado.",
+    },
+    {
+      n: 3,
+      emoji: "✏️",
+      color: "var(--green)",
+      rot: 4,
+      title: "Deixe uma mensagem",
+      desc: `Escreva um recadinho carinhoso ${responsaveis.destinatario} e pro bebê lerem no mural.`,
+    },
+    {
+      n: 4,
+      emoji: "✨",
+      color: "var(--lilac)",
+      rot: 3,
+      title: "Pronto",
+      desc: `O valor chega na conta ${responsaveis.posse}. ${responsaveis.compra} o presente do jeito que fica melhor.`,
+    },
+  ];
+}
 
-export function HowTo() {
+export function HowTo({ relacao }: { relacao?: string | null }) {
   return (
     <section id="como" className="eu-section" style={{ background: "var(--cream)" }}>
       <StarDoodle
@@ -108,7 +112,7 @@ export function HowTo() {
             gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
           }}
         >
-          {STEPS.map((s) => (
+          {stepsFor(relacao).map((s) => (
             <StepCard key={s.n} step={s} />
           ))}
         </div>
