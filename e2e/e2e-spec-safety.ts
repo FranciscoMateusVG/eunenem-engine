@@ -65,6 +65,9 @@ export const E2E_SPEC_SAFETY = [
   { file: 'painel-configuracoes.spec.ts', safety: 'non-payment' },
   { file: 'painel-editar-mimo-qty-changed.spec.ts', safety: 'non-payment' },
   { file: 'painel-editar-mimo.spec.ts', safety: 'non-payment' },
+  // Statistics is read-only; synthetic users are seeded only after the spec
+  // verifies the isolated 9bpre runner's local database identity.
+  { file: 'pxmdy-estatisticas.spec.ts', safety: 'non-payment' },
   // Read-only admin screen (Receita 1b). Self-skips unless launched by the
   // 9bpre ephemeral-DB runner with this spec as argument.
   { file: 'q4pfz-receita-1b.spec.ts', safety: 'non-payment' },
