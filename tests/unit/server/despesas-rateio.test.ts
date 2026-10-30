@@ -64,7 +64,64 @@ it('faltam desconta taxas de provedor antes de comparar com meta', () => {
     [{ dia: '2026-10-05', manualCents: 900, ocorrencias: 0 }],
   );
   expect(
-    agregarLucro(r, d, '2026-09-01', '2026-10-05').semanas.find((s) => s.faltamCents !== undefined)
+    agregarLucro(r, d, '2026-09-01', '2026-10-05').semanas.find((s) => s.de === '2026-10-05')
       ?.faltamCents,
   ).toBe(200);
+});
+it('avalia a mesma meta em semanas encerradas, atual parcial e futuras sem inventar resultado', () => {
+  const grade = gradePainel('2026-10-20');
+  const r = agregarDias(grade, []);
+  const d = agregarDespesas(
+    grade,
+    [],
+    [],
+    [],
+    [],
+    [{ dia: '2026-10-05', manualCents: 500, ocorrencias: 0 }],
+  );
+  const semanas = agregarLucro(r, d, '2026-09-01', '2026-10-20').semanas;
+  expect(semanas.find((s) => s.de === '2026-10-05')?.faltamCents).toBe(500);
+  expect(semanas.find((s) => s.de === '2026-10-19')).toMatchObject({ parcial: true });
+  expect(semanas.find((s) => s.de === '2026-10-26')?.faltamCents).toBeUndefined();
+});
+
+it('lucro positivo menor que a meta já a cobre; semana negativa não a cobre', () => {
+  const grade = gradePainel('2026-10-30');
+  const r = agregarDias(grade, [
+    {
+      dia: '2026-10-05',
+      tarifas: { registradoCents: 137010, canceladoCents: 0 },
+      recebido: { registradoCents: 137010, canceladoCents: 0 },
+    },
+  ]);
+  const manuais = [
+    { dia: '2026-10-05', manualCents: 99724, ocorrencias: 1 },
+    { dia: '2026-10-12', manualCents: 500, ocorrencias: 1 },
+  ];
+  const d = agregarDespesas(
+    grade,
+    [
+      {
+        dia: '2026-10-05',
+        stripeCents: 200,
+        interCents: 100,
+        naoVinculadas: 0,
+        naoVinculadasCents: 0,
+      },
+    ],
+    [],
+    manuais,
+    manuais,
+    manuais,
+  );
+  const s = agregarLucro(r, d, '2026-09-01', '2026-10-30').semanas;
+  expect(s.find((x) => x.de === '2026-10-05')).toMatchObject({
+    valorCents: 36986,
+    metaRecorrenteCents: 99724,
+    faltamCents: 0,
+  });
+  expect(s.find((x) => x.de === '2026-10-12')).toMatchObject({
+    valorCents: -500,
+    faltamCents: 500,
+  });
 });
