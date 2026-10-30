@@ -1,3 +1,4 @@
+import { AdminEstatisticasPage } from './AdminEstatisticasPage.js';
 import { Toaster } from 'sonner';
 import { AdminCampanhaPage } from './AdminCampanhaPage.js';
 import { AdminContribuicaoPage } from './AdminContribuicaoPage.js';
@@ -69,6 +70,7 @@ export function resolveRoute(pathname: string):
   | { kind: 'faq' }
   | { kind: 'taxas-e-prazos' }
   | { kind: 'admin' }
+  | { kind: 'admin-estatisticas' }
   | { kind: 'admin-usuario'; idConta: string }
   | { kind: 'admin-campanha'; idCampanha: string }
   | { kind: 'admin-contribuicao'; idContribuicao: string }
@@ -222,6 +224,7 @@ export function resolveRoute(pathname: string):
   if (pathname === '/admin/migrados' || pathname === '/admin/migrados/') {
     return { kind: 'admin-migrados' };
   }
+  if (pathname === '/admin/estatisticas' || pathname === '/admin/estatisticas/') return {kind:'admin-estatisticas'};
   if (pathname === '/admin' || pathname === '/admin/') {
     return { kind: 'admin' };
   }
@@ -450,6 +453,7 @@ function pickPage(route: ReturnType<typeof resolveRoute>, pathname: string) {
   if (route.kind === 'auth-demo') return <AuthDemoPage />;
   if (route.kind === 'faq') return <FaqPage />;
   if (route.kind === 'taxas-e-prazos') return <TaxasEPrazosPage />;
+  if (route.kind === 'admin-estatisticas') return <AdminEstatisticasPage />;
   if (route.kind === 'admin') return <AdminPage />;
   if (route.kind === 'admin-usuario')
     return <AdminUsuarioPage idConta={route.idConta} />;
