@@ -52,3 +52,17 @@ export function artigoDefinido(genero?: string | null): "o" | "a" | "" {
 export function saudacao(_genero?: string | null): string {
   return "Boas-vindas";
 }
+
+/** Agreement with the saved responsible adults, independent of the baby's gender. */
+export function concordanciaResponsaveis(relacao?: string | null) {
+  switch (relacao?.trim().toLocaleLowerCase('pt-BR')) {
+    case 'mãe':
+      return { posse: 'da mãe', sujeito: 'a mãe', destinatario: 'pra mãe', compra: 'Ela compra' };
+    case 'pai':
+      return { posse: 'do pai', sujeito: 'o pai', destinatario: 'pro pai', compra: 'Ele compra' };
+    case 'mamães':
+      return { posse: 'das mamães', sujeito: 'as mamães', destinatario: 'pras mamães', compra: 'Elas compram' };
+    default:
+      return { posse: 'dos papais', sujeito: 'os papais', destinatario: 'pros papais', compra: 'Eles compram' };
+  }
+}

@@ -4642,7 +4642,7 @@ html {
     font-size: 44px;
   }
   .painel-recebido-card {
-    margin: 12px 20px 8px;
+    margin: 12px 16px 8px;
     padding: 22px 24px 10px;
   }
   .painel-recebido-amount {
@@ -4650,6 +4650,13 @@ html {
   }
   .painel-stat-num {
     font-size: 30px;
+  }
+}
+
+/* Match the full-width menu below once the desktop shell supplies its gutters. */
+@media (min-width: 900px) {
+  .painel-recebido-card {
+    margin-inline: 0;
   }
 }
 
