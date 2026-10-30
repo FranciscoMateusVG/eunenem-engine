@@ -4375,6 +4375,7 @@ const LucroPeriodoSchema = z.object({
   valorCents: z.number().int().nullable(),
   metaRecorrenteCents: z.number().int().nonnegative().optional(),
   faltamCents: z.number().int().nonnegative().optional(),
+  parcial: z.boolean().optional(),
   estado: z.enum(["completo", "incompleto", "sem_dados", "futuro"]),
 });
 const ReceitaPainelSchema = z.object({

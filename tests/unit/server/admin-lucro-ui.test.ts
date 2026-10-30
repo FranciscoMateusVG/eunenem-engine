@@ -36,7 +36,9 @@ it('renderiza negativo abaixo do zero, incompleto e ausência sem inventar lucro
   expect(html).toContain('Meta para se pagar:');
   expect(html).not.toContain('data-weekly-target');
   expect(html).toContain('até hoje');
+  expect(html).toContain('Meta não atingida');
   expect(html).toContain('Faltam');
+  expect(html).toContain('Lucro observado');
   expect(html).toContain('semanas do mês corrente podem ser recalculadas');
 });
 
@@ -65,4 +67,55 @@ it('não mostra faltam zero quando meta atingida ou inexistente', () => {
     expect(html).toContain(text);
     expect(html).not.toContain('Faltam');
   }
+});
+
+it('mostra status por semana encerrada, negativa e atual parcial sem tratar futuro como atingido', () => {
+  const html = renderToStaticMarkup(
+    React.createElement(LucroGraficos, {
+      data: {
+        meses: [],
+        semanas: [
+          {
+            de: '2026-10-05',
+            ate: '2026-10-12',
+            valorCents: 36986,
+            estado: 'completo',
+            metaRecorrenteCents: 99724,
+            faltamCents: 0,
+            parcial: false,
+          },
+          {
+            de: '2026-10-12',
+            ate: '2026-10-19',
+            valorCents: -200,
+            estado: 'completo',
+            metaRecorrenteCents: 500,
+            faltamCents: 200,
+            parcial: false,
+          },
+          {
+            de: '2026-10-19',
+            ate: '2026-10-26',
+            valorCents: 300,
+            estado: 'incompleto',
+            metaRecorrenteCents: 500,
+            faltamCents: 0,
+            parcial: true,
+          },
+          {
+            de: '2026-10-26',
+            ate: '2026-11-01',
+            valorCents: null,
+            estado: 'futuro',
+            metaRecorrenteCents: 500,
+          },
+        ],
+      },
+    }),
+  );
+  expect(html.match(/Meta atingida ✓/g)).toHaveLength(2);
+  expect(html.match(/Meta não atingida/g)).toHaveLength(1);
+  expect(html).toContain('semana em andamento (parcial)');
+  expect(html).toContain('período futuro');
+  expect(html).toContain('Lucro observado: R$');
 });

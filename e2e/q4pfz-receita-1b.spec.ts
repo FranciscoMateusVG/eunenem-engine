@@ -27,7 +27,9 @@ import {
   startOfIsoWeek,
   startOfMonth,
 } from '../apps/eunenem-server/pages/lib/receitaPeriodo.js';
+import { criarDespesaManual } from '../apps/eunenem-server/server/admin-despesas-manuais.js';
 import { createDatabase, type Database } from '../src/adapters/database.js';
+import { ID_PLATAFORMA_EUNENEM } from '../src/index.js';
 import { ReceitaLedgerSeed } from '../tests/helpers/receita-ledger-seed.js';
 import { expect, test } from './fixtures.js';
 import { browserCookieFor, mintMagicLinkSession } from './magic-link-auth.js';
@@ -246,7 +248,9 @@ const ESTILOS_1B = (root: Element) => {
     [...root.querySelectorAll(sel)].find((e) => re.test((e.textContent ?? '').trim()));
   return {
     h1: pick(byText('h1', /^Receita EuNeném$/)),
-    subtitulo: pick(byText('p', /^Taxas da plataforma menos cancelamentos\.$/)),
+    subtitulo: pick(
+      byText('p', /^Taxas da plataforma e adicional do cartão, menos cancelamentos\.$/),
+    ),
     atualizado: pick(byText('p', /^Atualizado/)),
     kpiTitulo: pick(byText('h3', /^Mês atual$/i)),
     kpiFaixa: pick(byText('span', /^01\/10/)),
@@ -321,6 +325,13 @@ test('q4pfz: Receita 1b — KPIs, meses, semanas do mês e notas de definição'
 
     const seed = new ReceitaLedgerSeed(db);
     const campanha = await seed.campanha();
+    // Fixture local: custo fixo gera semanas atingidas e não atingidas.
+    await criarDespesaManual(db, {
+      platformId: ID_PLATAFORMA_EUNENEM,
+      nome: 'Custo fixo sintético 9jsnc',
+      valorCents: 310,
+      tipo: { recorrencia: 'mensal', diaCobranca: 1, inicio: mes.de },
+    });
     const outra = await seed.campanha(OTHER_PLATFORM);
     const eventos: Evento[] = [];
     const registrar = (em: Date, taxa: number, pago: number) =>
@@ -357,8 +368,8 @@ test('q4pfz: Receita 1b — KPIs, meses, semanas do mês e notas de definição'
       canceladoEm: inicioDoMes,
       provedor: 'stripe',
     });
-    registrar(sp(ultimoDiaMesPassado, '23:30:00'), 2_500, virada.pagoCents);
-    cancelar(inicioDoMes, 2_500, virada.pagoCents);
+    registrar(sp(ultimoDiaMesPassado, '23:30:00'), 4_300, virada.pagoCents);
+    cancelar(inicioDoMes, 4_300, virada.pagoCents);
     // Mês corrente: primeiro dia e agora.
     const dia1 = sp(mes.de, '01:30:00');
     const p1 = await seed.pagamento({
@@ -437,11 +448,15 @@ test('q4pfz: Receita 1b — KPIs, meses, semanas do mês e notas de definição'
         await expect(
           page.getByRole('heading', { level: 1, name: 'Receita EuNeném' }),
         ).toBeVisible();
-        await expect(page.getByText('Taxas da plataforma menos cancelamentos.')).toBeVisible();
+        await expect(
+          page.getByText('Taxas da plataforma e adicional do cartão, menos cancelamentos.'),
+        ).toBeVisible();
         await expect(
           page.getByText(`Atualizado ${ddmmaaaa(hoje)} · horário de São Paulo`),
         ).toBeVisible();
-        await expect(page.locator('body')).not.toContainText(/lucro|l[ií]quid/i);
+        await expect(page.getByRole('heading', { name: 'Lucro líquido por semana' })).toBeVisible();
+        await expect(page.getByText(/semana em andamento \(parcial\)/)).toBeVisible();
+        await expect(page.getByText('Meta atingida ✓').first()).toBeVisible();
         await expect(page.locator('body')).not.toContainText(brl(99_900));
 
         // ── KPIs: duas colunas por cartão (Tarifas | Recebido) ────────────
@@ -508,9 +523,23 @@ test('q4pfz: Receita 1b — KPIs, meses, semanas do mês e notas de definição'
         ).toHaveCount(0);
 
         // ── Por mês: 12 meses, só o corrente parcial, barra empilhada ─────
-        await expect(page.getByRole('heading', { name: 'Por mês' })).toBeVisible();
+        await expect(page.getByRole('heading', { name: 'Por mês', exact: true })).toBeVisible();
         const barrasMes = page.getByTestId('receita-mes');
-        await expect(barrasMes).toHaveCount(12);
+        await expect(barrasMes).toHaveCount(3);
+        const seletor = page.getByRole('combobox', { name: 'Gráficos mensais' });
+        await expect(seletor).toHaveValue('3');
+        for (const n of [3, 6, 12]) {
+          await seletor.selectOption(String(n));
+          await expect(barrasMes).toHaveCount(n);
+          await expect(barrasMes.first()).toHaveAttribute('data-mes', meses[12 - n] as string);
+          const lucroMensal = page.getByRole('region', { name: 'Lucro líquido por mês' });
+          await expect(lucroMensal.locator('[aria-label]')).toHaveCount(n);
+          if (viewport.width === 1280)
+            await page.screenshot({
+              path: testInfo.outputPath(`9jsnc-${n}-meses-desktop.png`),
+              fullPage: true,
+            });
+        }
         const somaMes = (k: number) =>
           somar(eventos, meses[k] as string, k === 11 ? amanha : (meses[k + 1] as string));
         const maxRecebidoMes = Math.max(...meses.map((_, k) => somaMes(k).recebido));
@@ -628,7 +657,7 @@ test('q4pfz: Receita 1b — KPIs, meses, semanas do mês e notas de definição'
 
         // ── Notas de definição (texto do design) ──────────────────────────
         await expect(page.locator('p').filter({ hasText: /^Tarifas EuNeném:/ })).toHaveText(
-          'Tarifas EuNeném: taxas registradas na data do pagamento aprovado, menos cancelamentos na data em que ocorreram.',
+          'Tarifas EuNeném: taxas da plataforma e adicional do cartão registrados na data do pagamento aprovado, menos cancelamentos na data em que ocorreram.',
         );
         await expect(page.locator('p').filter({ hasText: /^Recebido no banco:/ })).toHaveText(
           'Recebido no banco: soma dos pagamentos aprovados, menos estornos. É uma estimativa: o custo do provedor e o valor que de fato caiu na conta não são registrados. Estornos parciais, disputas e chargebacks não são registrados e ficam fora.',

@@ -134,15 +134,18 @@ describe('Receita 1b — KPIs', () => {
 describe('Receita 1b — barras', () => {
   const html = render(painel());
 
-  it('12 meses, só o corrente parcial, com valores compactos e título completo', () => {
-    expect(html.match(/data-testid="receita-mes"/g)).toHaveLength(12);
+  it('3 meses por padrão e seletor 3/6/12, só o corrente parcial, com valores compactos e título completo', () => {
+    expect(html.match(/data-testid="receita-mes"/g)).toHaveLength(3);
     expect(html.match(/data-parcial="true"/g)).toHaveLength(1);
     expect(html).toContain('data-mes="2026-10-01" data-parcial="true"');
     expect(html.replace(/\u00a0/g, ' ')).toContain(
       'title="outubro 2026 (parcial) · tarifas R$ 584,00 · recebido R$ 11.798,00"',
     );
-    expect(texto(html)).toContain('últimos 12 meses · outubro em andamento');
-    expect(texto(trecho(html, 'receita-mes'))).toContain('R$ 0');
+    expect(texto(html)).toContain('últimos 3 meses · outubro em andamento');
+    expect(html).toContain('Gráficos mensais');
+    expect(html).toContain('value="3" selected');
+    expect(html).toContain('value="6"');
+    expect(html).toContain('value="12"');
     expect(texto(html)).toContain('R$ 94,4 mil R$ 4,7 mil');
   });
 
@@ -194,18 +197,18 @@ describe('Receita 1b — barras', () => {
     const borda = render(
       painel('2026-10-05', [
         dia('2026-09-10', 389_300, 7_786_000),
-        // Julho: estorno maior que o recebido ⇒ Recebido −R$ 50,00.
-        dia('2026-07-10', 100, 0, 5_000),
-        // Junho: Tarifas R$ 9,00 acima do Recebido R$ 6,00.
-        dia('2026-06-10', 900, 600),
+        // Agosto: estorno maior que o recebido ⇒ Recebido −R$ 50,00.
+        dia('2026-08-10', 100, 0, 5_000),
+        // Outubro: Tarifas R$ 9,00 acima do Recebido R$ 6,00.
+        dia('2026-10-03', 900, 600),
       ]),
     );
     expect(borda).not.toMatch(/NaN|Infinity/);
-    const julho = trecho(borda, 'receita-mes" data-mes="2026-07-01');
+    const julho = trecho(borda, 'receita-mes" data-mes="2026-08-01');
     expect(altura(julho, 'data-testid="receita-barra"')).toBe('0.00%');
     expect(altura(julho, 'data-fatia="tarifas"')).toBe('0.00%');
     expect(texto(julho)).toContain('-R$ 50');
-    const junho = trecho(borda, 'receita-mes" data-mes="2026-06-01');
+    const junho = trecho(borda, 'receita-mes" data-mes="2026-10-01');
     expect(altura(junho, 'data-fatia="tarifas"')).toBe('100.00%');
   });
 
