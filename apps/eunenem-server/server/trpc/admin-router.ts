@@ -1,3 +1,4 @@
+import { loadEstatisticas } from '../admin-estatisticas.js';
 import { loadReceitaComLucro } from "../admin-lucro.js";
 import { consultarRecuperacaoRepasse, recuperarRepasse, RecoveryInputSchema } from '../../../../src/use-cases/pagamentos/financeiro/consultar-recuperacao-repasse.js';
 import { CampanhaCompartilhamentoPostgres, EmailJaMembroCampanhaError } from '../../../../src/adapters/arrecadacao/campanha-compartilhamento.postgres.js';
@@ -4974,6 +4975,7 @@ export const adminRouter = t.router({
   pagamentos: pagamentosRouter,
 
   /** Receita EuNeném — taxas da plataforma por evento (aperture-9bpre). */
+  estatisticas: adminProcedure.query(({ctx}) => loadEstatisticas(ctx.deps.db, ID_PLATAFORMA_EUNENEM, ctx.deps.clock())),
   receita: receitaRouter,
   despesas: despesasRouter,
 
