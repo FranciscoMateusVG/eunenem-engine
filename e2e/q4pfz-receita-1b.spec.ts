@@ -510,7 +510,21 @@ test('q4pfz: Receita 1b — KPIs, meses, semanas do mês e notas de definição'
         // ── Por mês: 12 meses, só o corrente parcial, barra empilhada ─────
         await expect(page.getByRole('heading', { name: 'Por mês' })).toBeVisible();
         const barrasMes = page.getByTestId('receita-mes');
-        await expect(barrasMes).toHaveCount(12);
+        await expect(barrasMes).toHaveCount(3);
+        const seletor = page.getByRole('combobox', { name: 'Gráficos mensais' });
+        await expect(seletor).toHaveValue('3');
+        for (const n of [3, 6, 12]) {
+          await seletor.selectOption(String(n));
+          await expect(barrasMes).toHaveCount(n);
+          await expect(barrasMes.first()).toHaveAttribute('data-mes', meses[12 - n] as string);
+          const lucroMensal = page.getByRole('region', { name: 'Lucro líquido por mês' });
+          await expect(lucroMensal.locator('[aria-label]')).toHaveCount(n);
+          if (viewport.width === 1280)
+            await page.screenshot({
+              path: testInfo.outputPath(`9jsnc-${n}-meses-desktop.png`),
+              fullPage: true,
+            });
+        }
         const somaMes = (k: number) =>
           somar(eventos, meses[k] as string, k === 11 ? amanha : (meses[k + 1] as string));
         const maxRecebidoMes = Math.max(...meses.map((_, k) => somaMes(k).recebido));

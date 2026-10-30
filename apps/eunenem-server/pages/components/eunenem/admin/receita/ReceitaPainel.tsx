@@ -1,5 +1,5 @@
 import { LucroGraficos } from "./LucroGraficos.js";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { formatBRL } from "@/lib/formatBRL";
 import {
   barraEmpilhada,
@@ -511,6 +511,7 @@ export function ReceitaNotas() {
 
 /** Painel puro: tudo o que vem de UMA resposta de `admin.receita.painel`. */
 export function ReceitaPainel({ data }: { data: ReceitaPainelData }) {
+  const [quantidadeMeses, setQuantidadeMeses] = useState(3);
   return (
     <>
       <ReceitaAvisoPainel
@@ -520,10 +521,20 @@ export function ReceitaPainel({ data }: { data: ReceitaPainelData }) {
       <ReceitaKpis kpis={data.kpis} />
       <div className="flex flex-col gap-4">
         <Legenda />
-        <ReceitaPorMes meses={data.meses} />
+        <label className="flex items-center gap-2 text-sm">Gráficos mensais
+          <select aria-label="Gráficos mensais" value={quantidadeMeses} onChange={(event) => {
+            const n = Number(event.target.value);
+            if (n === 3 || n === 6 || n === 12) setQuantidadeMeses(n);
+          }} className="rounded-lg border border-line bg-white px-3 py-2">
+            <option value={3}>Últimos 3 meses</option>
+            <option value={6}>Últimos 6 meses</option>
+            <option value={12}>Últimos 12 meses</option>
+          </select>
+        </label>
+        <ReceitaPorMes meses={data.meses.slice(-quantidadeMeses)} />
       </div>
       <ReceitaSemanasDoMes semanas={data.semanas} mes={data.kpis.mesAtual.de} />
-      {data.lucro && <LucroGraficos data={data.lucro} />}
+      {data.lucro && <LucroGraficos data={{ ...data.lucro, meses: data.lucro.meses.slice(-quantidadeMeses) }} />}
       <ReceitaNotas />
     </>
   );
