@@ -359,6 +359,7 @@ describe('xog8g — calendário e vigência com PG real', () => {
     // 62000/47 =1319 remainder7; primeiros quatro dias recebem1320 cada.
     expect(depois.semanas[0]?.manualCents).toBe(5_280);
     const lucro = await caller().admin.receita.painel();
+    expect(lucro.lucro.semanas.find((s) => s.de === '2037-10-05')).toMatchObject({ parcial: true });
     expect(
       lucro.lucro.semanas.find((s) => s.estado === 'futuro')?.metaRecorrenteCents,
     ).toBeGreaterThan(0);
