@@ -46,7 +46,7 @@ export type IniciarPagamentoInput = Omit<
 
 export type IniciarPagamentoResult = Exclude<
   PaginaOutputs["iniciarPagamentoContribuicao"],
-  { tipo: "prepared" }
+  { tipo: "prepared" | "retry_new_operation" }
 >;
 
 /** Plan 0017 — multi-item cart checkout input/output (aperture-16flf). */
@@ -57,7 +57,7 @@ export type IniciarPagamentoCarrinhoInput = Omit<
 
 export type IniciarPagamentoCarrinhoResult = Exclude<
   PaginaOutputs["iniciarPagamentoCarrinho"],
-  { tipo: "prepared" }
+  { tipo: "prepared" | "retry_new_operation" }
 >;
 
 export type ObterSucessoResult = PaginaOutputs["obterSucessoPagamento"];

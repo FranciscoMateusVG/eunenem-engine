@@ -292,6 +292,6 @@ describe('checkout operation durable state machine', () => {
         now: new Date(t0.getTime() + 2),
         leaseUntil: new Date(t0.getTime() + 1_000),
       }),
-    ).resolves.toMatchObject({ status: 'claimed', claimKind: 'reconcile' });
+    ).resolves.toMatchObject({ status: 'abandoned', operation: { state: 'outcome_unknown' } });
   });
 });

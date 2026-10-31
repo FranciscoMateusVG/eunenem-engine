@@ -100,6 +100,81 @@ const capabilityHash = 'a'.repeat(64);
 const requestHmac = 'b'.repeat(64);
 
 describe('CheckoutOperationRepositoryPostgres', () => {
+  it('abandons only uncommitted PIX failure, fences late results and preserves audit', async () => {
+    const { pagamento, snapshot, platformId } = buildFixture();
+    await seedPagamentoParents(testDb.db, pagamento);
+    const repo = new CheckoutOperationRepositoryPostgres(testDb.db);
+    const now = new Date('2026-09-09T12:00:00Z');
+    const txid = pagamento.id.replaceAll('-', '');
+    const pixSnapshot = {
+      operationId: snapshot.operationId,
+      platformId,
+      campaignId: snapshot.campaignId,
+      paymentId: snapshot.paymentId,
+      intentId: snapshot.intentId,
+      method: 'pix' as const,
+      provider: 'inter' as const,
+      items: snapshot.items,
+      totalChargedCents: snapshot.totalChargedCents,
+      totalReceiverCents: snapshot.totalReceiverCents,
+      totalSurchargeCents: snapshot.totalSurchargeCents,
+      txid,
+      idempotencyKey: txid,
+      expirationSeconds: 600,
+    };
+    await repo.prepare({
+      pagamento,
+      operationId: pagamento.id,
+      platformId,
+      campaignId: snapshot.campaignId,
+      provider: 'inter',
+      method: 'pix',
+      capabilityHash,
+      requestHmac,
+      snapshot: pixSnapshot,
+      now,
+    });
+    const args = {
+      operationId: pagamento.id,
+      capabilityHash,
+      requestHmac,
+      now,
+      leaseUntil: new Date(now.getTime() + 30000),
+    };
+    const claim = await repo.claim(args);
+    if (claim.status !== 'claimed') throw new Error('claim');
+    expect((await repo.claim(args)).status).toBe('busy');
+    await repo.completeAttempt({
+      operationId: pagamento.id,
+      attemptNo: claim.attemptNo,
+      fenceToken: claim.fenceToken,
+      outcome: 'outcome_unknown',
+      diagnostic: 'provider_call_failed',
+      providerRef: null,
+      providerExpiresAt: null,
+      now,
+    });
+    const results = await Promise.all([repo.claim(args), repo.claim(args)]);
+    expect(results.map((r) => r.status)).toEqual(['abandoned', 'abandoned']);
+    expect(
+      await repo.completeAttempt({
+        operationId: pagamento.id,
+        attemptNo: claim.attemptNo,
+        fenceToken: claim.fenceToken,
+        outcome: 'provider_succeeded',
+        diagnostic: null,
+        providerRef: txid,
+        providerExpiresAt: null,
+        now,
+      }),
+    ).toBe(false);
+    const facts = await sql<{
+      n: string;
+    }>`SELECT count(*)::text AS n FROM payment_provider_operation_attempt_facts
+      WHERE operation_id = ${pagamento.id}`.execute(testDb.db);
+    expect(facts.rows[0]?.n).toBe('2');
+  });
+
   it('persists a realistic provider-500 diagnostic without rolling back the attempt', async () => {
     const { pagamento, snapshot, platformId } = buildFixture();
     await seedPagamentoParents(testDb.db, pagamento);
@@ -362,5 +437,14 @@ describe('CheckoutOperationRepositoryPostgres', () => {
         limit: 1,
       }),
     ).resolves.toEqual([{ idPagamento: pagamento.id, txid, expiraEm: expiredAt }]);
+    const afterCommit = await operations.claim({
+      operationId: pagamento.id,
+      capabilityHash,
+      requestHmac,
+      now: reconcileAt,
+      leaseUntil: new Date(reconcileAt.getTime() + 30000),
+    });
+    expect(afterCommit.status).toBe('local_committed');
+    expect(afterCommit.operation.abandonedAt).toBeNull();
   });
 });

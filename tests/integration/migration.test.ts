@@ -484,6 +484,12 @@ describe('Migration round-trip', () => {
     //    this sequence must start at the LATEST migration and walk earlier.
     //    Adding a new migration on top REQUIRES prepending its down-step here.
 
+    expect((await getColumn(db, 'payment_provider_operations', 'abandoned_at'))?.is_nullable).toBe(
+      'YES',
+    );
+    expect((await migrator.migrateDown()).error).toBeUndefined();
+    expect(await getColumn(db, 'payment_provider_operations', 'abandoned_at')).toBeUndefined();
+
     // 070 widens diagnostic without changing stored values.
     expect(
       (await getColumn(db, 'payment_provider_operation_attempt_facts', 'diagnostic'))?.data_type,
