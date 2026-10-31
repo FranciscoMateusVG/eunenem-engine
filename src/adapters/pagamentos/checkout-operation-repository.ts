@@ -78,6 +78,7 @@ export interface CheckoutOperation {
   readonly providerRef: string | null;
   readonly providerExpiresAt: Date | null;
   readonly localCommittedAt: Date | null;
+  readonly abandonedAt?: Date | null;
   readonly createdAt: Date;
   readonly updatedAt: Date;
 }
@@ -105,7 +106,10 @@ export type ClaimCheckoutOperationResult =
       readonly attemptNo: number;
       readonly fenceToken: string;
     }
-  | { readonly status: 'busy' | 'failed' | 'expired_window'; readonly operation: CheckoutOperation }
+  | {
+      readonly status: 'busy' | 'failed' | 'expired_window' | 'abandoned';
+      readonly operation: CheckoutOperation;
+    }
   | { readonly status: 'local_committed'; readonly operation: CheckoutOperation };
 
 export interface ClaimCheckoutOperationInput {

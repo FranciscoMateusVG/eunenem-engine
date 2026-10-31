@@ -202,6 +202,7 @@ export const IniciarPagamentoCarrinhoInputSchema = z.object({
  * transformer, so Dates don't survive the wire — serialize explicitly).
  */
 export const IniciarPagamentoContribuicaoOutputSchema = z.discriminatedUnion('tipo', [
+  z.object({ tipo: z.literal('retry_new_operation'), operationId: z.string().uuid() }),
   z.object({
     tipo: z.literal('prepared'),
     operationId: z.string().uuid(),
@@ -708,6 +709,9 @@ export const paginaRouter = t.router({
           clientSecret: result.clientSecret,
         };
       } catch (err) {
+        if ((err as { _tag?: unknown })?._tag === 'CheckoutOperationAbandonedError') {
+          return { tipo: 'retry_new_operation' as const, operationId: input.operationId };
+        }
         if (err instanceof TRPCError) throw err;
         throw new TRPCError({
           code:
@@ -851,6 +855,9 @@ export const paginaRouter = t.router({
           clientSecret: result.clientSecret,
         };
       } catch (err) {
+        if ((err as { _tag?: unknown })?._tag === 'CheckoutOperationAbandonedError') {
+          return { tipo: 'retry_new_operation' as const, operationId: input.operationId };
+        }
         if (err instanceof TRPCError) throw err;
         throw new TRPCError({
           code:

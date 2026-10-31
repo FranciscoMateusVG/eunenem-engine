@@ -169,6 +169,13 @@ export class CheckoutOperationConflictError extends Error {
   }
 }
 
+export class CheckoutOperationAbandonedError extends Error {
+  readonly _tag = 'CheckoutOperationAbandonedError';
+  constructor() {
+    super('checkout_operation_abandoned');
+  }
+}
+
 export class CheckoutOperationPendingError extends Error {
   readonly _tag = 'CheckoutOperationPendingError';
   constructor() {
@@ -560,6 +567,7 @@ async function runPagamentoCarrinho(
         if (claimed.status === 'busy' || claimed.status === 'expired_window') {
           throw new CheckoutOperationPendingError();
         }
+        if (claimed.status === 'abandoned') throw new CheckoutOperationAbandonedError();
         if (claimed.status === 'failed') throw new CheckoutOperationConflictError();
 
         if (claimed.status === 'local_committed') {
@@ -614,7 +622,7 @@ async function runPagamentoCarrinho(
             txid: provider === 'inter' ? parsed.idPagamento.replaceAll('-', '') : null,
           };
           logger.info('checkout.provider_call_failed', diagnostic);
-          await checkoutOperationRepository.completeAttempt({
+          const failureRecorded = await checkoutOperationRepository.completeAttempt({
             operationId: parsed.idPagamento,
             attemptNo: claimed.attemptNo,
             fenceToken: claimed.fenceToken,
@@ -624,6 +632,16 @@ async function runPagamentoCarrinho(
             providerExpiresAt: null,
             now: clock(),
           });
+          if (provider === 'inter' && failureRecorded) {
+            const afterFailure = await checkoutOperationRepository.claim({
+              operationId: parsed.idPagamento,
+              capabilityHash,
+              requestHmac,
+              now: clock(),
+              leaseUntil: new Date(clock().getTime() + 30000),
+            });
+            if (afterFailure.status === 'abandoned') throw new CheckoutOperationAbandonedError();
+          }
           throw new CheckoutOperationPendingError();
         }
 

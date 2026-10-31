@@ -92,8 +92,9 @@ export async function checkoutRequestStorageKey(
 }
 
 interface PreparedCheckoutResult {
-  readonly tipo: "prepared";
+  readonly tipo: "prepared" | "retry_new_operation";
 }
+const activeRequests = new WeakMap<CheckoutOperationStorage, Map<string, Promise<unknown>>>();
 
 /**
  * Exact two-request orchestration used by the public checkout hooks.
@@ -116,21 +117,38 @@ export async function executeRecoverableCheckout<
   readonly storage?: CheckoutOperationStorage;
   readonly createId?: () => string;
 }): Promise<Exclude<TResponse, PreparedCheckoutResult>> {
-  const storageKey = await checkoutRequestStorageKey(input.storageKey, input.requestInput, input.storage);
-  const operationId = getOrCreatePendingCheckoutOperation(
-    storageKey,
-    input.storage,
-    input.createId,
-  );
-  const requestInput = { ...input.requestInput, operationId };
-  const prepared = await input.request(requestInput);
-  if (prepared.tipo !== "prepared") {
-    clearPendingCheckoutOperation(storageKey, operationId, input.storage);
-    return prepared as Exclude<TResponse, PreparedCheckoutResult>;
-  }
-
-  const result = await input.request(requestInput);
-  if (result.tipo === "prepared") throw new Error("Checkout não confirmado");
-  clearPendingCheckoutOperation(storageKey, operationId, input.storage);
-  return result as Exclude<TResponse, PreparedCheckoutResult>;
+  const storage = input.storage ?? browserSessionStorage();
+  if (!storage) throw new CheckoutOperationStorageUnavailableError();
+  const storageKey = await checkoutRequestStorageKey(input.storageKey, input.requestInput, storage);
+  let active = activeRequests.get(storage);
+  if (!active) { active = new Map(); activeRequests.set(storage, active); }
+  const running = active.get(storageKey);
+  if (running) return running as Promise<Exclude<TResponse, PreparedCheckoutResult>>;
+  const perform = async (): Promise<Exclude<TResponse, PreparedCheckoutResult>> => {
+    const retryAt = Number(storage.getItem(`${storageKey}:retryAt`) ?? 0);
+    if (retryAt > Date.now()) throw new Error("Aguarde alguns segundos antes de tentar novamente.");
+    const operationId = getOrCreatePendingCheckoutOperation(storageKey, storage, input.createId);
+    const requestInput = { ...input.requestInput, operationId };
+    let result = await input.request(requestInput);
+    if (result.tipo === "prepared") result = await input.request(requestInput);
+    if (result.tipo === "prepared") throw new Error("Checkout não confirmado");
+    if (result.tipo === "retry_new_operation") {
+      // This response is issued only after a server-side, locked abandonment.
+      // Network errors never clear an ambiguous identity. No automatic reissue.
+      const failures = Math.min(4, Number(storage.getItem(`${storageKey}:failures`) ?? 0) + 1);
+      storage.setItem(`${storageKey}:failures`, String(failures));
+      storage.setItem(`${storageKey}:retryAt`, String(Date.now() + Math.min(30000, 5000 * 2 ** (failures - 1))));
+      clearPendingCheckoutOperation(storageKey, operationId, storage);
+      throw new Error("Não foi possível gerar o PIX. Aguarde alguns segundos e tente novamente.");
+    }
+    storage.removeItem(`${storageKey}:failures`);
+    storage.removeItem(`${storageKey}:retryAt`);
+    // A delivered QR remains bound to this identity, even after rerender/reload.
+    if (result.tipo !== "pix_qr") clearPendingCheckoutOperation(storageKey, operationId, storage);
+    return result as Exclude<TResponse, PreparedCheckoutResult>;
+  };
+  const promise = perform();
+  active.set(storageKey, promise);
+  try { return await promise; }
+  finally { if (active.get(storageKey) === promise) active.delete(storageKey); }
 }
