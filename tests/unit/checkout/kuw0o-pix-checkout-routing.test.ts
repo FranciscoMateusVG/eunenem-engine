@@ -4,6 +4,7 @@ import { ContribuicaoRepositoryMemory } from '../../../src/adapters/arrecadacao/
 import { CheckoutOperationRepositoryMemory } from '../../../src/adapters/pagamentos/checkout-operation-repository.memory.js';
 import { PagamentoEventPublisherMemory } from '../../../src/adapters/pagamentos/event-publisher.memory.js';
 import { PixCobrancaProviderFake } from '../../../src/adapters/pagamentos/pix-cobranca-provider.fake.js';
+import { PixCobrancaProviderInter } from '../../../src/adapters/pagamentos/pix-cobranca-provider.inter.js';
 import { PagamentoProviderFake } from '../../../src/adapters/pagamentos/provider.fake.js';
 import { PagamentoRepositoryMemory } from '../../../src/adapters/pagamentos/repository.memory.js';
 import { ID_PLATAFORMA_EUNENEM } from '../../../src/adapters/plataforma/repository.memory.js';
@@ -210,6 +211,79 @@ describe('iniciarPagamentoCarrinho — PIX-cobrança routing (aperture-kuw0o)', 
     expect(
       (await deps.pagamentoRepository.findById(idPagamento as IdPagamento))?.intencao.externalRef,
     ).toBeNull();
+  });
+
+  it('3kt7u: records HTTP 500 diagnostics from real Inter adapter without provider secrets or PII', async () => {
+    const deps = makeDeps('inter');
+    const seeded = await seedCampanhaComContribuicao(deps, 'Provider diagnostics');
+    const logger = vi.spyOn(deps.observability.logger, 'info');
+    const real = new PixCobrancaProviderInter(
+      {
+        baseUrl: 'https://inter.invalid',
+        clientId: 'synthetic-client',
+        clientSecret: 'SECRET_CANARY',
+        scope: 'cob.write',
+        certPem: '',
+        keyPem: '',
+        pixKey: 'PIX_KEY_CANARY',
+      },
+      async (_method, path) =>
+        path.includes('oauth')
+          ? {
+              statusCode: 200,
+              body: JSON.stringify({ access_token: 'TOKEN_CANARY', expires_in: 3600 }),
+            }
+          : {
+              statusCode: 500,
+              body: JSON.stringify({
+                title: 'Internal Server Error',
+                detail: 'Service temporarily unavailable',
+                token: 'TOKEN_CANARY',
+                pixKey: 'PIX_KEY_CANARY',
+                payer: 'PRIVATE_PERSON_CANARY',
+              }),
+            },
+    );
+    const actualDeps = { ...deps, pixCobrancaProvider: real };
+    const input = {
+      ...baseInput(),
+      idCampanha: seeded.idCampanha,
+      metodo: 'pix' as const,
+      itens: [{ idContribuicao: seeded.idContribuicao, quantidade: 1 }],
+      idsItens: [randomUUID()],
+      contribuinte,
+    };
+    await expect(prepareAndStart(actualDeps as Deps, input)).rejects.toBeInstanceOf(
+      CheckoutOperationPendingError,
+    );
+    const facts = deps.checkoutOperationRepository.listFactsForTests(input.idPagamento);
+    const diagnostic = facts.find((f) => f.diagnostic)?.diagnostic;
+    expect(diagnostic).toBeTruthy();
+    const parsed = JSON.parse(diagnostic ?? '{}');
+    expect(parsed).toMatchObject({
+      code: 'provider_call_failed',
+      provider: 'inter',
+      endpoint: '/pix/v2/cob/:txid',
+      httpStatus: 500,
+      title: 'Internal Server Error',
+      detail: 'Service temporarily unavailable',
+      operationId: input.idPagamento,
+      txid: input.idPagamento.replaceAll('-', ''),
+    });
+    expect(parsed.latencyMs).toBeGreaterThanOrEqual(0);
+    expect(logger).toHaveBeenCalledWith(
+      'checkout.provider_call_failed',
+      expect.objectContaining({ httpStatus: 500, operationId: input.idPagamento }),
+    );
+    const all = JSON.stringify([facts, logger.mock.calls]);
+    for (const secret of [
+      'SECRET_CANARY',
+      'TOKEN_CANARY',
+      'PIX_KEY_CANARY',
+      'PRIVATE_PERSON_CANARY',
+    ])
+      expect(all).not.toContain(secret);
+    logger.mockRestore();
   });
 
   it('persists only a finite provider failure category', async () => {
