@@ -100,6 +100,63 @@ const capabilityHash = 'a'.repeat(64);
 const requestHmac = 'b'.repeat(64);
 
 describe('CheckoutOperationRepositoryPostgres', () => {
+  it('persists a realistic provider-500 diagnostic without rolling back the attempt', async () => {
+    const { pagamento, snapshot, platformId } = buildFixture();
+    await seedPagamentoParents(testDb.db, pagamento);
+    const repo = new CheckoutOperationRepositoryPostgres(testDb.db);
+    const now = new Date('2026-09-09T12:00:00Z');
+    await repo.prepare({
+      pagamento,
+      operationId: pagamento.id,
+      platformId,
+      campaignId: pagamento.intencao.idCampanha,
+      provider: 'stripe',
+      method: pagamento.intencao.metodo,
+      capabilityHash,
+      requestHmac,
+      snapshot,
+      now,
+    });
+    const claim = await repo.claim({
+      operationId: pagamento.id,
+      capabilityHash,
+      requestHmac,
+      now,
+      leaseUntil: new Date(now.getTime() + 30000),
+    });
+    if (claim.status !== 'claimed') throw new Error('claim');
+    const diagnostic = JSON.stringify({
+      code: 'provider_call_failed',
+      provider: 'stripe',
+      endpoint: '/v1/checkout/sessions',
+      httpStatus: 500,
+      title: 'Internal Server Error',
+      detail: 'Service temporarily unavailable',
+      latencyMs: 1250,
+      operationId: pagamento.id,
+      txid: null,
+    });
+    expect(diagnostic.length).toBeGreaterThan(250);
+    await expect(
+      repo.completeAttempt({
+        operationId: pagamento.id,
+        attemptNo: claim.attemptNo,
+        fenceToken: claim.fenceToken,
+        outcome: 'outcome_unknown',
+        diagnostic,
+        providerRef: null,
+        providerExpiresAt: null,
+        now,
+      }),
+    ).resolves.toBe(true);
+    const facts = await sql<{ diagnostic: string; outcome: string }>`
+      SELECT diagnostic, outcome FROM payment_provider_operation_attempt_facts
+      WHERE operation_id = ${pagamento.id} AND diagnostic IS NOT NULL
+    `.execute(testDb.db);
+    expect(facts.rows).toEqual([{ diagnostic, outcome: 'outcome_unknown' }]);
+    expect(await repo.findById(pagamento.id)).toMatchObject({ state: 'outcome_unknown' });
+  });
+
   it('persists the payment reservation and a claim fact before provider I/O', async () => {
     const { pagamento, snapshot, platformId } = buildFixture();
     await seedPagamentoParents(testDb.db, pagamento);

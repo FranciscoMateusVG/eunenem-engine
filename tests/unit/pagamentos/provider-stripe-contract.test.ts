@@ -1,6 +1,7 @@
 import type Stripe from 'stripe';
 import { describe, expect, it, vi } from 'vitest';
 import { SURCHARGE_LINE_ITEM_NAME } from '../../../src/adapters/pagamentos/card-surcharge.js';
+import { readCheckoutProviderDiagnostic } from '../../../src/adapters/pagamentos/checkout-provider-diagnostic.js';
 import type { CriarSessaoCheckoutInput } from '../../../src/adapters/pagamentos/checkout-session-provider.js';
 import { PagamentoProviderStripe } from '../../../src/adapters/pagamentos/provider.stripe.js';
 
@@ -57,6 +58,30 @@ function callArgs(create: ReturnType<typeof vi.fn>) {
 }
 
 describe('PagamentoProviderStripe.criarSessaoCheckout — Stripe handoff contract', () => {
+  it('3kt7u: preserves sanitized HTTP500 metadata without exposing raw Stripe errors', async () => {
+    const { stripe, create } = mockStripe();
+    create.mockRejectedValueOnce({
+      statusCode: 500,
+      raw: {
+        type: 'Internal Server Error',
+        message: 'Service temporarily unavailable',
+        secret: 'SECRET_CANARY',
+      },
+    });
+    const provider = new PagamentoProviderStripe({ stripe });
+    const error = await provider.criarSessaoCheckout(baseInput()).catch((e) => e);
+    expect(error.message).toBe('checkout_provider_unavailable');
+    expect(readCheckoutProviderDiagnostic(error)).toEqual({
+      endpoint: '/v1/checkout/sessions',
+      httpStatus: 500,
+      title: 'Internal Server Error',
+      detail: 'Service temporarily unavailable',
+    });
+    expect(JSON.stringify([error, readCheckoutProviderDiagnostic(error)])).not.toContain(
+      'SECRET_CANARY',
+    );
+  });
+
   it('always creates an embedded payment session and returns the session ids', async () => {
     const { stripe, create } = mockStripe();
     const provider = new PagamentoProviderStripe({ stripe, clock: () => new Date(0) });
