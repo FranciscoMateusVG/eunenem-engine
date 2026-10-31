@@ -397,6 +397,7 @@ export interface PaymentProviderOperationAttemptFacts {
 }
 
 export interface PaymentProviderOperations {
+  abandoned_at: Timestamp | null;
   attempt_count: Generated<number>;
   campaign_id: string;
   capability_hash: string;

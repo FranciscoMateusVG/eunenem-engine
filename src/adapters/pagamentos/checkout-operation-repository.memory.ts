@@ -81,6 +81,18 @@ export class CheckoutOperationRepositoryMemory implements CheckoutOperationRepos
       throw new Error('checkout operation authorization mismatch');
     }
     if (operation.state === 'local_committed') return { status: 'local_committed', operation };
+    if (operation.abandonedAt) return { status: 'abandoned', operation };
+    if (
+      operation.provider === 'inter' &&
+      operation.state === 'outcome_unknown' &&
+      !operation.localCommittedAt &&
+      !operation.providerSucceededAt &&
+      !operation.providerRef
+    ) {
+      const abandoned = { ...operation, abandonedAt: input.now, updatedAt: input.now };
+      this.operations.set(input.operationId, abandoned);
+      return { status: 'abandoned', operation: abandoned };
+    }
     if (operation.state === 'failed') return { status: 'failed', operation };
     if (
       operation.state === 'in_flight' &&

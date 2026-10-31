@@ -17,6 +17,7 @@ import { adicionarOpcaoContribuicao } from '../../../src/use-cases/arrecadacao/a
 import { criarCampanha } from '../../../src/use-cases/arrecadacao/criar-campanha.js';
 import { criarContribuicao } from '../../../src/use-cases/arrecadacao/criar-contribuicao.js';
 import {
+  CheckoutOperationAbandonedError,
   CheckoutOperationPendingError,
   type CobrancaPixProviderKind,
   iniciarPagamentoCarrinho,
@@ -254,7 +255,7 @@ describe('iniciarPagamentoCarrinho — PIX-cobrança routing (aperture-kuw0o)', 
       contribuinte,
     };
     await expect(prepareAndStart(actualDeps as Deps, input)).rejects.toBeInstanceOf(
-      CheckoutOperationPendingError,
+      CheckoutOperationAbandonedError,
     );
     const facts = deps.checkoutOperationRepository.listFactsForTests(input.idPagamento);
     const diagnostic = facts.find((f) => f.diagnostic)?.diagnostic;

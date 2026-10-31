@@ -36,6 +36,7 @@ interface OperationRow {
   provider_ref: string | null;
   provider_expires_at: Date | string | null;
   local_committed_at: Date | string | null;
+  abandoned_at: Date | string | null;
   created_at: Date | string;
   updated_at: Date | string;
 }
@@ -64,6 +65,7 @@ function hydrate(row: OperationRow): CheckoutOperation {
     providerRef: row.provider_ref,
     providerExpiresAt: asDate(row.provider_expires_at),
     localCommittedAt: asDate(row.local_committed_at),
+    abandonedAt: asDate(row.abandoned_at),
     createdAt: asDate(row.created_at) as Date,
     updatedAt: asDate(row.updated_at) as Date,
   };
@@ -145,6 +147,18 @@ export class CheckoutOperationRepositoryPostgres implements CheckoutOperationRep
       const operation = hydrate(row);
 
       if (operation.state === 'local_committed') return { status: 'local_committed', operation };
+      if (operation.abandonedAt) return { status: 'abandoned', operation };
+      if (
+        operation.provider === 'inter' &&
+        operation.state === 'outcome_unknown' &&
+        !operation.localCommittedAt &&
+        !operation.providerSucceededAt &&
+        !operation.providerRef
+      ) {
+        await sql`UPDATE payment_provider_operations SET abandoned_at = ${input.now}, updated_at = ${input.now}
+          WHERE operation_id = ${input.operationId}::uuid`.execute(trx);
+        return { status: 'abandoned', operation: { ...operation, abandonedAt: input.now } };
+      }
       if (operation.state === 'failed') return { status: 'failed', operation };
       if (
         operation.state === 'in_flight' &&

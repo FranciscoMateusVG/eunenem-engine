@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   CheckoutOperationStorageUnavailableError,
   checkoutRequestStorageKey,
@@ -124,4 +124,37 @@ it('concurrent identical failures and reload keep the same ID; method switch kee
   await expect(run('pix')).rejects.toThrow('response lost');
   expect(new Set(sent.filter((v) => v.metodo === 'pix').map((v) => v.operationId)).size).toBe(1);
   expect(sent[2]?.operationId).not.toBe(sent[0]?.operationId);
+});
+
+it('k0tg1: explicit abandoned reply rotates only next action; double click shares work', async () => {
+  const storage = new StorageMemory();
+  const createId = vi
+    .fn()
+    .mockReturnValueOnce('00000000-0000-4000-8000-000000000011')
+    .mockReturnValueOnce('00000000-0000-4000-8000-000000000012');
+  let fail = true;
+  const ids: string[] = [];
+  const request = vi.fn(async (input: { operationId: string }) => {
+    ids.push(input.operationId);
+    return fail
+      ? { tipo: 'retry_new_operation', operationId: input.operationId }
+      : { tipo: 'pix_qr' };
+  });
+  const args = { storageKey: 'k0tg1', requestInput: {}, storage, createId, request };
+  const result = await Promise.allSettled([
+    executeRecoverableCheckout(args),
+    executeRecoverableCheckout(args),
+  ]);
+  expect(result.map((r) => r.status)).toEqual(['rejected', 'rejected']);
+  expect(request).toHaveBeenCalledTimes(1);
+  await expect(executeRecoverableCheckout(args)).rejects.toThrow('Aguarde');
+  expect(request).toHaveBeenCalledTimes(1);
+  fail = false;
+  vi.spyOn(Date, 'now').mockReturnValue(Date.now() + 31000);
+  try {
+    await expect(executeRecoverableCheckout(args)).resolves.toEqual({ tipo: 'pix_qr' });
+  } finally {
+    vi.restoreAllMocks();
+  }
+  expect(ids[0]).not.toBe(ids[1]);
 });

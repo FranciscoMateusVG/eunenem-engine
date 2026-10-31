@@ -1313,7 +1313,7 @@ describe('g1wl4 — per-hop idCampanha, THROUGH the router (PR #344 + aperture-4
 });
 
 describe('iytxa — public checkout capability slots', () => {
-  it('jp71l: failed PIX → card uses another operation; retry PIX retains its identity', async () => {
+  it('k0tg1: failed PIX → card works; next PIX action recovers with a new txid', async () => {
     const rig = await buildRig();
     const pix = new PixCobrancaProviderFake({ criarCobrancaError: new Error('provider down') });
     const pixCalls = vi.spyOn(pix, 'criarCobranca');
@@ -1375,7 +1375,24 @@ describe('iytxa — public checkout capability slots', () => {
     expect(sent.find((v) => v.metodo === 'credit_card')?.operationId).not.toBe(pixId);
     await expect(execute(input)).rejects.toThrow();
     expect(sent.filter((v) => v.metodo === 'pix').every((v) => v.operationId === pixId)).toBe(true);
-    expect(new Set(pixCalls.mock.calls.map(([call]) => call.idempotencyKey)).size).toBe(1);
+    expect(new Set(pixCalls.mock.calls.map(([call]) => call.idPagamento)).size).toBe(1);
+    expect((await rig.deps.checkoutOperationRepository.findById(pixId))?.abandonedAt).toBeTruthy();
+    const recoveredProvider = new PixCobrancaProviderFake();
+    const newCalls = vi.spyOn(recoveredProvider, 'criarCobranca');
+    Object.assign(rig.deps, { pixCobrancaProvider: recoveredProvider });
+    vi.spyOn(Date, 'now').mockReturnValue(Date.now() + 31000);
+    try {
+      const results = await Promise.all([execute(input), execute(input)]);
+      expect(results.map((r) => r.tipo)).toEqual(['pix_qr', 'pix_qr']);
+      expect(newCalls).toHaveBeenCalledOnce();
+      expect(newCalls.mock.calls[0]?.[0].idPagamento).not.toBe(
+        pixCalls.mock.calls[0]?.[0].idPagamento,
+      );
+      await expect(execute(input)).resolves.toMatchObject({ tipo: 'pix_qr' });
+      expect(newCalls).toHaveBeenCalledOnce();
+    } finally {
+      vi.restoreAllMocks();
+    }
   });
 
   it('reuses one browser operation and provider key after an accepted response is lost', async () => {
