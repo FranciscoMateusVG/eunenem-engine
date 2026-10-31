@@ -48,6 +48,8 @@ export const E2E_SPEC_SAFETY = [
   { file: 'd3tlf-convidados-save-deadend.spec.ts', safety: 'non-payment' },
   { file: 'fblrt-fix-wave.spec.ts', safety: 'non-payment' },
   { file: 'g1wl4-islegacy-routing.spec.ts', safety: 'non-payment' },
+  // Isolated ephemeral DB only; real auth with captured mail, no external send.
+  { file: 'guvaw-signup-attribution.spec.ts', safety: 'non-payment' },
   { file: 'gf733-cart-no-persist-regression.spec.ts', safety: 'non-payment' },
   { file: 'gf733-onboarding-no-silent-loop-regression.spec.ts', safety: 'non-payment' },
   {

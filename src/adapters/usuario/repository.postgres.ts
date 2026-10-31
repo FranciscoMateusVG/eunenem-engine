@@ -140,6 +140,19 @@ export class UsuarioRepositoryPostgres implements UsuarioRepository {
               tutorial_completado_em: usuario.tutorialCompletadoEm,
               onboarding_concluido_em: usuario.onboardingConcluidoEm,
               desativado_em: usuario.desativadoEm ?? null,
+              signup_utm_source: usuario.signupAttribution?.utm_source ?? null,
+              signup_utm_medium: usuario.signupAttribution?.utm_medium ?? null,
+              signup_utm_campaign: usuario.signupAttribution?.utm_campaign ?? null,
+              signup_utm_term: usuario.signupAttribution?.utm_term ?? null,
+              signup_utm_content: usuario.signupAttribution?.utm_content ?? null,
+              signup_gclid: usuario.signupAttribution?.gclid ?? null,
+              signup_gbraid: usuario.signupAttribution?.gbraid ?? null,
+              signup_wbraid: usuario.signupAttribution?.wbraid ?? null,
+              signup_referrer: usuario.signupAttribution?.referrer ?? null,
+              signup_landing_path: usuario.signupAttribution?.landing_path ?? null,
+              signup_captured_at: usuario.signupAttribution
+                ? new Date(usuario.signupAttribution.captured_at)
+                : null,
             })
             .execute();
 

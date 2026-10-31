@@ -1,3 +1,4 @@
+import { parseSignupAttribution, SIGNUP_ATTRIBUTION_COOKIE } from '../../../../src/domain/usuario/signup-attribution.js';
 import {
   derivarNomeExibicaoFallback,
   ID_PLATAFORMA_EUNENEM,
@@ -222,6 +223,7 @@ async function autoProvisionarUsuarioOrfao(
   deps: ServerDeps,
   idUsuario: string,
   principal: NonNullable<SessaoResolvida['principal']>,
+  headers: Headers,
 ): Promise<Usuario> {
   try {
     const resultado = await provisionarContaUsuarioDominio(
@@ -241,6 +243,7 @@ async function autoProvisionarUsuarioOrfao(
       },
       {
         idUsuario,
+        signupAttribution: readSignupAttribution(headers) ?? undefined,
         idPlataforma: principal.idPlataforma,
         email: principal.email,
         nome: principal.nome,
@@ -335,7 +338,7 @@ export async function resolverUsuarioAutenticado(
 
   let usuario: Usuario;
   try {
-    usuario = await autoProvisionarUsuarioOrfao(deps, sessao.idUsuario, sessao.principal);
+    usuario = await autoProvisionarUsuarioOrfao(deps, sessao.idUsuario, sessao.principal, headers);
   } catch (err) {
     deps.observability.logger.info('usuario.sessao.auto_provisionamento_falhou', {
       idUsuario: sessao.idUsuario,
@@ -367,4 +370,11 @@ export async function resolverUsuarioAutenticadoOuNull(
     if (err instanceof SessaoNaoAutenticadaError) return null;
     throw err;
   }
+}
+
+function readSignupAttribution(headers: Headers) {
+  try {
+    const raw = readSessionCookie(headers, SIGNUP_ATTRIBUTION_COOKIE);
+    return parseSignupAttribution(raw);
+  } catch { return null; }
 }
