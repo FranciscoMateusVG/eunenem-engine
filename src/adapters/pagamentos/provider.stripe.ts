@@ -14,6 +14,7 @@ import {
 } from '../../domain/pagamentos/value-objects/ids.js';
 import type { MetodoPagamento } from '../../domain/pagamentos/value-objects/metodo-pagamento.js';
 import { SURCHARGE_LINE_ITEM_NAME } from './card-surcharge.js';
+import { attachCheckoutProviderDiagnostic } from './checkout-provider-diagnostic.js';
 import type {
   CheckoutSessionProvider,
   CriarSessaoCheckoutInput,
@@ -258,9 +259,15 @@ export class PagamentoProviderStripe implements PagamentoProvider, CheckoutSessi
           clientSecret: session.client_secret,
           externalRef: session.id,
         };
-      } catch {
+      } catch (error: unknown) {
         span.setStatus({ code: SpanStatusCode.ERROR });
-        throw new Error('checkout_provider_unavailable');
+        const fields = error && typeof error === 'object' ? (error as Record<string, unknown>) : {};
+        throw attachCheckoutProviderDiagnostic(
+          new Error('checkout_provider_unavailable'),
+          '/v1/checkout/sessions',
+          fields.statusCode,
+          fields.raw ?? fields,
+        );
       } finally {
         span.end();
       }

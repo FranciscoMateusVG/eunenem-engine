@@ -8,6 +8,7 @@ import type {
   CheckoutOperationRepository,
   CheckoutOperationSnapshot,
 } from '../../adapters/pagamentos/checkout-operation-repository.js';
+import { readCheckoutProviderDiagnostic } from '../../adapters/pagamentos/checkout-provider-diagnostic.js';
 import type {
   CheckoutSessionProvider,
   CriarSessaoCheckoutInput,
@@ -581,6 +582,7 @@ async function runPagamentoCarrinho(
         if (claimed.status !== 'claimed') throw new CheckoutOperationPendingError();
 
         let material: ProviderMountMaterial;
+        const providerStartedAt = performance.now();
         try {
           material = await obtainProviderMaterial(
             claimed.claimKind,
@@ -602,13 +604,22 @@ async function runPagamentoCarrinho(
               redirectOnCompletion: parsed.redirectOnCompletion ?? 'always',
             },
           );
-        } catch {
+        } catch (error: unknown) {
+          const diagnostic = {
+            code: 'provider_call_failed',
+            provider,
+            ...readCheckoutProviderDiagnostic(error),
+            latencyMs: Math.max(0, Math.round(performance.now() - providerStartedAt)),
+            operationId: parsed.idPagamento,
+            txid: provider === 'inter' ? parsed.idPagamento.replaceAll('-', '') : null,
+          };
+          logger.info('checkout.provider_call_failed', diagnostic);
           await checkoutOperationRepository.completeAttempt({
             operationId: parsed.idPagamento,
             attemptNo: claimed.attemptNo,
             fenceToken: claimed.fenceToken,
             outcome: 'outcome_unknown',
-            diagnostic: 'provider_call_failed',
+            diagnostic: JSON.stringify(diagnostic),
             providerRef: null,
             providerExpiresAt: null,
             now: clock(),

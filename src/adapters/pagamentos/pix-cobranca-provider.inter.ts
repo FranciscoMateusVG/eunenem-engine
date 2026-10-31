@@ -4,6 +4,7 @@ import {
   IdIntencaoPagamentoSchema,
   IdPagamentoSchema,
 } from '../../domain/pagamentos/value-objects/ids.js';
+import { attachCheckoutProviderDiagnostic } from './checkout-provider-diagnostic.js';
 import {
   extractInterErrorCode,
   InterHttpClient,
@@ -123,14 +124,23 @@ export class PixCobrancaProviderInter implements PixCobrancaProvider {
       } catch {
         // PUT + deterministic txid converges on retry, even when the first
         // response was lost after Inter received the request.
-        throw new PixCobrancaTransitoriaError('criarCobranca: falha de transporte');
+        throw attachCheckoutProviderDiagnostic(
+          new PixCobrancaTransitoriaError('criarCobranca: falha de transporte'),
+          '/pix/v2/cob/:txid',
+          null,
+        );
       }
       span.setAttribute('cobranca.http_status', response.statusCode);
 
       if (!isSuccess(response.statusCode)) {
         const code = extractInterErrorCode(response);
         span.setAttribute('cobranca.inter_error_code', code);
-        throw new PixCobrancaTransitoriaError(`criarCobranca: ${code}`);
+        throw attachCheckoutProviderDiagnostic(
+          new PixCobrancaTransitoriaError(`criarCobranca: ${code}`),
+          '/pix/v2/cob/:txid',
+          response.statusCode,
+          parseJson<unknown>(response.body),
+        );
       }
 
       const parsed = parseJson<InterCobrancaResponse>(response.body);
@@ -160,14 +170,23 @@ export class PixCobrancaProviderInter implements PixCobrancaProvider {
           this.http.jsonHeaders(token),
         );
       } catch {
-        throw new PixCobrancaTransitoriaError('consultarCobranca: falha de transporte');
+        throw attachCheckoutProviderDiagnostic(
+          new PixCobrancaTransitoriaError('consultarCobranca: falha de transporte'),
+          '/pix/v2/cob/:txid',
+          null,
+        );
       }
       span.setAttribute('cobranca.http_status', response.statusCode);
 
       if (!isSuccess(response.statusCode)) {
         const code = extractInterErrorCode(response);
         span.setAttribute('cobranca.inter_error_code', code);
-        throw new PixCobrancaTransitoriaError(`consultarCobranca: ${code}`);
+        throw attachCheckoutProviderDiagnostic(
+          new PixCobrancaTransitoriaError(`consultarCobranca: ${code}`),
+          '/pix/v2/cob/:txid',
+          response.statusCode,
+          parseJson<unknown>(response.body),
+        );
       }
 
       const parsed = parseJson<InterCobrancaResponse>(response.body);
