@@ -1071,6 +1071,7 @@ export const paginaRouter = t.router({
     .output(
       z.object({
         status: z.enum(['pendente', 'confirmado', 'expirado', 'rejeitado']),
+        retryableError: z.boolean().optional(),
       }),
     )
     .query(async ({ ctx, input }) => {
@@ -1096,8 +1097,8 @@ export const paginaRouter = t.router({
 
       // Pending in our DB + a configured PIX provider → authoritative
       // consult for display. Transitory provider errors degrade to
-      // 'pendente' (the poll retries in 2s; a public query must not
-      // surface transport noise).
+      // 'pendente' with a safe backoff signal; a public query must not
+      // surface transport details.
       if (ctx.deps.cobrancaPixProviderKind !== 'stripe') {
         try {
           const cobranca = await ctx.deps.pixCobrancaProvider.consultarCobranca(input.txid);
@@ -1108,7 +1109,7 @@ export const paginaRouter = t.router({
             return { status: 'expirado' as const };
           }
         } catch {
-          // transient/ambiguous consult failure — stay 'pendente'
+          return { status: 'pendente' as const, retryableError: true }; // no provider details
         }
       }
 

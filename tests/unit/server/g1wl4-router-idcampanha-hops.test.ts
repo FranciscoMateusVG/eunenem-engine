@@ -1390,6 +1390,14 @@ describe('iytxa — public checkout capability slots', () => {
       );
       await expect(execute(input)).resolves.toMatchObject({ tipo: 'pix_qr' });
       expect(newCalls).toHaveBeenCalledOnce();
+      const qr = results[0];
+      if (qr?.tipo !== 'pix_qr') throw new Error('expected QR');
+      vi.spyOn(recoveredProvider, 'consultarCobranca').mockRejectedValue(
+        new Error('SECRET_PROVIDER_BODY'),
+      );
+      await expect(
+        rig.anonCaller.pagina.obterStatusPix({ slug: user.slug, txid: qr.txid }),
+      ).resolves.toEqual({ status: 'pendente', retryableError: true });
     } finally {
       vi.restoreAllMocks();
     }
