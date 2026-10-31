@@ -187,9 +187,21 @@ também é enviado ao Mixpanel — nenhuma mudança por call-site foi necessári
 | Logout | — | `resetAnalyticsIdentity()` em `useSignOut` ([pages/lib/auth.ts](pages/lib/auth.ts)) — só no `onSuccess` do signOut |
 
 `identifyWithUtm` chama `mixpanel.identify(idConta)` e, em seguida,
-`people.set_once({ utm_source })` — o `utm_source` de primeiro toque é capturado
-em [LandingPage.tsx](pages/LandingPage.tsx) (`URLSearchParams` → `localStorage`
-`eunenem:utm_source`, só em `/`). Só `utm_source` é capturado.
+`people.set_once` com `utm_source/medium/campaign/term/content`, `gclid`,
+`gbraid`, `wbraid`, `referrer`, `landing_path` e `captured_at`.
+A captura ocorre antes da hidratação em qualquer página de entrada (inclusive
+visita direta sem UTM), uma única vez por browser. LocalStorage
+`eunenem:first_touch:v1` + cookie host-only `eunenem_first_touch` (Lax, Secure
+em HTTPS, 1 ano) preservam o primeiro toque nas navegações e retornos de auth.
+O cookie transporta os dados para o provisionamento da conta (`usuarios.signup_*`),
+no mesmo INSERT transacional; logins posteriores nunca atualizam essas colunas.
+Migration 069 aditiva/nullable, sem backfill. O antigo `eunenem:utm_source`
+não é importado, pois era sobrescrito e não prova primeiro toque.
+Referrer não inclui credenciais/query/hash; landing inclui só pathname. Campos
+limitados em tamanho (incluindo orçamento URL-encoded do cookie), sem logs.
+É atribuição declarada pelo browser, não prova de identidade ou conversão Ads.
+Cookies/storage bloqueados, apagados ou outro dispositivo podem deixar a origem
+indisponível; não reconstruímos a origem com o referrer do login. Sem mudança em GA4/GTM.
 
 Lacunas conhecidas (não tratadas nesta rodada): sessão por cookie válida com
 localStorage limpo nunca re-identifica; falha de `signOut` deixa a identidade

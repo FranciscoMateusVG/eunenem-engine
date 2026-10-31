@@ -679,6 +679,17 @@ export interface Usuarios {
   id_plataforma: string;
   nome_exibicao: string;
   onboarding_concluido_em: Timestamp | null;
+  signup_captured_at: Timestamp | null;
+  signup_gbraid: string | null;
+  signup_gclid: string | null;
+  signup_landing_path: string | null;
+  signup_referrer: string | null;
+  signup_utm_campaign: string | null;
+  signup_utm_content: string | null;
+  signup_utm_medium: string | null;
+  signup_utm_source: string | null;
+  signup_utm_term: string | null;
+  signup_wbraid: string | null;
   slug: string;
   tutorial_completado_em: Timestamp | null;
 }

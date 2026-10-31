@@ -17,6 +17,7 @@ import type {
   IdOpcaoContribuicao,
 } from '../../domain/arrecadacao/value-objects/ids.js';
 import type { Conta, Usuario } from '../../domain/usuario/entities/usuario.js';
+import { SignupAttributionSchema } from '../../domain/usuario/signup-attribution.js';
 import { deriveSlugBase, slugWithSuffix } from '../../domain/usuario/slug-derivation.js';
 import { EmailUsuarioSchema } from '../../domain/usuario/value-objects/email-usuario.js';
 import type { IdContaUsuario } from '../../domain/usuario/value-objects/ids.js';
@@ -146,6 +147,7 @@ export type RegistrarContaUsuarioInput = z.infer<typeof RegistrarContaUsuarioInp
  * which are generated here).
  */
 export const ProvisionarContaUsuarioDominioInputSchema = z.object({
+  signupAttribution: SignupAttributionSchema.optional(),
   idUsuario: IdUsuarioSchema,
   idPlataforma: IdPlataformaReferenciaSchema,
   email: EmailUsuarioSchema,
@@ -518,6 +520,7 @@ export async function provisionarContaUsuarioDominio(
 
       // step 3: domain aggregate
       const usuario: Usuario = {
+        ...(data.signupAttribution ? { signupAttribution: data.signupAttribution } : {}),
         id: data.idUsuario,
         idPlataforma: data.idPlataforma,
         idConta,
