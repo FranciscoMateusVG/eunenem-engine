@@ -15,6 +15,8 @@
 //     (was: { nome: string })
 //   - IniciarPagamentoInput now requires `metodo: 'pix' | 'credit_card'`
 
+import { useMemo } from "react";
+import { createPixPollingPolicy } from "./pixPolling.js";
 import type { inferRouterInputs, inferRouterOutputs } from "@trpc/server";
 import type { PaginaRouter } from "../../server/trpc/pagina-router.js";
 import { useCampanhaRota } from "./campanha-rota.js";
@@ -253,7 +255,7 @@ export function useObterConfigCheckout() {
 
 /**
  * Poll target for the PIX QR screen. Mirrors useObterSucessoPagamento's
- * poll shape: 2s interval while 'pendente', stops on any terminal status.
+ * poll shape: 5s while pending, progressive error backoff, terminal stop.
  * The give-up cap is generous (~12min = expiry window + grace) — the QR
  * screen's own countdown flips the UI to 'expirado' at expiraEm; the poll
  * cap is just the backstop against a zombie tab polling forever.
@@ -264,25 +266,22 @@ export function useObterStatusPix(
   opts: { enabled?: boolean } = {},
 ) {
   const idCampanha = useCampanhaRota();
+  const polling = useMemo(() => createPixPollingPolicy(), [slug, txid, idCampanha]);
   return trpc.pagina.obterStatusPix.useQuery(
     idCampanha
       ? { slug, txid: txid ?? "", idCampanha }
       : { slug, txid: txid ?? "" },
     {
       enabled: (opts.enabled ?? true) && Boolean(txid),
-      refetchInterval: (query) => {
-        const status = query.state.data?.status;
-        if (status === "confirmado" || status === "expirado" || status === "rejeitado") {
-          return false;
-        }
-        // ~12min: 600s charge window + grace, at 2s per poll.
-        if (query.state.dataUpdateCount >= 360) {
-          return false;
-        }
-        return 2000;
-      },
+      refetchInterval: (query) => polling({
+        status: query.state.data?.status,
+        failed: query.state.status === "error" || query.state.data?.retryableError === true,
+        revision: query.state.dataUpdateCount + query.state.errorUpdateCount,
+      }),
       staleTime: 1_000,
-      retry: 1,
+      retry: false,
+      refetchOnWindowFocus: false,
+      refetchOnReconnect: false,
     },
   );
 }
