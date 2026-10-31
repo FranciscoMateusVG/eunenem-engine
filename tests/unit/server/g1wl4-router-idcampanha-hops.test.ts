@@ -1,3 +1,4 @@
+import { PixCobrancaProviderFake } from '../../../src/adapters/pagamentos/pix-cobranca-provider.fake.js';
 /**
  * aperture-g1wl4 (part 1) — THROUGH-THE-ROUTER suite for PR #344
  * (aperture-yeauv: per-hop OPTIONAL idCampanha resolution).
@@ -66,6 +67,7 @@ import { randomUUID } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
 import {
   CheckoutOperationStorageUnavailableError,
+  checkoutRequestStorageKey,
   executeRecoverableCheckout,
 } from '../../../apps/eunenem-server/pages/lib/checkoutOperationClient.js';
 import type { ServerDeps } from '../../../apps/eunenem-server/server/auth/setup.js';
@@ -1311,6 +1313,71 @@ describe('g1wl4 — per-hop idCampanha, THROUGH the router (PR #344 + aperture-4
 });
 
 describe('iytxa — public checkout capability slots', () => {
+  it('jp71l: failed PIX → card uses another operation; retry PIX retains its identity', async () => {
+    const rig = await buildRig();
+    const pix = new PixCobrancaProviderFake({ criarCobrancaError: new Error('provider down') });
+    const pixCalls = vi.spyOn(pix, 'criarCobranca');
+    Object.assign(rig.deps, { pixCobrancaProvider: pix, cobrancaPixProviderKind: 'inter' });
+    const user = await rig.addUser(uniqueEmail('method-switch'));
+    const [idContribuicao] = (
+      await user.caller.contribuicao.create({
+        idCampanha: user.campanhaSignup.id,
+        nome: 'Synthetic gift',
+        valor: 1000,
+        quantidade: 1,
+      })
+    ).ids;
+    if (!idContribuicao) throw new Error('fixture contribution');
+    const values = new Map<string, string>();
+    const storage = {
+      getItem: (k: string) => values.get(k) ?? null,
+      setItem: (k: string, v: string) => {
+        values.set(k, v);
+      },
+      removeItem: (k: string) => {
+        values.delete(k);
+      },
+    };
+    const input = {
+      slug: user.slug,
+      itens: [{ idContribuicao, quantidade: 1 }],
+      metodo: 'pix' as 'pix' | 'credit_card',
+      contribuinte: { nome: 'Synthetic Guest', email: 'guest@example.test' },
+    };
+    const cookies = new Map<string, string>();
+    const sent: Array<{ operationId: string; metodo: string }> = [];
+    const request = async (value: typeof input & { operationId: string }) => {
+      sent.push(value);
+      const response = await rig.anonCaller.pagina.iniciarPagamentoCarrinho(value);
+      const pair = rig.anonCtx.resHeaders.get('set-cookie')?.split(';')[0];
+      if (pair) {
+        const separator = pair.indexOf('=');
+        cookies.set(pair.slice(0, separator), pair.slice(separator + 1));
+      }
+      rig.anonCtx.headers.set('cookie', [...cookies].map(([k, v]) => `${k}=${v}`).join('; '));
+      rig.anonCtx.resHeaders.delete('set-cookie');
+      return response;
+    };
+    const execute = (requestInput: typeof input) =>
+      executeRecoverableCheckout({ storageKey: 'cart', storage, requestInput, request });
+    await expect(execute(input)).rejects.toThrow();
+    expect(pixCalls).toHaveBeenCalledOnce();
+    const pixId = sent[0]?.operationId;
+    if (!pixId) throw new Error('missing operation');
+    expect(await rig.deps.checkoutOperationRepository.findById(pixId)).toMatchObject({
+      state: 'outcome_unknown',
+    });
+    const stripe = vi.spyOn(rig.deps.checkoutSessionProvider, 'criarSessaoCheckout');
+    await expect(execute({ ...input, metodo: 'credit_card' })).resolves.toMatchObject({
+      tipo: 'stripe_embedded',
+    });
+    expect(stripe).toHaveBeenCalledOnce();
+    expect(sent.find((v) => v.metodo === 'credit_card')?.operationId).not.toBe(pixId);
+    await expect(execute(input)).rejects.toThrow();
+    expect(sent.filter((v) => v.metodo === 'pix').every((v) => v.operationId === pixId)).toBe(true);
+    expect(new Set(pixCalls.mock.calls.map(([call]) => call.idempotencyKey)).size).toBe(1);
+  });
+
   it('reuses one browser operation and provider key after an accepted response is lost', async () => {
     const rig = await buildRig();
     const user = await rig.addUser(uniqueEmail('checkout-client-recovery'));
@@ -1363,7 +1430,8 @@ describe('iytxa — public checkout capability slots', () => {
         createId: () => operationId,
       }),
     ).rejects.toThrow('simulated accepted response loss');
-    expect(storage.getItem('contribution')).toBe(operationId);
+    const scopedKey = await checkoutRequestStorageKey('contribution', input, storage);
+    expect(storage.getItem(scopedKey)).toBe(operationId);
 
     const recovered = await executeRecoverableCheckout({
       storageKey: 'contribution',
@@ -1373,7 +1441,7 @@ describe('iytxa — public checkout capability slots', () => {
       createId: () => randomUUID(),
     });
     expect(recovered).toMatchObject({ tipo: 'stripe_embedded' });
-    expect(storage.getItem('contribution')).toBeNull();
+    expect(storage.getItem(scopedKey)).toBeNull();
     expect(providerCall).toHaveBeenCalledOnce();
     expect(requestInputs).toHaveLength(3);
     expect(requestInputs).toEqual(requestInputs.map(() => ({ ...input, operationId })));

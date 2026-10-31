@@ -65,6 +65,32 @@ export function clearPendingCheckoutOperation(
   }
 }
 
+/** Versioned request identity, not authorization (server HMAC remains authoritative).
+ * Old bare UUIDs have no request fingerprint: keep their conservative recovery
+ * behavior until the tab closes; never silently discard an ambiguous payment.
+ */
+export async function checkoutRequestStorageKey(
+  baseKey: string,
+  requestInput: object,
+  storage = browserSessionStorage(),
+): Promise<string> {
+  if (!storage) throw new CheckoutOperationStorageUnavailableError();
+  try {
+    if (storage.getItem(baseKey) !== null) return baseKey;
+    const canonical = JSON.stringify(requestInput, (_key, value: unknown) => {
+      if (value && typeof value === 'object' && !Array.isArray(value)) {
+        return Object.fromEntries(Object.entries(value).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0));
+      }
+      return value;
+    });
+    const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(canonical));
+    const hash = Array.from(new Uint8Array(digest), b => b.toString(16).padStart(2, '0')).join('');
+    return `${baseKey}:v2:${hash}`;
+  } catch {
+    throw new CheckoutOperationStorageUnavailableError();
+  }
+}
+
 interface PreparedCheckoutResult {
   readonly tipo: "prepared";
 }
@@ -90,20 +116,21 @@ export async function executeRecoverableCheckout<
   readonly storage?: CheckoutOperationStorage;
   readonly createId?: () => string;
 }): Promise<Exclude<TResponse, PreparedCheckoutResult>> {
+  const storageKey = await checkoutRequestStorageKey(input.storageKey, input.requestInput, input.storage);
   const operationId = getOrCreatePendingCheckoutOperation(
-    input.storageKey,
+    storageKey,
     input.storage,
     input.createId,
   );
   const requestInput = { ...input.requestInput, operationId };
   const prepared = await input.request(requestInput);
   if (prepared.tipo !== "prepared") {
-    clearPendingCheckoutOperation(input.storageKey, operationId, input.storage);
+    clearPendingCheckoutOperation(storageKey, operationId, input.storage);
     return prepared as Exclude<TResponse, PreparedCheckoutResult>;
   }
 
   const result = await input.request(requestInput);
   if (result.tipo === "prepared") throw new Error("Checkout não confirmado");
-  clearPendingCheckoutOperation(input.storageKey, operationId, input.storage);
+  clearPendingCheckoutOperation(storageKey, operationId, input.storage);
   return result as Exclude<TResponse, PreparedCheckoutResult>;
 }

@@ -96,6 +96,31 @@ describe('sendEvent → Mixpanel sink', () => {
     expect(mocks.track.mock.calls[1]).toEqual(['login_concluido', { is_legacy: false }]);
   });
 
+  it('identifies before set_once with every first-touch field, without a GA event', async () => {
+    const { identifyWithUtm } = await loadWith('tok');
+    const attribution = {
+      utm_source: 'google',
+      utm_medium: 'cpc',
+      utm_campaign: 'test',
+      utm_term: 'term',
+      utm_content: 'creative',
+      gclid: 'g',
+      gbraid: 'b',
+      wbraid: 'w',
+      referrer: 'https://search.example/',
+      landing_path: '/faq',
+      captured_at: '2026-10-31T20:00:00.000Z',
+    };
+    window.localStorage.getItem = () => JSON.stringify(attribution);
+    identifyWithUtm('account');
+    expect(mocks.identify).toHaveBeenCalledWith('account');
+    expect(mocks.set_once).toHaveBeenCalledWith(attribution);
+    expect(mocks.identify.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.set_once.mock.invocationCallOrder[0] ?? 0,
+    );
+    expect(mocks.track).not.toHaveBeenCalled();
+  });
+
   it('mounts dark without a token: never inits, never tracks, never identifies', async () => {
     const { sendEvent, identifyWithUtm, resetAnalyticsIdentity } = await loadWith(undefined);
     sendEvent('compra_concluida', { transaction_id: 'cs_x_1' });

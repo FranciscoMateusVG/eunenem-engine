@@ -1,3 +1,4 @@
+import { readFirstTouch } from './signup-attribution.js';
 // aperture-ga4gtm: single entry point for custom event tracking. GTM/GA
 // scripts are injected server-side by server.tsx's envelope() (gtag.js +
 // GTM container). Both read window.dataLayer, but they expect DIFFERENT
@@ -138,19 +139,15 @@ export function resetAnalyticsIdentity(): void {
   }
 }
 
-// Identify the resolved account AND attach its first-touch utm_source (captured
-// to localStorage by the landing page). identify() runs BEFORE set_once() so the
-// props land on the identified profile rather than the anonymous one. This is the
-// one call auth-resolution sites make — login (useOauthReturnRedirect: OAuth +
-// magic-link returns, aperture-d2r21) and signup completion (OnboardingWizard).
-// No-op when Mixpanel is dark. localStorage reads are guarded: Safari private
-// mode throws on access.
+// Preserve the public helper name; attach the same bounded first-touch fields
+// captured before hydration on every entry page. identify precedes set_once.
+// Historical eunenem:utm_source is deliberately ignored: it was last-touch.
 export function identifyWithUtm(distinctId: string): void {
   identifyUser(distinctId);
   if (typeof window === 'undefined') return;
   try {
-    const utmSource = window.localStorage.getItem('eunenem:utm_source');
-    if (utmSource) setOnceUserProps({ utm_source: utmSource });
+    const attribution = readFirstTouch(window);
+    if (attribution) setOnceUserProps({ ...attribution });
   } catch {
     // localStorage unavailable (private mode / disabled) — skip first-touch attr.
   }

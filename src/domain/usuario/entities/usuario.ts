@@ -1,3 +1,4 @@
+import type { SignupAttribution } from '../signup-attribution.js';
 import type { EmailUsuario } from '../value-objects/email-usuario.js';
 import type { IdContaUsuario, IdPlataformaReferencia, IdUsuario } from '../value-objects/ids.js';
 import type { NomeExibicaoUsuario } from '../value-objects/nome-exibicao-usuario.js';
@@ -27,6 +28,7 @@ import type { SlugUsuario } from '../value-objects/slug-usuario.js';
  * the permission check is a property of the Conta entity.
  */
 export interface Usuario {
+  readonly signupAttribution?: SignupAttribution;
   readonly id: IdUsuario;
   readonly idPlataforma: IdPlataformaReferencia;
   readonly idConta: IdContaUsuario;

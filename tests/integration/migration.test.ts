@@ -484,6 +484,29 @@ describe('Migration round-trip', () => {
     //    this sequence must start at the LATEST migration and walk earlier.
     //    Adding a new migration on top REQUIRES prepending its down-step here.
 
+    // 069 attribution is nullable and reversible; no historical backfill.
+    const attributionColumns = [
+      'utm_source',
+      'utm_medium',
+      'utm_campaign',
+      'utm_term',
+      'utm_content',
+      'gclid',
+      'gbraid',
+      'wbraid',
+      'referrer',
+      'landing_path',
+      'captured_at',
+    ];
+    for (const field of attributionColumns) {
+      const column = await getColumn(db, 'usuarios', `signup_${field}`);
+      expect(column?.is_nullable).toBe('YES');
+      expect(column?.data_type).toBe(field === 'captured_at' ? 'timestamp with time zone' : 'text');
+    }
+    expect((await migrator.migrateDown()).error).toBeUndefined();
+    for (const field of attributionColumns)
+      expect(await getColumn(db, 'usuarios', `signup_${field}`)).toBeUndefined();
+
     // 068 additive soft-delete; down restores the original columns.
     expect((await getColumn(db, 'despesas_manuais', 'excluida_em'))?.is_nullable).toBe('YES');
     expect((await getColumn(db, 'despesas_manuais', 'excluida_por'))?.is_nullable).toBe('YES');
