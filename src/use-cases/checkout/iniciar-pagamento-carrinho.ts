@@ -8,7 +8,10 @@ import type {
   CheckoutOperationRepository,
   CheckoutOperationSnapshot,
 } from '../../adapters/pagamentos/checkout-operation-repository.js';
-import { readCheckoutProviderDiagnostic } from '../../adapters/pagamentos/checkout-provider-diagnostic.js';
+import {
+  readCheckoutProviderDiagnostic,
+  readPersistedCheckoutProviderDiagnostic,
+} from '../../adapters/pagamentos/checkout-provider-diagnostic.js';
 import type {
   CheckoutSessionProvider,
   CriarSessaoCheckoutInput,
@@ -627,7 +630,10 @@ async function runPagamentoCarrinho(
             attemptNo: claimed.attemptNo,
             fenceToken: claimed.fenceToken,
             outcome: 'outcome_unknown',
-            diagnostic: JSON.stringify(diagnostic),
+            diagnostic: JSON.stringify({
+              ...diagnostic,
+              ...readPersistedCheckoutProviderDiagnostic(error),
+            }),
             providerRef: null,
             providerExpiresAt: null,
             now: clock(),

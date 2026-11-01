@@ -214,7 +214,7 @@ describe('iniciarPagamentoCarrinho — PIX-cobrança routing (aperture-kuw0o)', 
     ).toBeNull();
   });
 
-  it('3kt7u: records HTTP 500 diagnostics from real Inter adapter without provider secrets or PII', async () => {
+  it('4s1y3: DB retains provider response, logs exclude PII and both exclude our auth', async () => {
     const deps = makeDeps('inter');
     const seeded = await seedCampanhaComContribuicao(deps, 'Provider diagnostics');
     const logger = vi.spyOn(deps.observability.logger, 'info');
@@ -276,7 +276,10 @@ describe('iniciarPagamentoCarrinho — PIX-cobrança routing (aperture-kuw0o)', 
       'checkout.provider_call_failed',
       expect.objectContaining({ httpStatus: 500, operationId: input.idPagamento }),
     );
-    const all = JSON.stringify([facts, logger.mock.calls]);
+    expect(parsed.body).toContain('PRIVATE_PERSON_CANARY');
+    expect(parsed.body).toContain('PIX_KEY_CANARY');
+    expect(JSON.stringify(facts)).not.toMatch(/SECRET_CANARY|TOKEN_CANARY/);
+    const all = JSON.stringify(logger.mock.calls);
     for (const secret of [
       'SECRET_CANARY',
       'TOKEN_CANARY',

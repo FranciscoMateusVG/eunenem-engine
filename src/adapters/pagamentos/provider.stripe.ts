@@ -64,6 +64,7 @@ const PIX_EXPIRES_AFTER_SECONDS = 600 as const;
 export interface PagamentoProviderStripeOptions {
   readonly stripe: Stripe;
   readonly clock?: () => Date;
+  readonly diagnosticSecrets?: readonly string[];
 }
 
 /**
@@ -90,9 +91,11 @@ export interface PagamentoProviderStripeOptions {
 export class PagamentoProviderStripe implements PagamentoProvider, CheckoutSessionProvider {
   private readonly stripe: Stripe;
   private readonly clock: () => Date;
+  private readonly diagnosticSecrets: readonly string[];
 
   constructor(options: PagamentoProviderStripeOptions) {
     this.stripe = options.stripe;
+    this.diagnosticSecrets = options.diagnosticSecrets ?? [];
     this.clock = options.clock ?? (() => new Date());
   }
 
@@ -266,7 +269,8 @@ export class PagamentoProviderStripe implements PagamentoProvider, CheckoutSessi
           new Error('checkout_provider_unavailable'),
           '/v1/checkout/sessions',
           fields.statusCode,
-          fields.raw ?? fields,
+          fields.raw,
+          this.diagnosticSecrets,
         );
       } finally {
         span.end();
