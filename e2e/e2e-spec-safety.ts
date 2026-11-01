@@ -53,6 +53,11 @@ export const E2E_SPEC_SAFETY = [
   { file: 'gf733-cart-no-persist-regression.spec.ts', safety: 'non-payment' },
   { file: 'gf733-onboarding-no-silent-loop-regression.spec.ts', safety: 'non-payment' },
   {
+    file: 'gu7u6-cart-change-resets-checkout.spec.ts',
+    safety: 'money-movement',
+    capability: 'Creates PIX and card checkouts through pagina.iniciarPagamentoCarrinho.',
+  },
+  {
     file: 'kuw0o-pix-qr-checkout.spec.ts',
     safety: 'money-movement',
     capability: 'Creates and reconciles PIX checkouts through the payment composition root.',

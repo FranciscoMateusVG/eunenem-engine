@@ -321,3 +321,15 @@ export function toSagaInput(
   return itens;
 }
 
+/**
+ * aperture-gu7u6 — true when both carts would send the same checkout request
+ * (same saga items, same order). A pending checkout screen is only valid for
+ * the cart it was generated from.
+ */
+export function sameCheckoutRequest(
+  a: readonly CartLine[],
+  b: readonly CartLine[],
+): boolean {
+  return JSON.stringify(toSagaInput(a)) === JSON.stringify(toSagaInput(b));
+}
+
