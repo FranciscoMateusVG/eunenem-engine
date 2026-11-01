@@ -32,6 +32,9 @@ function sp(local: string): Date {
 
 let testDb: TestDatabase;
 let seed: ReceitaLedgerSeed;
+let sharedDb: TestDatabase;
+let foreignSeed: ReceitaLedgerSeed;
+let foreignPaymentId: string;
 
 async function limparTarifas() {
   await sql`DELETE FROM provider_fee_events`.execute(testDb.db);
@@ -40,13 +43,33 @@ async function limparTarifas() {
 }
 
 beforeAll(async () => {
-  testDb = await createTestDatabase();
+  // Reproduce a prior file leaving an eligible same-platform payment behind.
+  // Since-start coverage must not absorb this deliberately hostile fixture.
+  sharedDb = await createTestDatabase();
+  foreignSeed = new ReceitaLedgerSeed(sharedDb.db);
+  const foreignCampaign = await foreignSeed.campanha();
+  foreignPaymentId = (
+    await foreignSeed.pagamento({
+      campaignId: foreignCampaign,
+      taxaCents: 123,
+      criadoEm: sp('2037-10-01T12:00:00'),
+      metodo: 'credit_card',
+      provedor: 'stripe',
+    })
+  ).idPagamento;
+  testDb = await createTestDatabase({ isolated: true });
   seed = new ReceitaLedgerSeed(testDb.db);
-});
+}, 60000);
 
 afterAll(async () => {
   await limparTarifas();
   await seed.wipe();
+  // Isolation must preserve another file's rows, not just erase pollution.
+  const foreign = await sql<{ count: string }>`SELECT count(*)::text AS count FROM pagamentos
+    WHERE id = ${foreignPaymentId}::uuid`.execute(sharedDb.db);
+  expect(foreign.rows[0]?.count).toBe('1');
+  await foreignSeed.wipe();
+  await sharedDb.teardown();
   await testDb.teardown();
 });
 
@@ -125,6 +148,12 @@ async function pix(campaignId: string, criadoEm: Date) {
   const p = await seed.pagamento({ campaignId, taxaCents: 300, criadoEm, provedor: 'inter' });
   return p.idPagamento;
 }
+
+it('isolates same-platform payments left in the shared database', async () => {
+  const result = await sql<{ count: string }>`SELECT count(*)::text AS count FROM pagamentos
+    WHERE id = ${foreignPaymentId}::uuid`.execute(testDb.db);
+  expect(result.rows[0]?.count).toBe('0');
+});
 
 describe('Despesas — valores pela data de débito (occurred_at) em São Paulo', () => {
   async function seedOutubro() {
