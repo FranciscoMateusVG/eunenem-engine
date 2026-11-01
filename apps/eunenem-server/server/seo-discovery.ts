@@ -105,6 +105,8 @@ export function createSeoDiscoveryRoutes(db: Database, publicOrigin: string) {
           `Sitemap: ${origin}/sitemap.xml`,
           '',
         ].join('\n'),
+        200,
+        { 'Cache-Control': 'public, max-age=300' },
       ),
     )
     .get('/sitemap.xml', async (c) => {
@@ -121,7 +123,7 @@ export function createSeoDiscoveryRoutes(db: Database, publicOrigin: string) {
       return c.body(
         `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls.join('\n')}\n</urlset>\n`,
         200,
-        { 'Content-Type': 'application/xml; charset=UTF-8' },
+        { 'Content-Type': 'application/xml; charset=UTF-8', 'Cache-Control': 'public, max-age=300' },
       );
     });
 }

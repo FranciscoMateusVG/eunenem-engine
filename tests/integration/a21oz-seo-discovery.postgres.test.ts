@@ -107,6 +107,7 @@ describe('SEO discovery through HTTP + real PostgreSQL', () => {
     const app = createSeoDiscoveryRoutes(testDb.db, `${origin}/`);
     const res = await app.request('https://untrusted.example/sitemap.xml');
     expect(res.status).toBe(200);
+    expect(res.headers.get('Cache-Control')).toBe('public, max-age=300');
     expect(res.headers.get('Content-Type')).toContain('application/xml');
     const xml = await res.text();
     const locations = [...xml.matchAll(/<loc>([^<]+)<\/loc>/g)].map((m) => m[1]);
@@ -149,6 +150,7 @@ describe('SEO discovery through HTTP + real PostgreSQL', () => {
     const app = createSeoDiscoveryRoutes(testDb.db, origin);
     const res = await app.request('https://untrusted.example/robots.txt');
     expect(res.status).toBe(200);
+    expect(res.headers.get('Cache-Control')).toBe('public, max-age=300');
     expect(res.headers.get('Content-Type')).toContain('text/plain');
     const text = await res.text();
     expect(text).toContain(`Sitemap: ${origin}/sitemap.xml`);
