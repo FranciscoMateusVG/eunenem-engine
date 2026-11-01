@@ -8439,9 +8439,23 @@ dialog.config-modal::backdrop { background: #33233380; }
   font-size: 11px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase;
   white-space: nowrap;
 }
-/* aperture-0vne4 — owner's edit/remove buttons on the public card: bottom of
-   the photo, clear of the top-right "Presenteado" tag. */
-.pagina-gift-card .lista-card-actions { top: auto; bottom: 8px; right: 8px; z-index: 3; }
+/* aperture-0vne4 + 11l2x — owner's edit/remove buttons on the public card:
+   top-right of the photo like the painel, opaque and lifted so they read over
+   any image. The "Presenteado" tag moves to the bottom-left to stay clear. */
+.pagina-gift-card .lista-card-actions { top: 10px; right: 10px; gap: 6px; z-index: 3; }
+.pagina-gift-card .lista-card-actions button {
+  width: 38px; height: 38px;
+  background: #fff; color: var(--plum);
+  box-shadow: 0 2px 8px rgba(51, 35, 51, 0.28);
+}
+.pagina-gift-card .lista-card-actions button svg { width: 17px; height: 17px; }
+.pagina-gift-card .lista-card-actions button:hover { background: var(--lilac-soft); color: var(--lilac-deep); }
+.pagina-gift-card .lista-card-actions button.danger:hover { background: var(--pink-soft); color: var(--coral-pink); }
+.pagina-gift-card .lista-card-actions button.is-disabled,
+.pagina-gift-card .lista-card-actions button.is-disabled:hover {
+  background: rgba(255, 255, 255, 0.85); color: var(--ink-mute); box-shadow: none;
+}
+.pagina-gift-thumb:has(.lista-card-actions) .pagina-gift-tag { top: auto; right: auto; bottom: 14px; left: 14px; }
 .pagina-gift-nome {
   font-size: 24px; line-height: 1.1; color: var(--plum);
   margin: 16px 0 10px;
@@ -8491,6 +8505,9 @@ dialog.config-modal::backdrop { background: #33233380; }
     top: 8px; right: 8px; padding: 3px 8px;
     font-size: 9.5px; letter-spacing: 0.04em;
   }
+  .pagina-gift-card .lista-card-actions { top: 6px; right: 6px; gap: 4px; }
+  .pagina-gift-card .lista-card-actions button { width: 40px; height: 40px; }
+  .pagina-gift-thumb:has(.lista-card-actions) .pagina-gift-tag { bottom: 8px; left: 8px; }
   .pagina-gift-nome { font-size: 17px; margin: 10px 0 6px; min-height: 3.3em; }
   .pagina-gift-preco { font-size: 22px; }
   .pagina-gift-preco-rotulo { display: none; }

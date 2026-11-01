@@ -56,6 +56,7 @@ export function GiftCard({ gift, onPick, onAdd }: GiftCardProps) {
       }}
     >
       <div
+        className="pagina-gift-thumb"
         style={{
           width: "100%",
           aspectRatio: "1 / 1",
