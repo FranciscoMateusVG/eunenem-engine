@@ -19,6 +19,7 @@ import { getStripePromise } from "@/lib/stripeClient";
 import { sendEvent } from "@/lib/analytics";
 import { emitirInicioCheckoutPix, registrarCompraConcluida } from "@/lib/analytics-conversao";
 import { emitirCheckoutFalhou } from "@/lib/analytics-funil";
+import { CriarListaLink } from "./CriarListaCta";
 
 // Plan 0017 / aperture-16flf — visitor cart drawer + checkout flow.
 //
@@ -1299,6 +1300,7 @@ function SuccessPanel({
           ? "aguardando confirmação…"
           : "Voltar pra listinha ♡"}
       </button>
+      {(isConfirmed || isSlow) && <CriarListaLink />}
     </div>
   );
 }

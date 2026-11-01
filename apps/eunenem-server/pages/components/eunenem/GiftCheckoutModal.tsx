@@ -21,6 +21,7 @@ import type { VisitorGift } from "@/lib/visitorGift";
 import { sendEvent } from "@/lib/analytics";
 import { emitirInicioCheckoutPix, registrarCompraConcluida } from "@/lib/analytics-conversao";
 import { emitirCheckoutFalhou } from "@/lib/analytics-funil";
+import { CriarListaLink } from "./CriarListaCta";
 
 // aperture-3xgch (scaffold) → aperture-ra027 (real wiring + metodo step)
 // → aperture-kx9bl (drop contribuinte form — Stripe is source of truth)
@@ -773,6 +774,7 @@ function SuccessPanel({
           fechar
         </button>
       </div>
+      {!isPending && <CriarListaLink />}
     </div>
   );
 }

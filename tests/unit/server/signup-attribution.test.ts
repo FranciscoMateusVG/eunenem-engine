@@ -73,3 +73,45 @@ it('does not invent acquisition from an auth callback without first-touch state'
     captureFirstTouch(browser('https://eunenem.com/?oauth=1', 'https://accounts.google.com/')),
   ).toBeNull();
 });
+
+// aperture-i06qu — guest pages are not creator acquisition. A touch stored on
+// a guest route stays (organic guest→creator still shows landing /pagina/x)
+// until a later entry carries campaign params, e.g. the guest_to_creator CTA.
+it('a later campaign touch replaces a first touch stored on a guest route', () => {
+  const b = browser('https://eunenem.com/pagina/maria', 'https://wa.me/');
+  const guest = captureFirstTouch(b);
+  expect(guest).toMatchObject({ landing_path: '/pagina/maria', utm_source: null });
+  b.location = new URL('https://eunenem.com/faq');
+  expect(captureFirstTouch(b)).toEqual(guest);
+  b.location = new URL(
+    'https://eunenem.com/login?utm_source=eunenem&utm_medium=guest_page&utm_campaign=guest_to_creator',
+  );
+  const cta = captureFirstTouch(b);
+  expect(cta).toMatchObject({
+    utm_source: 'eunenem',
+    utm_medium: 'guest_page',
+    utm_campaign: 'guest_to_creator',
+    landing_path: '/login',
+  });
+  expect(decodeURIComponent(b.document.cookie)).toContain('guest_to_creator');
+  b.location = new URL('https://eunenem.com/?utm_source=later');
+  expect(captureFirstTouch(b)).toEqual(cta);
+});
+
+it('success and RSVP guest routes are replaceable too; gclid alone counts', () => {
+  for (const path of ['/pagina/maria/sucesso', '/maria/confirmar-presenca/abc123']) {
+    const b = browser(`https://eunenem.com${path}`);
+    captureFirstTouch(b);
+    b.location = new URL('https://eunenem.com/?gclid=click');
+    expect(captureFirstTouch(b), path).toMatchObject({ gclid: 'click', landing_path: '/' });
+  }
+});
+
+it('a non-guest first touch without campaign params stays immutable', () => {
+  const b = browser('https://eunenem.com/faq');
+  const first = captureFirstTouch(b);
+  b.location = new URL(
+    'https://eunenem.com/login?utm_source=eunenem&utm_medium=guest_page&utm_campaign=guest_to_creator',
+  );
+  expect(captureFirstTouch(b)).toEqual(first);
+});

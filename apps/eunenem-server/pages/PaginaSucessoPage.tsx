@@ -25,6 +25,7 @@ import { Navbar } from "./components/eunenem/Navbar";
 import { Footer } from "./components/eunenem/Footer";
 import { BottleDoodle, FlowerDoodle, HeartDoodle } from "./components/eunenem/Doodles";
 import { TweaksProvider } from "./components/eunenem/TweaksContext";
+import { CriarListaLink } from "./components/eunenem/CriarListaCta";
 // aperture-d52he — the success page renders <Navbar>, which calls useCartDrawer
 // and therefore REQUIRES the cart providers (Plan 0017 / aperture-16flf). The
 // page never wrapped them, so SSR threw "useCartDrawer must be used inside
@@ -272,6 +273,7 @@ function ApprovedState({
       <a href={paginaSharePath(slug, idCampanha)} className="btn-lilac sucesso-cta">
         voltar pra listinha ←
       </a>
+      <CriarListaLink />
     </section>
   );
 }
