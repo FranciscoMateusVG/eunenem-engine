@@ -89,10 +89,12 @@ interface InterDevolucaoResponse {
 export class PixCobrancaProviderInter implements PixCobrancaProvider {
   private readonly http: InterHttpClient;
   private readonly pixKey: string;
+  private readonly diagnosticSecrets: readonly string[];
 
   constructor(config: InterPixCobrancaConfig, transport?: InterHttpTransport) {
     this.http = new InterHttpClient(config, transport);
     this.pixKey = config.pixKey;
+    this.diagnosticSecrets = [config.clientId, config.clientSecret, config.certPem, config.keyPem];
   }
 
   async criarCobranca(input: CriarCobrancaInput): Promise<CobrancaCriada> {
@@ -139,7 +141,8 @@ export class PixCobrancaProviderInter implements PixCobrancaProvider {
           new PixCobrancaTransitoriaError(`criarCobranca: ${code}`),
           '/pix/v2/cob/:txid',
           response.statusCode,
-          parseJson<unknown>(response.body),
+          response.body,
+          [...this.diagnosticSecrets, token],
         );
       }
 
@@ -185,7 +188,8 @@ export class PixCobrancaProviderInter implements PixCobrancaProvider {
           new PixCobrancaTransitoriaError(`consultarCobranca: ${code}`),
           '/pix/v2/cob/:txid',
           response.statusCode,
-          parseJson<unknown>(response.body),
+          response.body,
+          [...this.diagnosticSecrets, token],
         );
       }
 

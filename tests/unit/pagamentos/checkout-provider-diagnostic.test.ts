@@ -2,6 +2,7 @@ import { expect, it } from 'vitest';
 import {
   attachCheckoutProviderDiagnostic,
   readCheckoutProviderDiagnostic,
+  readPersistedCheckoutProviderDiagnostic,
 } from '../../../src/adapters/pagamentos/checkout-provider-diagnostic.js';
 
 it('never copies raw error messages, arbitrary titles/details or credential fields', () => {
@@ -42,4 +43,20 @@ it('only finite valid HTTP status and generic phrases survive', () => {
       attachCheckoutProviderDiagnostic(new Error('safe'), 'unknown', '500', { title: [] }),
     ).httpStatus,
   ).toBeNull();
+});
+
+it('retains non-JSON responses verbatim but excludes known request auth even if echoed', () => {
+  const body = '<html>upstream unavailable</html>\n';
+  const e = attachCheckoutProviderDiagnostic(new Error('safe'), '/pix/v2/cob/:txid', 502, body);
+  expect(readPersistedCheckoutProviderDiagnostic(e).body).toBe(body);
+  const echo = attachCheckoutProviderDiagnostic(
+    new Error('safe'),
+    '/pix/v2/cob/:txid',
+    500,
+    '{"detail":"Bearer OUR_TOKEN","title":"Erro interno."}',
+    ['OUR_TOKEN'],
+  );
+  expect(readPersistedCheckoutProviderDiagnostic(echo).detail).toBe('Bearer [our-auth-redacted]');
+  expect(JSON.stringify(readPersistedCheckoutProviderDiagnostic(echo))).not.toContain('OUR_TOKEN');
+  expect(JSON.stringify(echo)).toBe('{}');
 });

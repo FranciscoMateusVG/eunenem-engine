@@ -1,7 +1,10 @@
 import type Stripe from 'stripe';
 import { describe, expect, it, vi } from 'vitest';
 import { SURCHARGE_LINE_ITEM_NAME } from '../../../src/adapters/pagamentos/card-surcharge.js';
-import { readCheckoutProviderDiagnostic } from '../../../src/adapters/pagamentos/checkout-provider-diagnostic.js';
+import {
+  readCheckoutProviderDiagnostic,
+  readPersistedCheckoutProviderDiagnostic,
+} from '../../../src/adapters/pagamentos/checkout-provider-diagnostic.js';
 import type { CriarSessaoCheckoutInput } from '../../../src/adapters/pagamentos/checkout-session-provider.js';
 import { PagamentoProviderStripe } from '../../../src/adapters/pagamentos/provider.stripe.js';
 
@@ -62,15 +65,30 @@ describe('PagamentoProviderStripe.criarSessaoCheckout — Stripe handoff contrac
     const { stripe, create } = mockStripe();
     create.mockRejectedValueOnce({
       statusCode: 500,
+      headers: { Authorization: 'OUR_REQUEST_TOKEN' },
+      config: { secret: 'OUR_REQUEST_TOKEN' },
       raw: {
         type: 'Internal Server Error',
         message: 'Service temporarily unavailable',
         secret: 'SECRET_CANARY',
+        authEcho: 'OUR_REQUEST_TOKEN',
+        violations: [{ code: 'synthetic', reason: 'Erro arbitrário do provedor' }],
       },
     });
-    const provider = new PagamentoProviderStripe({ stripe });
+    const provider = new PagamentoProviderStripe({
+      stripe,
+      diagnosticSecrets: ['OUR_REQUEST_TOKEN'],
+    });
     const error = await provider.criarSessaoCheckout(baseInput()).catch((e) => e);
     expect(error.message).toBe('checkout_provider_unavailable');
+    expect(readPersistedCheckoutProviderDiagnostic(error).body).toMatchObject({
+      secret: 'SECRET_CANARY',
+      violations: [{ code: 'synthetic', reason: 'Erro arbitrário do provedor' }],
+    });
+    expect(JSON.stringify(readPersistedCheckoutProviderDiagnostic(error))).not.toContain(
+      'OUR_REQUEST_TOKEN',
+    );
+
     expect(readCheckoutProviderDiagnostic(error)).toEqual({
       endpoint: '/v1/checkout/sessions',
       httpStatus: 500,
