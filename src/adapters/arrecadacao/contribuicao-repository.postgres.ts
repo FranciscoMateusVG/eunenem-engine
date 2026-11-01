@@ -36,6 +36,7 @@ type ContribuicaoRow = {
    */
   quantidade: number;
   criada_em: Date;
+  arquivada_em: Date | null;
 };
 
 export class ContribuicaoRepositoryPostgres implements ContribuicaoRepository {
@@ -269,5 +270,6 @@ function toContribuicao(row: ContribuicaoRow): Contribuicao {
     // as quantidade=1 (the workaround the field eliminates).
     quantidade: row.quantidade,
     criadaEm: row.criada_em,
+    ...(row.arquivada_em ? { arquivada: true } : {}),
   };
 }

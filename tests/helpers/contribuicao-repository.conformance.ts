@@ -47,7 +47,10 @@ export function describeContribuicaoRepositoryConformance(
       await repo.deleteById(randomUUID());
       await repo.save(gift); // a stale admin edit must not resurrect the gift
       expect(await repo.findById(gift.id)).toBeUndefined();
-      expect(await repo.findById(gift.id, { incluirArquivadas: true })).toEqual(gift);
+      expect(await repo.findById(gift.id, { incluirArquivadas: true })).toEqual({
+        ...gift,
+        arquivada: true,
+      });
       expect(await repo.findByCampanhaId(gift.idCampanha)).toEqual([]);
       expect(await repo.findByOpcao(gift.idCampanha, gift.idOpcaoContribuicao)).toEqual([]);
       expect(await repo.countByOpcao(gift.idCampanha, gift.idOpcaoContribuicao)).toBe(0);

@@ -5,6 +5,8 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   useIniciarPagamentoCarrinho,
+  useRevalidarCarrinho,
+  type CartQuote,
   useInvalidarListaPresentes,
   useObterConfigCheckout,
   useObterSucessoPagamento,
@@ -19,6 +21,7 @@ import { getStripePromise } from "@/lib/stripeClient";
 import { sendEvent } from "@/lib/analytics";
 import { emitirInicioCheckoutPix, registrarCompraConcluida } from "@/lib/analytics-conversao";
 import { emitirCheckoutFalhou } from "@/lib/analytics-funil";
+import { reconcileCart } from "@/lib/cart-revalidation.js";
 import { CriarListaLink } from "./CriarListaCta";
 
 // Plan 0017 / aperture-16flf — visitor cart drawer + checkout flow.
@@ -74,6 +77,55 @@ export function CartDrawer({ open, onClose, slug }: CartDrawerProps) {
 
   const iniciar = useIniciarPagamentoCarrinho();
   const invalidarListaPresentes = useInvalidarListaPresentes();
+  const fetchQuote = useRevalidarCarrinho();
+  const [quote, setQuote] = useState<CartQuote | null>(null);
+  const [quoteKey, setQuoteKey] = useState("");
+  const [validating, setValidating] = useState(false);
+  const [quoteError, setQuoteError] = useState<string | null>(null);
+  const [notices, setNotices] = useState<string[]>([]);
+  const currentLines = useRef(cart.state.lines);
+  currentLines.current = cart.state.lines;
+  const quoteGeneration = useRef(0);
+  const requestKey = JSON.stringify(toSagaInput(cart.state.lines));
+  const cartRef = useRef(cart);
+  cartRef.current = cart;
+  const revalidate = useCallback(async () => {
+    const lines = currentLines.current;
+    if (!lines.length) { setQuote(null); return null; }
+    const generation = ++quoteGeneration.current;
+    const snapshot = JSON.stringify(lines);
+    setValidating(true);
+    setQuoteError(null);
+    try {
+      const fresh = await fetchQuote({ slug, itens: [...toSagaInput(lines)],
+        idsDisponiveis: lines.flatMap((l) => [...l.idsAvailable]) });
+      if (generation !== quoteGeneration.current || snapshot !== JSON.stringify(currentLines.current)) return null;
+      const reconciled = reconcileCart(lines, fresh);
+      const changed = !sameCheckoutRequest(lines, reconciled.lines);
+      if (reconciled.notices.length) setNotices(reconciled.notices);
+      cartRef.current.revalidate(reconciled.lines);
+      setQuote(fresh);
+      setQuoteKey(JSON.stringify(toSagaInput(reconciled.lines)));
+      return { ...reconciled, quote: fresh, changed };
+    } catch (error) {
+      console.error("Falha ao revalidar carrinho", error);
+      if (generation === quoteGeneration.current) {
+        setQuoteError("Não conseguimos conferir o carrinho. Tente novamente antes de pagar.");
+        setQuote(null);
+      }
+      return null;
+    } finally {
+      if (generation === quoteGeneration.current) setValidating(false);
+    }
+  }, [fetchQuote, slug]);
+  // Fresh reads on every opening and quantity/item edit. Old responses cannot
+  // overwrite edits made while the request was in flight.
+  useEffect(() => {
+    if (open && currentLines.current.length) void revalidate();
+    return () => { ++quoteGeneration.current; };
+  }, [open, requestKey, revalidate]);
+  const quoteReady = quote !== null && quoteKey === requestKey && !validating && !quoteError;
+
   // aperture-kuw0o: boot-time flag — PIX via our QR flow vs Stripe iframe.
   const configCheckout = useObterConfigCheckout();
   const pixViaQr = configCheckout.data?.pixViaQr ?? false;
@@ -166,23 +218,8 @@ export function CartDrawer({ open, onClose, slug }: CartDrawerProps) {
     };
   }, [open]);
 
-  // Plan 0016 locked decision #10 — "Race conditions: accept overshoot.
-  // Honest predicate at query time. No pre-reservation table, no TTL
-  // cleanup cron, no claim semantics." The cart deliberately does NOT
-  // re-validate at finalize-time. If a row went esgotada between
-  // add-and-finalize, the saga's per-item esgotada gate rejects with
-  // a 500 — that's surfaced as the default iniciar.isError state on
-  // the summary panel. Visitor edits + retries; no remediation, no
-  // race-recovery toast, no auto-decrement. Operator-accepted overshoot
-  // semantics flow through cleanly.
-  //
-  // After Rex's create-flow migration is fully the canonical pattern
-  // (new campanhas → 1 row + quantidade=N), the legacy multi-row data
-  // is gone, the availableIds layer becomes redundant, and the cart
-  // simplifies to "one saga item per line." Race is then a pure saga-
-  // level concern.
   const onFinalizar = useCallback(async () => {
-    if (cart.state.lines.length === 0 || iniciar.isPending) return;
+    if (cart.state.lines.length === 0 || iniciar.isPending || validating) return;
     const itens = toSagaInput(cart.state.lines);
     if (itens.length === 0) return;
     // aperture-irhxi blocker 1: fail closed until the config is KNOWN —
@@ -191,10 +228,13 @@ export function CartDrawer({ open, onClose, slug }: CartDrawerProps) {
     // is also disabled below; this is the belt to that suspender.
     if (configLoading) return;
     if (metodo === "pix" && configError) return;
+    const checked = await revalidate();
+    if (!checked || !checked.lines.length) return;
+    if (checked.changed) { setPhase({ kind: "summary" }); iniciar.reset(); return; }
     setCheckoutSnapshot({
-      lines: cart.state.lines.slice(),
+      lines: checked.lines,
       totalUnits: cart.totalUnits,
-      totalCents: metodo === "pix" ? cart.totalPixCents : cart.totalCartaoCents,
+      totalCents: metodo === "pix" ? checked.quote.totalPixCents : checked.quote.totalCartaoCents,
     });
     // aperture-kuw0o: PIX via our QR flow — identity first, no network yet.
     if (metodo === "pix" && pixViaQr) {
@@ -209,9 +249,10 @@ export function CartDrawer({ open, onClose, slug }: CartDrawerProps) {
           quantidade: item.quantidade,
         })),
         metodo,
+        expectedTotalCents: metodo === "pix" ? checked.quote.totalPixCents : checked.quote.totalCartaoCents,
       });
       sendEvent("checkout_iniciado", {
-        valor_centavos: metodo === "pix" ? cart.totalPixCents : cart.totalCartaoCents,
+        valor_centavos: metodo === "pix" ? checked.quote.totalPixCents : checked.quote.totalCartaoCents,
         quantidade_itens: cart.totalUnits,
         metodo,
       });
@@ -228,7 +269,7 @@ export function CartDrawer({ open, onClose, slug }: CartDrawerProps) {
       // aperture-qq74p — the mutation REJECTED: a real failure, finite code.
       emitirCheckoutFalhou({
         metodo,
-        valorCentavos: metodo === "pix" ? cart.totalPixCents : cart.totalCartaoCents,
+        valorCentavos: metodo === "pix" ? checked.quote.totalPixCents : checked.quote.totalCartaoCents,
         quantidadeItens: cart.totalUnits,
         erro: err,
       });
@@ -242,7 +283,7 @@ export function CartDrawer({ open, onClose, slug }: CartDrawerProps) {
     iniciar,
     metodo,
     pixViaQr,
-    slug,
+    slug, revalidate, validating, configLoading, configError,
   ]);
 
   // aperture-kuw0o: identity submitted → initiate the PIX charge → QR step.
@@ -254,14 +295,17 @@ export function CartDrawer({ open, onClose, slug }: CartDrawerProps) {
 
   const onSubmitPixIdentity = useCallback(
     async (contribuinte: ContribuinteInput) => {
-      if (cart.state.lines.length === 0 || iniciar.isPending) return;
+      if (cart.state.lines.length === 0 || iniciar.isPending || validating) return;
       const itens = toSagaInput(cart.state.lines);
       if (itens.length === 0) return;
       setPixContribuinte(contribuinte);
+      const checked = await revalidate();
+      if (!checked || !checked.lines.length) { setPhase({ kind: "summary" }); return; }
+      if (checked.changed) { setPhase({ kind: "summary" }); iniciar.reset(); return; }
       setCheckoutSnapshot({
         lines: cart.state.lines.slice(),
         totalUnits: cart.totalUnits,
-        totalCents: cart.totalPixCents,
+        totalCents: checked.quote.totalPixCents,
       });
       try {
         const result = await iniciar.mutateAsync({
@@ -271,6 +315,7 @@ export function CartDrawer({ open, onClose, slug }: CartDrawerProps) {
             quantidade: item.quantidade,
           })),
           metodo: "pix",
+          expectedTotalCents: checked.quote.totalPixCents,
           contribuinte,
         });
         // A regenerate is only a regenerate when a NEW QR actually came back;
@@ -279,7 +324,7 @@ export function CartDrawer({ open, onClose, slug }: CartDrawerProps) {
         emitirInicioCheckoutPix({
           regenerando: pixRegenerandoRef.current && result.tipo === "pix_qr",
           transactionId: result.tipo === "pix_qr" ? result.txid : "",
-          valorCentavos: cart.totalPixCents,
+          valorCentavos: checked.quote.totalPixCents,
           quantidadeItens: cart.totalUnits,
         });
         pixRegenerandoRef.current = false;
@@ -292,13 +337,13 @@ export function CartDrawer({ open, onClose, slug }: CartDrawerProps) {
         // isError surfaces inline on the identity form; visitor retries there.
         emitirCheckoutFalhou({
           metodo: "pix",
-          valorCentavos: cart.totalPixCents,
+          valorCentavos: checked.quote.totalPixCents,
           quantidadeItens: cart.totalUnits,
           erro: err,
         });
       }
     },
-    [cart.state.lines, cart.totalUnits, cart.totalPixCents, iniciar, slug],
+    [cart.state.lines, cart.totalUnits, cart.totalPixCents, iniciar, slug, revalidate, validating],
   );
 
   // aperture-kuw0o: QR poll confirmed the payment — clear the cart (the
@@ -421,12 +466,15 @@ export function CartDrawer({ open, onClose, slug }: CartDrawerProps) {
           onClose={canClose ? onClose : undefined}
         />
 
+        {notices.length > 0 && <p role="status" style={{ padding: "8px 24px", color: "var(--plum)" }}>{notices.join(" ")}</p>}
+        {validating && <p style={{ padding: "8px 24px" }}>Conferindo preços e disponibilidade…</p>}
+        {quoteError && <p role="alert" style={{ padding: "8px 24px" }}>{quoteError} <button onClick={() => void revalidate()}>Tentar novamente</button></p>}
         {phase.kind === "summary" && (
           <SummaryStep
             metodo={metodo}
             setMetodo={setMetodo}
             onFinalizar={onFinalizar}
-            isPending={iniciar.isPending}
+            isPending={iniciar.isPending || validating}
             isError={iniciar.isError}
             errorMessage={iniciar.errorMessage}
             configLoading={configLoading}
@@ -434,13 +482,15 @@ export function CartDrawer({ open, onClose, slug }: CartDrawerProps) {
             configResolved={configCheckout.isSuccess}
             onRetryConfig={() => void configCheckout.refetch()}
             pixViaQr={pixViaQr}
+            quoteReady={quoteReady}
+            serverTotalCents={metodo === "pix" ? quote?.totalPixCents : quote?.totalCartaoCents}
           />
         )}
 
-        {phase.kind === "checkout" && phase.step === "pix_identity" && (
+        {!validating && phase.kind === "checkout" && phase.step === "pix_identity" && (
           <div style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: 20 }}>
             <PixIdentityForm
-              valorCents={cart.totalPixCents}
+              valorCents={quote?.totalPixCents ?? 0}
               submitting={iniciar.isPending}
               submitError={iniciar.isError}
               errorMessage={iniciar.errorMessage}
@@ -452,7 +502,7 @@ export function CartDrawer({ open, onClose, slug }: CartDrawerProps) {
           </div>
         )}
 
-        {phase.kind === "checkout" && phase.step === "pix_qr" && pixData && (
+        {!validating && phase.kind === "checkout" && phase.step === "pix_qr" && pixData && (
           <div style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: 20 }}>
             <PixQrPanel
               slug={slug}
@@ -582,8 +632,10 @@ function SummaryStep({
   configError,
   configResolved,
   onRetryConfig,
-  pixViaQr,
+  pixViaQr, quoteReady, serverTotalCents,
 }: {
+  quoteReady: boolean;
+  serverTotalCents?: number | undefined;
   metodo: MetodoPagamento;
   setMetodo: (m: MetodoPagamento) => void;
   onFinalizar: () => void;
@@ -601,7 +653,7 @@ function SummaryStep({
   pixViaQr: boolean;
 }) {
   const cart = useCart();
-  const totalCents = metodo === "pix" ? cart.totalPixCents : cart.totalCartaoCents;
+  const totalCents = serverTotalCents ?? 0;
 
   if (cart.state.lines.length === 0) {
     return <EmptyCart />;
@@ -619,7 +671,7 @@ function SummaryStep({
       >
         <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
           {cart.state.lines.map((line) => (
-            <CartLineRow key={line.nome} line={line} />
+            <CartLineRow key={line.cartKey ?? line.nome} line={line} />
           ))}
         </ul>
       </div>
@@ -662,7 +714,7 @@ function SummaryStep({
               fontVariantNumeric: "tabular-nums",
             }}
           >
-            {formatBRL(totalCents)}
+            <span data-testid="cart-server-total">{quoteReady ? formatBRL(totalCents) : "Conferindo…"}</span>
           </span>
         </div>
 
@@ -721,7 +773,7 @@ function SummaryStep({
           // aperture-irhxi blocker 1: fail closed while the checkout config
           // resolves; PIX stays blocked on a config error (retry above).
           disabled={
-            isPending ||
+            isPending || !quoteReady ||
             cart.state.lines.length === 0 ||
             configLoading ||
             (configError && metodo === "pix")
@@ -877,7 +929,7 @@ function CartLineRow({ line }: { line: CartLine }) {
           </h3>
           <button
             type="button"
-            onClick={() => cart.remove(line.nome)}
+            onClick={() => cart.remove(line.cartKey ?? line.nome)}
             aria-label={`Remover ${line.nome} do carrinho`}
             style={{
               background: "transparent",
@@ -957,7 +1009,7 @@ function QtyStepper({ line }: { line: CartLine }) {
       }}
     >
       <StepperBtn
-        onClick={() => cart.decrement(line.nome)}
+        onClick={() => cart.decrement(line.cartKey ?? line.nome)}
         aria-label={`Diminuir quantidade de ${line.nome}`}
       >
         −
@@ -976,7 +1028,7 @@ function QtyStepper({ line }: { line: CartLine }) {
         {line.quantidade}
       </span>
       <StepperBtn
-        onClick={() => cart.increment(line.nome)}
+        onClick={() => cart.increment(line.cartKey ?? line.nome)}
         disabled={!canIncrement}
         aria-label={`Aumentar quantidade de ${line.nome}`}
       >

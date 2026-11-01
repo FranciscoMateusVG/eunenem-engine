@@ -86,6 +86,8 @@ export interface Contribuicao {
    * can return ≤ 0; `esgotada` returns true.
    */
   readonly quantidade: number;
+  /** Present only on explicit historical reads; archived gifts cannot be purchased. */
+  readonly arquivada?: boolean;
   readonly criadaEm: Date;
 }
 

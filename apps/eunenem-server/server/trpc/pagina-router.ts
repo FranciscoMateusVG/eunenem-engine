@@ -5,6 +5,8 @@ import { initTRPC, TRPCError } from '@trpc/server';
 import { z } from 'zod/v4';
 import {
   calcularValorTaxaPercentual,
+  calcularComposicaoValoresParaItem,
+  calcularSurchargeParaCarrinho,
   type Campanha,
   computeCardSurchargeCents,
   quantidadeRestante,
@@ -193,6 +195,7 @@ export const IniciarPagamentoCarrinhoInputSchema = z.object({
   metodo: z.enum(['pix', 'credit_card']),
   // aperture-kuw0o: see IniciarPagamentoContribuicaoInputSchema.
   contribuinte: ContribuinteInputSchema.optional(),
+  expectedTotalCents: z.number().int().nonnegative().optional(),
 });
 
 /**
@@ -501,6 +504,39 @@ function deterministicUuid(operationId: string, domain: string): string {
 // ── Router ────────────────────────────────────────────────────────────────
 
 export const paginaRouter = t.router({
+  /** Fresh cart quote: only current, same-campaign gifts; no provider side effects. */
+  revalidarCarrinho: t.procedure
+    .input(IniciarPagamentoCarrinhoInputSchema.pick({ slug: true, idCampanha: true, itens: true }).extend({ idsDisponiveis: z.array(z.string().uuid()).max(5000).optional() }))
+    .query(async ({ ctx, input }) => {
+      const { campanha, idOpcaoPresentes } = await resolvePaginaBySlug(ctx, input.slug, input.idCampanha);
+      const ids = [...new Set([...input.itens.map((i) => i.idContribuicao), ...(input.idsDisponiveis ?? [])])];
+      const sold = await ctx.deps.pagamentoRepository.somarQuantidadesContribuicoesEmPagamentosAprovados(ids);
+      const gifts = new Map((await ctx.deps.contribuicaoRepository.findByOpcao(campanha.id, idOpcaoPresentes)).map((gift) => [gift.id, gift]));
+      const itens = [];
+      let totalPixCents = 0;
+      let totalContributionCents = 0;
+      for (const id of ids) {
+        const gift = gifts.get(id);
+        if (!gift || gift.idCampanha !== campanha.id || gift.idOpcaoContribuicao !== idOpcaoPresentes) continue;
+        const qtyAvailable = Math.max(0, gift.quantidade - (sold.get(id) ?? 0));
+        const quantidade = Math.min(qtyAvailable, input.itens.filter((i) => i.idContribuicao === id).reduce((n, i) => n + i.quantidade, 0));
+        if (!qtyAvailable) continue;
+        const composition = await calcularComposicaoValoresParaItem(ctx.deps, {
+          idPlataforma: campanha.idPlataforma, idContribuicao: id, tipo: 'presente',
+          contributionUnitAmountCents: gift.valor, quantidade: Math.max(1, quantidade),
+        });
+        const valorCents = composition.receiverUnitAmountCents + composition.feeUnitAmountCents;
+        totalPixCents += valorCents * quantidade;
+        totalContributionCents += composition.contributionUnitAmountCents * quantidade;
+        itens.push({ idContribuicao: id, nome: gift.nome, quantidade, qtyAvailable, valorCents,
+          valorComTaxaCartaoCents: valorCents + computeCardSurchargeCents(gift.valor), imagemUrl: gift.imagemUrl });
+      }
+      const surcharge = totalPixCents > 0 ? await calcularSurchargeParaCarrinho(ctx.deps, {
+        totalContributionCents, metodo: 'credit_card',
+      }) : null;
+      return { itens, totalPixCents, totalCartaoCents: totalPixCents + (surcharge?.amountCents ?? 0) };
+    }),
+
   /**
    * Visitor-safe gift list. Resolves the slug → usuario → campanha →
    * `presente` opção, lists its contribuicoes, projects to the six fields
@@ -858,6 +894,7 @@ export const paginaRouter = t.router({
               quantidade: item.quantidade,
             })),
             metodo: input.metodo,
+            ...(input.expectedTotalCents === undefined ? {} : { expectedTotalCents: input.expectedTotalCents }),
             idPagamento,
             idIntencaoPagamento,
             idsItens,
@@ -904,6 +941,9 @@ export const paginaRouter = t.router({
       } catch (err) {
         if ((err as { _tag?: unknown })?._tag === 'CheckoutOperationAbandonedError') {
           return { tipo: 'retry_new_operation' as const, operationId: input.operationId };
+        }
+        if ((err as { _tag?: unknown })?._tag === 'CheckoutQuoteChangedError') {
+          throw new TRPCError({ code: 'CONFLICT', message: 'O valor do carrinho mudou. Confira o total atualizado e tente novamente.' });
         }
         if (err instanceof TRPCError) throw err;
         throw new TRPCError({

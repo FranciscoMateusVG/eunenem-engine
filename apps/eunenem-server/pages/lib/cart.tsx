@@ -57,6 +57,8 @@ import type { VisitorGift } from './visitorGift.js';
 export interface CartLine {
   /** Stable key — the gift's display nome. Lines are 1:1 with VisitorGift groups. */
   nome: string;
+  /** Identity when a legacy name group splits into differently priced rows. */
+  cartKey?: string;
   /**
    * Snapshot of contribuição row-ids the slot exposed at add-time.
    *
@@ -93,14 +95,16 @@ type Action =
   | { type: 'increment'; nome: string }
   | { type: 'decrement'; nome: string }
   | { type: 'remove'; nome: string }
-  | { type: 'clear' };
+  | { type: 'clear' }
+  | { type: 'revalidate'; lines: readonly CartLine[] };
 
 // ── Reducer ────────────────────────────────────────────────────────────────
 
 export function cartReducer(state: CartState, action: Action): CartState {
   switch (action.type) {
     case 'add': {
-      const existing = state.lines.find((l) => l.nome === action.gift.nome);
+      const matches = (l: CartLine) => l.idsAvailable.some((id) => action.gift.availableIds.includes(id)) || l.nome === action.gift.nome;
+      const existing = state.lines.find((l) => matches(l) && l.quantidade < l.qtyAvailable) ?? state.lines.find(matches);
       if (existing) {
         // aperture-nz12u — cap by qtyAvailable (works for both legacy
         // multi-row and new-shape single-row data). Pre-nz12u this
@@ -110,7 +114,7 @@ export function cartReducer(state: CartState, action: Action): CartState {
         return {
           ...state,
           lines: state.lines.map((l) =>
-            l.nome === action.gift.nome ? { ...l, quantidade: l.quantidade + 1 } : l,
+            l === existing ? { ...l, quantidade: l.quantidade + 1 } : l,
           ),
         };
       }
@@ -144,29 +148,32 @@ export function cartReducer(state: CartState, action: Action): CartState {
       return { ...state, lines: [...state.lines, line] };
     }
     case 'increment': {
+      const target = state.lines.find((l) => (l.cartKey === action.nome || l.nome === action.nome) && l.quantidade < l.qtyAvailable);
       return {
         ...state,
         lines: state.lines.map((l) =>
           // aperture-nz12u — qtyAvailable cap (dual-mode safe).
-          l.nome === action.nome && l.quantidade < l.qtyAvailable
+          l === target && l.quantidade < l.qtyAvailable
             ? { ...l, quantidade: l.quantidade + 1 }
             : l,
         ),
       };
     }
     case 'decrement': {
+      const target = state.lines.find((l) => l.cartKey === action.nome || l.nome === action.nome);
       return {
         ...state,
         lines: state.lines
           .map((l) =>
-            l.nome === action.nome ? { ...l, quantidade: l.quantidade - 1 } : l,
+            l === target ? { ...l, quantidade: l.quantidade - 1 } : l,
           )
           .filter((l) => l.quantidade > 0),
       };
     }
     case 'remove': {
-      return { ...state, lines: state.lines.filter((l) => l.nome !== action.nome) };
+      return { ...state, lines: state.lines.filter((l) => (l.cartKey ?? l.nome) !== action.nome) };
     }
+    case 'revalidate': return { ...state, lines: action.lines };
     case 'clear': {
       return { ...state, lines: [] };
     }
@@ -183,6 +190,7 @@ interface CartContextValue {
   decrement: (nome: string, origem?: OrigemCarrinho) => void;
   remove: (nome: string, origem?: OrigemCarrinho) => void;
   clear: () => void;
+  revalidate: (lines: readonly CartLine[]) => void;
   /** Total units across all lines. Drives the badge on the cart button. */
   totalUnits: number;
   /** PIX-method cart total in cents (no surcharge). */
@@ -249,19 +257,20 @@ export function CartProvider({ slug, children }: CartProviderProps) {
         despacharComDelta(celula, cartReducer, dispatch, { type: 'remove', nome }, nome, origem),
       // clear runs after a purchase — not a removal, nothing emitted.
       clear: () => dispatch({ type: 'clear' }),
+      revalidate: (lines) => dispatch({ type: 'revalidate', lines }),
       totalUnits,
       totalPixCents,
       totalCartaoCents,
       remainingFor: (nome) => {
-        const line = state.lines.find((l) => l.nome === nome);
-        if (!line) return Infinity; // First add: cap comes from gift.qtyAvailable, not the cart.
+        const lines = state.lines.filter((l) => l.nome === nome);
+        if (!lines.length) return Infinity; // First add: cap comes from gift.qtyAvailable, not the cart.
         // aperture-nz12u — qtyAvailable, NOT idsAvailable.length. For
         // new-shape data the length is always 1 but the slot can have N
         // units remaining.
-        return line.qtyAvailable - line.quantidade;
+        return lines.reduce((n, line) => n + line.qtyAvailable - line.quantidade, 0);
       },
       quantidadeFor: (nome) =>
-        state.lines.find((l) => l.nome === nome)?.quantidade ?? 0,
+        state.lines.filter((l) => l.nome === nome).reduce((n, l) => n + l.quantidade, 0),
     };
   }, [state, celula]);
 
@@ -323,13 +332,15 @@ export function toSagaInput(
 
 /**
  * aperture-gu7u6 — true when both carts would send the same checkout request
- * (same saga items, same order). A pending checkout screen is only valid for
+ * (same saga items, order and quoted unit prices). A checkout screen is only valid for
  * the cart it was generated from.
  */
 export function sameCheckoutRequest(
   a: readonly CartLine[],
   b: readonly CartLine[],
 ): boolean {
-  return JSON.stringify(toSagaInput(a)) === JSON.stringify(toSagaInput(b));
+  return JSON.stringify(toSagaInput(a)) === JSON.stringify(toSagaInput(b)) &&
+    JSON.stringify(a.map((l) => [l.valorCents, l.valorComTaxaCartaoCents])) ===
+    JSON.stringify(b.map((l) => [l.valorCents, l.valorComTaxaCartaoCents]));
 }
 
