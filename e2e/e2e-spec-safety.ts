@@ -9,8 +9,12 @@
  * silently creating an unguarded payment path.
  */
 export const E2E_SPEC_SAFETY = [
+  // Seeds gifts (one with a synthetic sold item); edits/removes as the owner. No checkout.
+  { file: '0vne4-owner-edit-pagina.spec.ts', safety: 'non-payment' },
   { file: '118sb-clickthrough-gate.spec.ts', safety: 'non-payment' },
   { file: '1z18g-member-permissions-ui.spec.ts', safety: 'non-payment' },
+  // Read-only, anonymous: server HTML head + icon/manifest fetches.
+  { file: '4nnys-seo-head.spec.ts', safety: 'non-payment' },
   {
     file: '4uvgf-admin-estorno.spec.ts',
     safety: 'money-movement',
@@ -37,6 +41,8 @@ export const E2E_SPEC_SAFETY = [
     capability: 'Creates, reconciles, and refunds PIX payments.',
   },
   { file: 'acr3t-switcher-mobile.spec.ts', safety: 'non-payment' },
+  // Guest page CTA + signup first touch; seeds a campaign, never pays.
+  { file: 'i06qu-guest-cta.spec.ts', safety: 'non-payment' },
   // Deliberately safe: only denied anonymous/non-admin approval attempts with
   // an impossible id. Keeping this runnable remotely preserves the auth gate.
   { file: 'admin-authz-denial.spec.ts', safety: 'non-payment' },

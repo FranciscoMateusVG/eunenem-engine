@@ -4,6 +4,7 @@ import {
   SIGNUP_ATTRIBUTION_KEY,
   type SignupAttribution,
 } from '../../../../src/domain/usuario/signup-attribution.js';
+import { resolveRoute } from '../App.js';
 
 type Browser = {
   location: Pick<Location, 'search' | 'pathname' | 'protocol'>;
@@ -35,8 +36,21 @@ export function readFirstTouch(b: Browser): SignupAttribution | null {
     return null;
   }
 }
+// aperture-i06qu — guest pages are not creator acquisition. A first touch
+// stored there is kept (organic guest→creator still shows landing /pagina/x)
+// until a later entry carries campaign params, e.g. the guest_to_creator CTA.
+const GUEST_ROUTE_KINDS = new Set(['pagina', 'pagina-sucesso', 'confirmar-presenca']);
+const CAMPAIGN_PARAMS = ['utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content', 'gclid', 'gbraid', 'wbraid'];
+
+function replaceableGuestTouch(stored: SignupAttribution, search: string): boolean {
+  if (!GUEST_ROUTE_KINDS.has(resolveRoute(stored.landing_path).kind)) return false;
+  const params = new URLSearchParams(search);
+  return CAMPAIGN_PARAMS.some((key) => params.get(key));
+}
+
 export function captureFirstTouch(b: Browser): SignupAttribution | null {
   let value = readFirstTouch(b);
+  if (value && replaceableGuestTouch(value, b.location.search)) value = null;
   if (!value) {
     const params = new URLSearchParams(b.location.search);
     // Auth callback is not an acquisition entry when the original browser state is absent.
