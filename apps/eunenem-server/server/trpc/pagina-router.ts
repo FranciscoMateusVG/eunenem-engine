@@ -964,6 +964,7 @@ export const paginaRouter = t.router({
       const contribuicao = primeiroItemContribuicao
         ? await ctx.deps.contribuicaoRepository.findById(
             primeiroItemContribuicao.idContribuicao as unknown as IdContribuicao,
+            { incluirArquivadas: true },
           )
         : undefined;
 

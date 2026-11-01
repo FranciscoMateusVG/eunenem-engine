@@ -1,5 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { ServerDeps } from '../../apps/eunenem-server/server/auth/setup.js';
+import { appRouter } from '../../apps/eunenem-server/server/trpc/router.js';
 import { CampanhaRepositoryPostgres } from '../../src/adapters/arrecadacao/campanha-repository.postgres.js';
 import { ContribuicaoRepositoryPostgres } from '../../src/adapters/arrecadacao/contribuicao-repository.postgres.js';
 import { RecebedorRepositoryPostgres } from '../../src/adapters/arrecadacao/recebedor-repository.postgres.js';
@@ -10,10 +12,13 @@ import { PixCobrancaProviderFake } from '../../src/adapters/pagamentos/pix-cobra
 import { PagamentoProviderFake } from '../../src/adapters/pagamentos/provider.fake.js';
 import { PagamentoRepositoryPostgres } from '../../src/adapters/pagamentos/repository.postgres.js';
 import { ProvedorRegraTaxaMemory } from '../../src/adapters/taxas/regra-provider.memory.js';
+import { WebhookEventArchiveMemory } from '../../src/adapters/webhook-archive/webhook-event-archive.memory.js';
+import { ID_PLATAFORMA_EUNENEM } from '../../src/index.js';
 import { removerContribuicao } from '../../src/use-cases/arrecadacao/remover-contribuicao.js';
 import { finalizarPagamentoAprovado } from '../../src/use-cases/checkout/finalizar-pagamento-aprovado.js';
 import { finalizarPagamentoRejeitado } from '../../src/use-cases/checkout/finalizar-pagamento-rejeitado.js';
 import { prepararPagamentoCarrinho } from '../../src/use-cases/checkout/iniciar-pagamento-carrinho.js';
+import { adminAuthOverrides } from '../helpers/admin-auth.js';
 import { createTestObservability } from '../helpers/observability.js';
 import { makePagamento } from '../helpers/pagamento-repository.conformance.js';
 import { seedPagamentoParents } from '../helpers/seed-pagamento-parents.js';
@@ -160,4 +165,54 @@ it.each([
   expect(await contribuicaoRepository.findById(idContribuicao)).toBeUndefined();
   const entries = await deps.livroFinanceiroRepository.findLancamentosByIdPagamento(pagamento.id);
   expect(entries.length).toBe(status === 'aprovado' ? 2 : 0);
+});
+
+it.each([
+  'pendente',
+  'rejeitado',
+] as const)('admin history still resolves %s payment and gift name after archive', async (status) => {
+  const idContribuicao = randomUUID();
+  const payment = makePagamento({ idContribuicao, status });
+  await seedPagamentoParents(testDb.db, payment);
+  await testDb.db
+    .updateTable('campanhas')
+    .set({ id_plataforma: ID_PLATAFORMA_EUNENEM })
+    .where('id', '=', payment.intencao.idCampanha)
+    .execute();
+  const contribuicaoRepository = new ContribuicaoRepositoryPostgres(testDb.db);
+  const pagamentoRepository = new PagamentoRepositoryPostgres(testDb.db);
+  await pagamentoRepository.save(payment);
+  const auth = adminAuthOverrides();
+  const caller = appRouter.createCaller({
+    headers: auth.headers,
+    resHeaders: new Headers(),
+    deps: {
+      ...auth.depsOverrides,
+      contribuicaoRepository,
+      pagamentoRepository,
+      campanhaRepository: new CampanhaRepositoryPostgres(
+        testDb.db,
+        new RecebedorRepositoryPostgres(testDb.db),
+      ),
+      livroFinanceiroRepository: new LivroFinanceiroRepositoryPostgres(testDb.db),
+      webhookEventArchive: new WebhookEventArchiveMemory(),
+      clock: () => new Date(),
+      observability: obs.observability,
+    } as unknown as ServerDeps,
+  });
+  const before = await caller.admin.pagamentos.findById({ idPagamento: payment.id });
+  expect(JSON.stringify(before)).toContain('seed');
+  await removerContribuicao(
+    { contribuicaoRepository, pagamentoRepository, observability: obs.observability },
+    {
+      idContribuicao,
+      idCampanhaEsperada: payment.intencao.idCampanha,
+    },
+  );
+  expect(await caller.admin.pagamentos.findById({ idPagamento: payment.id })).toEqual(before);
+  const listed = await caller.admin.pagamentos.listByCampanha({
+    idCampanha: payment.intencao.idCampanha,
+  });
+  expect(listed.pagamentos).toHaveLength(1);
+  expect(JSON.stringify(listed)).toContain('seed');
 });

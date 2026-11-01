@@ -91,12 +91,17 @@ export class ContribuicaoRepositoryMemory implements ContribuicaoRepository {
     });
   }
 
-  async findByCampanhaId(idCampanha: IdCampanha): Promise<readonly Contribuicao[]> {
+  async findByCampanhaId(
+    idCampanha: IdCampanha,
+    options?: { incluirArquivadas?: boolean },
+  ): Promise<readonly Contribuicao[]> {
     return tracer.startActiveSpan('db.arrecadacao_contribuicoes.findByCampanhaId', async (span) => {
       span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'SELECT' });
       try {
         const result = [...this.contribuicoes.values()].filter(
-          (c) => !this.arquivadas.has(c.id) && c.idCampanha === idCampanha,
+          (c) =>
+            (options?.incluirArquivadas || !this.arquivadas.has(c.id)) &&
+            c.idCampanha === idCampanha,
         );
         span.setStatus({ code: SpanStatusCode.OK });
         return result;

@@ -158,7 +158,10 @@ export class ContribuicaoRepositoryPostgres implements ContribuicaoRepository {
     });
   }
 
-  async findByCampanhaId(idCampanha: IdCampanha): Promise<readonly Contribuicao[]> {
+  async findByCampanhaId(
+    idCampanha: IdCampanha,
+    options?: { incluirArquivadas?: boolean },
+  ): Promise<readonly Contribuicao[]> {
     return tracer.startActiveSpan('db.arrecadacao_contribuicoes.findByCampanhaId', async (span) => {
       span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'SELECT' });
       try {
@@ -166,7 +169,7 @@ export class ContribuicaoRepositoryPostgres implements ContribuicaoRepository {
           .selectFrom('contribuicoes')
           .selectAll()
           .where('campanha_id', '=', idCampanha)
-          .where('arquivada_em', 'is', null)
+          .$if(!options?.incluirArquivadas, (q) => q.where('arquivada_em', 'is', null))
           .execute();
         span.setStatus({ code: SpanStatusCode.OK });
         return rows.map(toContribuicao);

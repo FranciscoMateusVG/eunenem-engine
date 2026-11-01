@@ -34,7 +34,10 @@ export interface ContribuicaoRepository {
     id: IdContribuicao,
     options?: { incluirArquivadas?: boolean },
   ): Promise<Contribuicao | undefined>;
-  findByCampanhaId(idCampanha: IdCampanha): Promise<readonly Contribuicao[]>;
+  findByCampanhaId(
+    idCampanha: IdCampanha,
+    options?: { incluirArquivadas?: boolean },
+  ): Promise<readonly Contribuicao[]>;
   /**
    * Lista as contribuições associadas a uma opção dentro de uma campanha
    * (aperture-d6atj). Usado pelo `listarContribuicoesDeOpcao` para alimentar
@@ -56,7 +59,7 @@ export interface ContribuicaoRepository {
    * Remove uma contribuição pelo id (aperture-d6atj). Caller (use-case
    * `removerContribuicao`) já validou status + autorização — o adapter só
    * arquiva, preservando referências históricas. Leituras normais excluem
-   * arquivadas; incluirArquivadas é exclusivo da finalização de pagamentos
+   * arquivadas; incluirArquivadas permite leituras históricas de pagamentos
    * já existentes. Idempotente: id inexistente é no-op.
    */
   deleteById(id: IdContribuicao): Promise<void>;
