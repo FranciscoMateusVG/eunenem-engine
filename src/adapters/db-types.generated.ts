@@ -488,6 +488,21 @@ export interface PixCobrancaDevolucoes {
   status: string;
 }
 
+export interface PixContestacoes {
+  atualizado_em: Generated<Timestamp>;
+  atualizado_por: string | null;
+  caso_id: string | null;
+  criado_em: Generated<Timestamp>;
+  criado_por: string;
+  estado: Generated<string>;
+  id: string;
+  id_pagamento: string;
+  notas: Generated<string>;
+  ocorrida_em: Timestamp;
+  resolvida_em: Timestamp | null;
+  valor_cents: number;
+}
+
 export interface ProviderFeeEvents {
   account_ref: string;
   amount_cents: Int8;
@@ -745,6 +760,7 @@ export interface DB {
   perfil_campanhas: PerfilCampanhas;
   perfil_criadores: PerfilCriadores;
   pix_cobranca_devolucoes: PixCobrancaDevolucoes;
+  pix_contestacoes: PixContestacoes;
   provider_fee_events: ProviderFeeEvents;
   provider_fee_inter_scans: ProviderFeeInterScans;
   provider_fee_sync: ProviderFeeSync;

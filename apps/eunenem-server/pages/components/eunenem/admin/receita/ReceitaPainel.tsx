@@ -502,8 +502,8 @@ export function ReceitaNotas() {
       <p>
         <span className="text-ink-soft">Recebido no banco:</span> soma dos pagamentos aprovados,
         menos estornos. É uma estimativa: o custo do provedor e o valor que de fato caiu na conta
-        não são registrados. Estornos parciais, disputas e chargebacks não são registrados e
-        ficam fora.
+        não são registrados. Estornos parciais e chargebacks ficam fora. Contestações PIX (MED) são registradas
+        separadamente no admin e retêm repasses, mas não ajustam esta estimativa nem o ledger.
       </p>
     </div>
   );
