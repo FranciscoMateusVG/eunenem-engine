@@ -10,6 +10,7 @@ import {
   aprovarRepasse,
   aprovarRepassePix,
   cancelarRepasse,
+  cancelarRepasseRetidoMed,
   criarRepasseRecebedorSolicitado,
   iniciarTransferencia,
   marcarRepasseEnviadoAoBanco,
@@ -38,6 +39,7 @@ import type { RecebedorRepository } from '../../arrecadacao/recebedor-repository
 import type { Database } from '../../database.js';
 import {
   acquirePaymentMoneyMovementLocks,
+  assertMedTransfersAllowed,
   assertTransfersAllowed,
   findPaymentIdsForLancamentos,
   findPaymentIdsForRepasse,
@@ -104,7 +106,10 @@ export function predicadoLancamentoDisponivel(now: Date): RawBuilder<boolean> {
                 AND p.intencao_balance_transaction_available_on IS NOT NULL
                 AND p.intencao_balance_transaction_available_on <= ${now}
                 AND NOT ${predicadoDevolucaoPixAtiva()}
-                AND NOT ${predicadoRefundOpStripeAtiva()})`;
+                AND NOT ${predicadoRefundOpStripeAtiva()}
+                AND NOT EXISTS (SELECT 1 FROM pix_contestacoes med
+                  WHERE med.id_pagamento = l.id_pagamento
+                    AND med.estado IN ('bloqueada', 'devolvida')))`;
 }
 
 /**
@@ -380,6 +385,7 @@ export class LivroFinanceiroRepositoryPostgres implements LivroFinanceiroReposit
             const idsPagamento = await findPaymentIdsForLancamentos(tx, idsLancamentos);
             const lockedIds = await acquirePaymentMoneyMovementLocks(tx, idsPagamento);
             await assertTransfersAllowed(tx, lockedIds);
+            await assertMedTransfersAllowed(tx, lockedIds);
             await sql`
               UPDATE lancamentos_financeiros
                 SET transferido_em = ${transferidoEm}
@@ -705,6 +711,13 @@ export class LivroFinanceiroRepositoryPostgres implements LivroFinanceiroReposit
         try {
           // biome-ignore lint/suspicious/noExplicitAny: Kysely tx type narrowing isn't worth chasing for the heterogeneous mix of sql`` + insertInto here.
           const result = await (this.db as any).transaction().execute(async (tx: any) => {
+            // Serialize the sweep with manual MED registration, before locking ledger rows.
+            const paymentRows = await sql<{ id: string }>`SELECT id FROM pagamentos
+              WHERE intencao_id_campanha = ${input.idCampanha} ORDER BY id`.execute(tx);
+            await acquirePaymentMoneyMovementLocks(
+              tx,
+              paymentRows.rows.map((p) => p.id),
+            );
             // 1. SELECT FOR UPDATE on the eligible set. The lock here +
             //    the unique partial index on (id_campanha) WHERE
             //    status='solicitado' jointly serialize concurrent
@@ -793,6 +806,7 @@ export class LivroFinanceiroRepositoryPostgres implements LivroFinanceiroReposit
             const idsPagamento = await findPaymentIdsForRepasse(tx, input.idRepasse);
             const lockedIds = await acquirePaymentMoneyMovementLocks(tx, idsPagamento);
             await assertTransfersAllowed(tx, lockedIds);
+            await assertMedTransfersAllowed(tx, lockedIds);
 
             // 1. SELECT FOR UPDATE the target repasse.
             const lockedRows = (await sql<RepasseRow>`
@@ -882,6 +896,11 @@ export class LivroFinanceiroRepositoryPostgres implements LivroFinanceiroReposit
         try {
           // biome-ignore lint/suspicious/noExplicitAny: see aprovarRepasseTransaction
           const result = await (this.db as any).transaction().execute(async (tx: any) => {
+            const idsPagamento = await findPaymentIdsForRepasse(tx, input.idRepasse);
+            const lockedIds = await acquirePaymentMoneyMovementLocks(tx, idsPagamento);
+            await assertTransfersAllowed(tx, lockedIds);
+            await assertMedTransfersAllowed(tx, lockedIds);
+
             const lockedRows = (await sql<RepasseRow>`
               SELECT * FROM repasses_recebedor WHERE id = ${input.idRepasse} FOR UPDATE
             `.execute(tx)) as unknown as { rows: RepasseRow[] };
@@ -1003,6 +1022,9 @@ export class LivroFinanceiroRepositoryPostgres implements LivroFinanceiroReposit
                 acao: 'reconciliar' as const,
               };
             }
+
+            // A late MED may coexist with sent money: only block a fresh claim.
+            await assertMedTransfersAllowed(tx, lockedIds);
 
             // Fresh claim: aprovado | falhou → transferindo (domain-guarded).
             const updated = iniciarTransferencia(existingRepasse);
@@ -1330,6 +1352,8 @@ export class LivroFinanceiroRepositoryPostgres implements LivroFinanceiroReposit
         try {
           // biome-ignore lint/suspicious/noExplicitAny: see aprovarRepasseTransaction
           const result = await (this.db as any).transaction().execute(async (tx: any) => {
+            const idsPagamento = await findPaymentIdsForRepasse(tx, input.idRepasse);
+            await acquirePaymentMoneyMovementLocks(tx, idsPagamento);
             const lockedRows = (await sql<RepasseRow>`
               SELECT * FROM repasses_recebedor WHERE id = ${input.idRepasse} FOR UPDATE
             `.execute(tx)) as unknown as { rows: RepasseRow[] };
@@ -1338,15 +1362,22 @@ export class LivroFinanceiroRepositoryPostgres implements LivroFinanceiroReposit
               throw new FinanceiroRepasseNaoEncontradoError(input.idRepasse);
             }
             const existingRepasse = repasseFromRow(existing);
-            if (existingRepasse.status !== 'falhou') {
+            const med = await sql<{ allowed: boolean }>`SELECT
+              EXISTS (SELECT 1 FROM pix_contestacoes WHERE id_pagamento = ANY(${[...idsPagamento]}::uuid[]))
+              AND NOT EXISTS (SELECT 1 FROM lancamentos_financeiros WHERE id_repasse = ${input.idRepasse}
+                AND transferido_em IS NOT NULL) AS allowed`.execute(tx);
+            const medCancel =
+              med.rows[0]?.allowed === true &&
+              ['solicitado', 'aprovado'].includes(existingRepasse.status);
+            if (existingRepasse.status !== 'falhou' && !medCancel) {
               throw new FinanceiroRepasseStatusInvalidoError(
                 input.idRepasse,
                 existingRepasse.status,
               );
             }
-
-            // Domain-guarded: falhou → cancelado (only claim-release path).
-            const updated = cancelarRepasse(existingRepasse);
+            const updated = medCancel
+              ? cancelarRepasseRetidoMed(existingRepasse)
+              : cancelarRepasse(existingRepasse);
             await sql`
               UPDATE repasses_recebedor
                 SET status = ${updated.status}
@@ -1471,6 +1502,7 @@ export class LivroFinanceiroRepositoryPostgres implements LivroFinanceiroReposit
       const ids = await findPaymentIdsForRepasse(tx, input.idRepasse);
       const locked = await acquirePaymentMoneyMovementLocks(tx, ids);
       await assertTransfersAllowed(tx, locked);
+      await assertMedTransfersAllowed(tx, locked);
       const rows = await sql<RepasseRow>`SELECT * FROM repasses_recebedor
         WHERE id = ${input.idRepasse} FOR UPDATE`.execute(tx);
       const row = rows.rows[0];

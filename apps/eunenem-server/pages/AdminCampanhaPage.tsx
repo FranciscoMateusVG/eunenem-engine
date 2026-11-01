@@ -1,3 +1,4 @@
+import { ContestacoesMed } from "@/components/eunenem/admin/ContestacoesMed";
 import { AdicionarEmailCampanha } from "@/components/eunenem/admin/AdicionarEmailCampanha";
 import {
   AdministradorItem,
@@ -61,6 +62,7 @@ export function AdminCampanhaPage({ idCampanha }: { idCampanha: string }) {
         </>
       }
     >
+      <ContestacoesMed idCampanha={idCampanha} />
       {isLoading && <LoadingState />}
       {error && <ErrorState message={error.message} />}
       {!isLoading && !error && data === null && (

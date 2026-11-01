@@ -42,6 +42,11 @@ export const E2E_SPEC_SAFETY = [
   { file: 'admin-authz-denial.spec.ts', safety: 'non-payment' },
   { file: 'admin-grouped-legacy.spec.ts', safety: 'non-payment' },
   { file: 'admin-pagamento-multi-item.spec.ts', safety: 'non-payment' },
+  {
+    file: 'admin-pix-med.spec.ts',
+    safety: 'money-movement',
+    capability: 'Registers and releases MED payout holds; local synthetic fixtures only.',
+  },
   // Sharing is local-only (the spec self-skips remote targets); never moves money.
   { file: 'campanha-compartilhar.spec.ts', safety: 'non-payment' },
   { file: 'cross-user-denial.spec.ts', safety: 'non-payment' },

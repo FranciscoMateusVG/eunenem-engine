@@ -1,4 +1,5 @@
 import { sql } from 'kysely';
+import { FinanceiroContestacaoMedError } from '../../errors/pagamentos/financeiro/contestacao-med.error.js';
 import { FinanceiroPagamentoMovimentacaoConflitanteError } from '../../errors/pagamentos/financeiro/pagamento-movimentacao-conflitante.error.js';
 import { sortUniquePaymentIds } from './payment-money-movement-lock.js';
 
@@ -107,4 +108,18 @@ export async function findPaymentIdsForRepasse(
       ORDER BY id_pagamento ASC
   `.execute(executor)) as unknown as { rows: Array<{ id_pagamento: string }> };
   return result.rows.map((row) => row.id_pagamento);
+}
+
+/** MED blocks new money movement, never reconciliation of already-sent funds. */
+export async function assertMedTransfersAllowed(
+  executor: SqlExecutor,
+  idsPagamento: readonly string[],
+): Promise<void> {
+  if (idsPagamento.length === 0) return;
+  const med = await sql<{ id_pagamento: string }>`
+    SELECT id_pagamento FROM pix_contestacoes
+    WHERE id_pagamento = ANY(${[...idsPagamento]}::uuid[])
+      AND estado IN ('bloqueada', 'devolvida') LIMIT 1
+  `.execute(executor);
+  if (med.rows[0]) throw new FinanceiroContestacaoMedError(med.rows[0].id_pagamento);
 }
