@@ -13,9 +13,18 @@ function browserSessionStorage(): CheckoutOperationStorage | undefined {
 }
 
 export class CheckoutOperationStorageUnavailableError extends Error {
+  readonly code = "CHECKOUT_STORAGE_UNAVAILABLE";
   constructor() {
-    super("checkout_operation_storage_unavailable");
+    super("Não foi possível acessar o armazenamento desta aba. Habilite o armazenamento do navegador e tente novamente.");
     this.name = "CheckoutOperationStorageUnavailableError";
+  }
+}
+
+export class CheckoutCooldownError extends Error {
+  readonly code = "CHECKOUT_COOLDOWN";
+  constructor(readonly retryAt: number) {
+    super(`Aguarde ${Math.max(1, Math.ceil((retryAt - Date.now()) / 1000))} s antes de tentar novamente.`);
+    this.name = "CheckoutCooldownError";
   }
 }
 
@@ -126,7 +135,7 @@ export async function executeRecoverableCheckout<
   if (running) return running as Promise<Exclude<TResponse, PreparedCheckoutResult>>;
   const perform = async (): Promise<Exclude<TResponse, PreparedCheckoutResult>> => {
     const retryAt = Number(storage.getItem(`${storageKey}:retryAt`) ?? 0);
-    if (retryAt > Date.now()) throw new Error("Aguarde alguns segundos antes de tentar novamente.");
+    if (retryAt > Date.now()) throw new CheckoutCooldownError(retryAt);
     const operationId = getOrCreatePendingCheckoutOperation(storageKey, storage, input.createId);
     const requestInput = { ...input.requestInput, operationId };
     let result = await input.request(requestInput);
@@ -137,9 +146,10 @@ export async function executeRecoverableCheckout<
       // Network errors never clear an ambiguous identity. No automatic reissue.
       const failures = Math.min(4, Number(storage.getItem(`${storageKey}:failures`) ?? 0) + 1);
       storage.setItem(`${storageKey}:failures`, String(failures));
-      storage.setItem(`${storageKey}:retryAt`, String(Date.now() + Math.min(30000, 5000 * 2 ** (failures - 1))));
+      const nextRetryAt = Date.now() + Math.min(30000, 5000 * 2 ** (failures - 1));
+      storage.setItem(`${storageKey}:retryAt`, String(nextRetryAt));
       clearPendingCheckoutOperation(storageKey, operationId, storage);
-      throw new Error("Não foi possível gerar o PIX. Aguarde alguns segundos e tente novamente.");
+      throw new CheckoutCooldownError(nextRetryAt);
     }
     storage.removeItem(`${storageKey}:failures`);
     storage.removeItem(`${storageKey}:retryAt`);

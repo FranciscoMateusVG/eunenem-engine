@@ -20,7 +20,7 @@ import { createPixPollingPolicy } from "./pixPolling.js";
 import type { inferRouterInputs, inferRouterOutputs } from "@trpc/server";
 import type { PaginaRouter } from "../../server/trpc/pagina-router.js";
 import { useCampanhaRota } from "./campanha-rota.js";
-import { executeRecoverableCheckout } from "./checkoutOperationClient.js";
+import { useRecoverableCheckout } from "./useRecoverableCheckout.js";
 import { trpc } from "./trpc.js";
 
 type PaginaInputs = inferRouterInputs<PaginaRouter>;
@@ -122,20 +122,10 @@ export function useIniciarPagamentoContribuicao() {
   // bare guest URL → no idCampanha → server default (guest back-compat).
   const idCampanha = useCampanhaRota();
   const m = trpc.pagina.iniciarPagamentoContribuicao.useMutation();
-  const mutateAsync = async (
-    input: IniciarPagamentoInput,
-  ): Promise<IniciarPagamentoResult> => {
-    const addressed = idCampanha ? { ...input, idCampanha } : input;
-    return executeRecoverableCheckout({
-      storageKey: CHECKOUT_OPERATION_STORAGE_KEYS.contribution,
-      requestInput: addressed,
-      request: m.mutateAsync,
-    });
-  };
-  // Do not expose the raw one-shot mutate: checkout requires the
-  // reserve response's per-operation cookie to make the second request.
+  const operation = useRecoverableCheckout<IniciarPagamentoInput, PaginaOutputs["iniciarPagamentoContribuicao"]>(CHECKOUT_OPERATION_STORAGE_KEYS.contribution, m);
+  const mutateAsync = (input: IniciarPagamentoInput) => operation.mutateAsync(idCampanha ? { ...input, idCampanha } : input);
   const { mutate: _rawMutate, mutateAsync: _rawMutateAsync, ...state } = m;
-  return { ...state, mutateAsync };
+  return { ...state, ...operation, mutateAsync };
 }
 
 /**
@@ -147,18 +137,10 @@ export function useIniciarPagamentoCarrinho() {
   // aperture-1yx1n — same money-write rule as the single-shot mutation.
   const idCampanha = useCampanhaRota();
   const m = trpc.pagina.iniciarPagamentoCarrinho.useMutation();
-  const mutateAsync = async (
-    input: IniciarPagamentoCarrinhoInput,
-  ): Promise<IniciarPagamentoCarrinhoResult> => {
-    const addressed = idCampanha ? { ...input, idCampanha } : input;
-    return executeRecoverableCheckout({
-      storageKey: CHECKOUT_OPERATION_STORAGE_KEYS.cart,
-      requestInput: addressed,
-      request: m.mutateAsync,
-    });
-  };
+  const operation = useRecoverableCheckout<IniciarPagamentoCarrinhoInput, PaginaOutputs["iniciarPagamentoCarrinho"]>(CHECKOUT_OPERATION_STORAGE_KEYS.cart, m);
+  const mutateAsync = (input: IniciarPagamentoCarrinhoInput) => operation.mutateAsync(idCampanha ? { ...input, idCampanha } : input);
   const { mutate: _rawMutate, mutateAsync: _rawMutateAsync, ...state } = m;
-  return { ...state, mutateAsync };
+  return { ...state, ...operation, mutateAsync };
 }
 
 /**

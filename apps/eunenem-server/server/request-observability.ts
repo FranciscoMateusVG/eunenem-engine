@@ -147,3 +147,19 @@ export function reportTrpcInternalFailure(
     statusCode: 500,
   });
 }
+
+const CHECKOUT_PATHS = new Set(['pagina.iniciarPagamentoCarrinho', 'pagina.iniciarPagamentoContribuicao']);
+/** One record per failed procedure, including batch 4xx/pre-claim failures.
+ * Never log input, cookie/capability, contributor fields or exception text. */
+export function reportCheckoutFailure(context: Context, input: {path?: string; code: string; input?: unknown}): void {
+  if (!input.path || !CHECKOUT_PATHS.has(input.path)) return;
+  const state = requestStates.get(context);
+  if (!state) return;
+  const operationId = input.input && typeof input.input === 'object' && 'operationId' in input.input ? input.input.operationId : undefined;
+  try {
+    state.logger.warn('checkout.request.failed', {
+      requestId: state.requestId, path: input.path, code: /^[A-Z_]{1,50}$/.test(input.code) ? input.code : 'UNKNOWN',
+      operationId: typeof operationId === 'string' && UUID.test(operationId) ? operationId : null,
+    });
+  } catch { /* Logging cannot change checkout semantics. */ }
+}

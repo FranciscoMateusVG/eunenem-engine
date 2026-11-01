@@ -450,6 +450,7 @@ export function GiftCheckoutModal({
             onContinue={onConfirmMetodo}
             isPending={iniciarPagamento.isPending}
             isError={iniciarPagamento.isError}
+            errorMessage={iniciarPagamento.errorMessage}
             configLoading={configLoading}
             configError={configError}
             configResolved={configCheckout.isSuccess}
@@ -463,6 +464,8 @@ export function GiftCheckoutModal({
             valorCents={gift.valorCents}
             submitting={iniciarPagamento.isPending}
             submitError={iniciarPagamento.isError}
+              errorMessage={iniciarPagamento.errorMessage}
+              retrySeconds={iniciarPagamento.retrySeconds}
             initial={pixContribuinte}
             onSubmit={onSubmitPixIdentity}
             onBack={() => setPhase({ kind: "checkout", step: "metodo" })}
@@ -806,6 +809,7 @@ function MetodoStep({
   onContinue,
   isPending,
   isError,
+  errorMessage,
   configLoading,
   configError,
   configResolved,
@@ -818,6 +822,7 @@ function MetodoStep({
   onContinue: () => void;
   isPending: boolean;
   isError: boolean;
+  errorMessage?: string;
   /** aperture-irhxi blocker 1: checkout config still resolving — fail closed. */
   configLoading: boolean;
   /** Config failed — PIX blocked (with retry); cartão doesn't depend on it. */
@@ -920,7 +925,7 @@ function MetodoStep({
             lineHeight: 1.4,
           }}
         >
-          deu ruim ao iniciar o pagamento — tenta de novo daqui a pouco ♡
+          {errorMessage ?? "Não foi possível iniciar o pagamento. Tente novamente."}
         </div>
       )}
 
