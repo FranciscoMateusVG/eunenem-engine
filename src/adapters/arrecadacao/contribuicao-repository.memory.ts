@@ -80,7 +80,7 @@ export class ContribuicaoRepositoryMemory implements ContribuicaoRepository {
             ? undefined
             : this.contribuicoes.get(id);
         span.setStatus({ code: SpanStatusCode.OK });
-        return result;
+        return result && this.arquivadas.has(id) ? { ...result, arquivada: true } : result;
       } catch (error: unknown) {
         span.recordException(error as Error);
         span.setStatus({ code: SpanStatusCode.ERROR });
@@ -104,7 +104,7 @@ export class ContribuicaoRepositoryMemory implements ContribuicaoRepository {
             c.idCampanha === idCampanha,
         );
         span.setStatus({ code: SpanStatusCode.OK });
-        return result;
+        return result.map((c) => (this.arquivadas.has(c.id) ? { ...c, arquivada: true } : c));
       } catch (error: unknown) {
         span.recordException(error as Error);
         span.setStatus({ code: SpanStatusCode.ERROR });

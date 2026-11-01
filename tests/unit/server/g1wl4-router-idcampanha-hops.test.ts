@@ -1892,3 +1892,75 @@ describe('iytxa — public checkout capability slots', () => {
     expect(rig.anonCtx.resHeaders.get('set-cookie')).not.toContain(otherPair.split('=')[0]);
   });
 });
+
+describe('fub3k: authoritative cart quotes', () => {
+  it.each([
+    'pix',
+    'credit_card',
+  ] as const)('quotes current prices and exact %s total; stale quote never creates payment', async (metodo) => {
+    const rig = await buildRig();
+    const user = await rig.addUser(uniqueEmail('quote-owner'));
+    const other = await rig.addUser(uniqueEmail('quote-other'));
+    const [id] = (
+      await user.caller.contribuicao.create({
+        idCampanha: user.campanhaSignup.id,
+        nome: 'Quote gift',
+        valor: 1000,
+        quantidade: 4,
+      })
+    ).ids;
+    const [foreign] = (
+      await other.caller.contribuicao.create({
+        idCampanha: other.campanhaSignup.id,
+        nome: 'Private gift',
+        valor: 9000,
+        quantidade: 1,
+      })
+    ).ids;
+    if (!id || !foreign) throw new Error('fixture');
+    const input = { slug: user.slug, itens: [{ idContribuicao: id, quantidade: 3 }], metodo };
+    const quote = await rig.anonCaller.pagina.revalidarCarrinho({
+      ...input,
+      idsDisponiveis: [foreign],
+    });
+    expect(quote.itens).toHaveLength(1);
+    expect(quote.itens[0]).toMatchObject({ idContribuicao: id, quantidade: 3, valorCents: 1090 });
+    expect(quote.totalPixCents).toBe(3270);
+    const oldTotal = metodo === 'pix' ? quote.totalPixCents : quote.totalCartaoCents;
+    await user.caller.contribuicao.update({ idCampanha: user.campanhaSignup.id, id, valor: 2000 });
+    const operationId = randomUUID();
+    await expect(
+      rig.anonCaller.pagina.iniciarPagamentoCarrinho({
+        ...input,
+        operationId,
+        expectedTotalCents: oldTotal,
+      }),
+    ).rejects.toMatchObject({ code: 'CONFLICT' });
+    expect(await rig.deps.checkoutOperationRepository.findById(operationId)).toBeUndefined();
+    expect(await rig.deps.pagamentoRepository.findById(operationId)).toBeUndefined();
+    const fresh = await rig.anonCaller.pagina.revalidarCarrinho(input);
+    const expectedTotalCents = metodo === 'pix' ? fresh.totalPixCents : fresh.totalCartaoCents;
+    const checkout = { ...input, operationId: randomUUID(), expectedTotalCents };
+    await rig.anonCaller.pagina.iniciarPagamentoCarrinho(checkout);
+    const cookie = rig.anonCtx.resHeaders.getSetCookie()[0]?.split(';')[0];
+    if (!cookie) throw new Error('fixture cookie');
+    rig.anonCtx.headers.set('cookie', cookie);
+    await user.caller.contribuicao.update({ idCampanha: user.campanhaSignup.id, id, valor: 3000 });
+    await expect(rig.anonCaller.pagina.iniciarPagamentoCarrinho(checkout)).rejects.toMatchObject({
+      code: 'CONFLICT',
+    });
+    expect(
+      (await rig.deps.checkoutOperationRepository.findById(checkout.operationId))
+        ?.providerStartedAt,
+    ).toBeNull();
+    // Prepare persists the intent; rejecting execution must not mutate it or start the provider.
+    expect(
+      (await rig.deps.pagamentoRepository.findById(checkout.operationId))?.intencao
+        .composicaoValoresAggregate.totalPaidCents,
+    ).toBe(expectedTotalCents);
+    await user.caller.contribuicao.update({ idCampanha: user.campanhaSignup.id, id, valor: 2000 });
+    await rig.anonCaller.pagina.iniciarPagamentoCarrinho(checkout);
+    const paid = await rig.deps.pagamentoRepository.findById(checkout.operationId);
+    expect(paid?.intencao.composicaoValoresAggregate.totalPaidCents).toBe(expectedTotalCents);
+  });
+});

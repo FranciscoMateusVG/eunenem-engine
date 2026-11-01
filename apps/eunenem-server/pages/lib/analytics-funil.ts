@@ -24,6 +24,7 @@ export type OrigemCarrinho = 'card' | 'drawer';
 /** The minimal line shape the delta needs (structural — the cart's CartLine satisfies it). */
 export interface LinhaCarrinhoMinima {
   nome: string;
+  cartKey?: string;
   quantidade: number;
   valorCents: number;
 }
@@ -47,10 +48,10 @@ export function deltaLinhaCarrinho(
   depois: readonly LinhaCarrinhoMinima[],
   nome: string,
 ): DeltaLinhaCarrinho | null {
-  const a = antes.find((l) => l.nome === nome);
-  const d = depois.find((l) => l.nome === nome);
-  const qa = a?.quantidade ?? 0;
-  const qd = d?.quantidade ?? 0;
+  const a = antes.find((l) => (l.cartKey ?? l.nome) === nome || l.nome === nome);
+  const d = depois.find((l) => (l.cartKey ?? l.nome) === nome || l.nome === nome);
+  const qa = antes.filter((l) => (l.cartKey ?? l.nome) === nome || l.nome === nome).reduce((n, l) => n + l.quantidade, 0);
+  const qd = depois.filter((l) => (l.cartKey ?? l.nome) === nome || l.nome === nome).reduce((n, l) => n + l.quantidade, 0);
   if (qa === qd) return null;
   const valorCentavos = (d ?? a)?.valorCents ?? 0;
   return qd > qa

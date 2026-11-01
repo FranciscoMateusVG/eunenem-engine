@@ -216,3 +216,39 @@ it.each([
   expect(listed.pagamentos).toHaveLength(1);
   expect(JSON.stringify(listed)).toContain('seed');
 });
+
+it('admin gift listing marks archived gifts explicitly', async () => {
+  const idContribuicao = randomUUID();
+  const payment = makePagamento({ idContribuicao, status: 'pendente' });
+  await seedPagamentoParents(testDb.db, payment);
+  await testDb.db
+    .updateTable('campanhas')
+    .set({ id_plataforma: ID_PLATAFORMA_EUNENEM })
+    .where('id', '=', payment.intencao.idCampanha)
+    .execute();
+  const repo = new ContribuicaoRepositoryPostgres(testDb.db);
+  const auth = adminAuthOverrides();
+  const caller = appRouter.createCaller({
+    headers: auth.headers,
+    resHeaders: new Headers(),
+    deps: {
+      ...auth.depsOverrides,
+      contribuicaoRepository: repo,
+      pagamentoRepository: new PagamentoRepositoryPostgres(testDb.db),
+      campanhaRepository: new CampanhaRepositoryPostgres(
+        testDb.db,
+        new RecebedorRepositoryPostgres(testDb.db),
+      ),
+    } as unknown as ServerDeps,
+  });
+  const input = { idCampanha: payment.intencao.idCampanha };
+  expect((await caller.admin.contribuicoes.listByCampanha(input)).contribuicoes[0]).toMatchObject({
+    id: idContribuicao,
+    arquivada: false,
+  });
+  await repo.deleteById(idContribuicao);
+  expect((await caller.admin.contribuicoes.listByCampanha(input)).contribuicoes[0]).toMatchObject({
+    id: idContribuicao,
+    arquivada: true,
+  });
+});

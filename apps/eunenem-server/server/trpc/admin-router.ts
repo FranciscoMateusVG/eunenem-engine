@@ -938,6 +938,7 @@ const ContribuinteDTOSchema = z
   .nullable();
 
 const ContribuicaoAdminDTOSchema = z.object({
+  arquivada: z.boolean(),
   id: z.string(),
   nome: z.string(),
   valorCentavos: z.number().int().nonnegative(),
@@ -1029,6 +1030,7 @@ function toContribuicaoAdminDTO(
   const contribuinte = contribuintesByIdContribuicao.get(c.id) ?? null;
   return {
     id: c.id,
+    arquivada: c.arquivada === true,
     nome: c.nome,
     valorCentavos: c.valor as unknown as number,
     grupo: c.grupo,

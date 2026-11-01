@@ -15,7 +15,7 @@
 //     (was: { nome: string })
 //   - IniciarPagamentoInput now requires `metodo: 'pix' | 'credit_card'`
 
-import { useMemo } from "react";
+import { useCallback, useMemo } from "react";
 import { createPixPollingPolicy } from "./pixPolling.js";
 import type { inferRouterInputs, inferRouterOutputs } from "@trpc/server";
 import type { PaginaRouter } from "../../server/trpc/pagina-router.js";
@@ -133,6 +133,15 @@ export function useIniciarPagamentoContribuicao() {
  * `{sessionId, clientSecret}` response shape as the single-shot mutation
  * so the embedded Stripe checkout mounts identically downstream.
  */
+export type CartQuote = PaginaOutputs["revalidarCarrinho"];
+export function useRevalidarCarrinho() {
+  const utils = trpc.useUtils();
+  const idCampanha = useCampanhaRota();
+  return useCallback((input: PaginaInputs["revalidarCarrinho"]) =>
+    utils.client.pagina.revalidarCarrinho.query(idCampanha ? { ...input, idCampanha } : input),
+    [utils.client, idCampanha]);
+}
+
 export function useIniciarPagamentoCarrinho() {
   // aperture-1yx1n — same money-write rule as the single-shot mutation.
   const idCampanha = useCampanhaRota();
