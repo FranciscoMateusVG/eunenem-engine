@@ -1,17 +1,20 @@
 /**
- * aperture-lcug3 — Estatísticas em sub-seções (Funil / Vendas / Tráfego /
- * Saúde & erros). Navegação entre abas, período 3/6/12 preservado na URL e
+ * aperture-lcug3 — Estatísticas em sub-seções (Funil / Vendas / Listas /
+ * Financeiro / Tráfego / Saúde & erros). Navegação entre abas, período 3/6/12 preservado na URL e
  * renderização de cada seção, em desktop e em celular.
  *
  * Read-only: só lê telas de admin. O banco de CI pode ter qualquer volume de
  * usuários, então o spec confere estrutura (abas, barras, período), não
- * contagens; os números são cobertos pelo pxmdy e pelos testes de unidade.
+ * contagens; os números são cobertos pelo pxmdy, pelos testes de unidade e
+ * pelos testes de integração de admin.analytics.
  */
 import { expect, test } from './fixtures.js';
 
 const SECOES = [
   { tab: 'Funil', path: '/admin/estatisticas' },
   { tab: 'Vendas', path: '/admin/estatisticas/vendas' },
+  { tab: 'Listas', path: '/admin/estatisticas/listas' },
+  { tab: 'Financeiro', path: '/admin/estatisticas/financeiro' },
   { tab: 'Tráfego', path: '/admin/estatisticas/trafego' },
   { tab: 'Saúde & erros', path: '/admin/estatisticas/saude' },
 ] as const;
@@ -33,9 +36,13 @@ for (const width of [1280, 375]) {
     const select = page.getByRole('combobox', { name: 'Período mensal' });
     await expect(select).toHaveValue('3');
     await expect(page.getByTestId('estatisticas-mes')).toHaveCount(3);
+    await expect(page.getByTestId('funil-etapa')).toHaveCount(4);
+    await expect(page.getByTestId('funil-mes')).toHaveCount(3);
+    await expect(page.getByTestId('funil-origem')).toHaveCount(5);
     await select.selectOption('6');
     await expect(page).toHaveURL(/\/admin\/estatisticas\?meses=6$/);
     await expect(page.getByTestId('estatisticas-mes')).toHaveCount(6);
+    await expect(page.getByTestId('funil-mes')).toHaveCount(6);
     await page.screenshot({
       path: testInfo.outputPath(`lcug3-funil-${width}.png`),
       fullPage: true,
@@ -51,6 +58,15 @@ for (const width of [1280, 375]) {
       );
       await expect(page.getByRole('heading', { name: secao.tab, exact: true })).toBeVisible();
       await expect(page.getByRole('combobox', { name: 'Período mensal' })).toHaveValue('6');
+      if (secao.tab === 'Vendas') {
+        await expect(page.getByTestId('vendas-kpi')).toHaveCount(7);
+        await expect(page.getByTestId('vendas-mes')).toHaveCount(6);
+        await expect(page.getByTestId('vendas-pix-mes')).toHaveCount(6);
+        await page.screenshot({
+          path: testInfo.outputPath(`lcug3-vendas-${width}.png`),
+          fullPage: true,
+        });
+      }
       expect(
         await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
       ).toBe(true);

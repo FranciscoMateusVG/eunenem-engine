@@ -23,6 +23,8 @@ describe('rotas das sub-seções', () => {
     ['/admin/estatisticas', 'funil'],
     ['/admin/estatisticas/', 'funil'],
     ['/admin/estatisticas/vendas', 'vendas'],
+    ['/admin/estatisticas/listas', 'listas'],
+    ['/admin/estatisticas/financeiro/', 'financeiro'],
     ['/admin/estatisticas/trafego/', 'trafego'],
     ['/admin/estatisticas/saude', 'saude'],
   ])('%s → %s', (path, secao) => {
@@ -68,7 +70,7 @@ describe('layout', () => {
 
   it('abas como links, aba ativa marcada e período propagado', () => {
     const html = render('vendas', 6);
-    for (const label of ['Funil', 'Vendas', 'Tráfego', 'Saúde &amp; erros'])
+    for (const label of ['Funil', 'Vendas', 'Listas', 'Financeiro', 'Tráfego', 'Saúde &amp; erros'])
       expect(html).toContain(label);
     expect(html).toMatch(/href="\/admin\/estatisticas\/vendas\?meses=6" aria-current="page"/);
     expect(html).toContain('href="/admin/estatisticas?meses=6"');
