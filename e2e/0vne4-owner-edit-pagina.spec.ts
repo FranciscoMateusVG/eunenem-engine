@@ -74,6 +74,54 @@ test('owner edits and removes gifts from the public page; removal stays blocked 
   await expect(vendido).toBeVisible();
 });
 
+// aperture-11l2x — the buttons sit in the photo's top-right corner (like the
+// painel), ≥40px to tap on mobile, never on top of the "Presenteado" tag.
+for (const viewport of [
+  { width: 375, height: 812 },
+  { width: 1280, height: 900 },
+]) {
+  test(`owner buttons sit top-right of the photo, clear of the tag (${viewport.width}px)`, async ({
+    authenticatedPage: page,
+    seededData,
+  }) => {
+    const db = createDatabase(DATABASE_URL);
+    const comprado = `Comprado ${randomUUID().slice(0, 6)}`;
+    try {
+      await seedSoldOutGift(buildSeedGiftRepos(db), {
+        idCampanha: seededData.idCampanha,
+        idOpcaoPresentes: seededData.idOpcaoPresentes,
+        nome: comprado,
+        valorCents: 100,
+      });
+    } finally {
+      await db.destroy();
+    }
+
+    await page.setViewportSize(viewport);
+    await page.goto(`/pagina/${seededData.slug}`);
+    const vendido = card(page, comprado);
+    const editar = vendido.getByRole('button', { name: `Editar ${comprado}` });
+    const remover = vendido.getByRole('button', { name: `Remover ${comprado}` });
+    await expect(editar).toBeVisible();
+
+    const foto = await vendido.locator('.pagina-gift-thumb').boundingBox();
+    const tag = await vendido.locator('.pagina-gift-tag').boundingBox();
+    const boxes = [await editar.boundingBox(), await remover.boundingBox()];
+    if (!foto || !tag || boxes.some((b) => !b)) throw new Error('layout boxes missing');
+    for (const b of boxes as NonNullable<(typeof boxes)[number]>[]) {
+      expect(b.y - foto.y).toBeLessThan(16);
+      expect(foto.x + foto.width - (b.x + b.width)).toBeLessThan(foto.width / 2);
+      expect(Math.min(b.width, b.height)).toBeGreaterThanOrEqual(viewport.width < 640 ? 40 : 36);
+      const overlaps =
+        b.x < tag.x + tag.width &&
+        tag.x < b.x + b.width &&
+        b.y < tag.y + tag.height &&
+        tag.y < b.y + b.height;
+      expect(overlaps).toBe(false);
+    }
+  });
+}
+
 test('guests never see the edit/remove buttons', async ({ page, seededData }) => {
   await page.goto(`/pagina/${seededData.slug}`);
   await expect(card(page, seededData.nomeContribuicao)).toBeVisible();
