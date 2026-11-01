@@ -378,9 +378,7 @@ async function readCheckoutCapability(
     } catch { /* Observability must not alter checkout semantics. */ }
     throw new TRPCError({
       code: 'CONFLICT',
-      message: reason === 'active_capability_slots_full'
-        ? 'Você tem pagamentos em aberto. Conclua um deles ou aguarde a expiração para iniciar outro.'
-        : 'Operação indisponível',
+      message: 'Operação indisponível',
     });
   };
   // Bound parsing/DB work, even for a forged request. Never delete unrelated cookies.
@@ -404,6 +402,7 @@ async function readCheckoutCapability(
   const now = ctx.deps.clock().getTime();
   const needsSpace = remaining > MAX_CHECKOUT_COOKIE_SLOTS ||
     (target === null && remaining >= MAX_CHECKOUT_COOKIE_SLOTS) || headerBytes > MAX_COOKIE_HEADER_BYTES;
+  const recoverable: { name: string; pair: string; createdAt: number }[] = [];
   for (const cookie of needsSpace ? parsed : []) {
     // Never discard the operation being resumed, including ambiguous provider results.
     if (cookie.name === expectedName) continue;
@@ -420,12 +419,26 @@ async function readCheckoutCapability(
     const legacyStripeExpired = operation?.provider === 'stripe' &&
       operation.providerExpiresAt === null && operation.providerSucceededAt !== null &&
       now - operation.providerSucceededAt.getTime() >= 25 * 60 * 60 * 1000;
-    // In-flight/unknown/reserved operations with no proven expiry remain recoverable.
+    // Prefer pruning terminal/expired slots before evicting a live browser capability.
     if (!operation || terminal || expired || legacyStripeExpired || (operation.abandonedAt && !operation.localCommittedAt)) {
       clearCheckoutCapability(ctx, id);
       remaining -= 1;
       remainingBytes -= Buffer.byteLength(cookie.pair, 'utf8') + 2;
+    } else {
+      recoverable.push({ ...cookie, createdAt: operation.createdAt.getTime() });
     }
+  }
+  // Capability cookies are browser recovery handles, not payment validity.
+  // Evict oldest first (server timestamp, never request-cookie order), excluding
+  // the resumed operation above. Do not abandon/cancel/delete the operation or
+  // payment: provider callbacks and reconciliation must still settle it.
+  recoverable.sort((a, b) => a.createdAt - b.createdAt || a.name.localeCompare(b.name));
+  for (const cookie of recoverable) {
+    const slotLimit = target === null ? MAX_CHECKOUT_COOKIE_SLOTS - 1 : MAX_CHECKOUT_COOKIE_SLOTS;
+    if (remaining <= slotLimit && remainingBytes <= MAX_COOKIE_HEADER_BYTES) break;
+    clearCheckoutCapability(ctx, cookie.name.slice(CHECKOUT_COOKIE_PREFIX.length));
+    remaining -= 1;
+    remainingBytes -= Buffer.byteLength(cookie.pair, 'utf8') + 2;
   }
   if (remainingBytes > MAX_COOKIE_HEADER_BYTES) conflict('cookie_header_size');
   if (remaining > MAX_CHECKOUT_COOKIE_SLOTS || (target === null && remaining >= MAX_CHECKOUT_COOKIE_SLOTS)) {
@@ -436,7 +449,8 @@ async function readCheckoutCapability(
 
 // Seven-day browser ceiling remains for reservations/legacy unknown results.
 // New Stripe sessions persist expires_at; PIX persists its QR expiry. Slot pressure
-// removes expired/terminal entries earlier without stranding a valid payment.
+// prunes expired/terminal entries first, then the oldest non-target capability.
+// Eviction only drops browser recovery access; the payment itself remains valid.
 function setCheckoutCapability(ctx: TrpcContext, operationId: string, capability: string): void {
   ctx.resHeaders.append(
     'set-cookie',
