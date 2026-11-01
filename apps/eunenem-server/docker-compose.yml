@@ -25,6 +25,11 @@ services:
     # See dokploy-api skill §12 "compose env layer-skip".
     environment:
       - NODE_ENV=production
+      # Server-only admin query credentials.
+      - MIXPANEL_PROJECT_ID=${MIXPANEL_PROJECT_ID:-}
+      - MIXPANEL_SERVICE_ACCOUNT_USERNAME=${MIXPANEL_SERVICE_ACCOUNT_USERNAME:-}
+      - MIXPANEL_SERVICE_ACCOUNT_SECRET=${MIXPANEL_SERVICE_ACCOUNT_SECRET:-}
+      - MIXPANEL_API_REGION=${MIXPANEL_API_REGION:-US}
       - PORT=3001
       - DATABASE_URL=${DATABASE_URL:-}
       - BETTER_AUTH_SECRET=${BETTER_AUTH_SECRET:-}
