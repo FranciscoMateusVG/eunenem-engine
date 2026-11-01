@@ -30,9 +30,8 @@ const persisted = new WeakMap<Error, CheckoutProviderDiagnostic & { readonly bod
 
 /** Private DB-only payload. Do not pass this projection to logs/traces/responses. */
 export function readPersistedCheckoutProviderDiagnostic(error: unknown) {
-  return error instanceof Error && persisted.has(error)
-    ? persisted.get(error)!
-    : { ...readCheckoutProviderDiagnostic(error), body: null };
+  const value = error instanceof Error ? persisted.get(error) : undefined;
+  return value ?? { ...readCheckoutProviderDiagnostic(error), body: null };
 }
 function withoutOurSecrets(body: unknown, secrets: readonly string[]): unknown {
   if (body === undefined) return null;
@@ -75,7 +74,7 @@ export function attachCheckoutProviderDiagnostic<T extends Error>(
     title: safeText(fields.title ?? fields.type),
     detail: safeText(fields.detail ?? fields.message),
   });
-  const safe = diagnostics.get(error)!;
+  const safe = readCheckoutProviderDiagnostic(error);
   persisted.set(error, {
     ...safe,
     title:
