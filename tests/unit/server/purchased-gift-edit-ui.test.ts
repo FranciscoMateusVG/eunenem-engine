@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
 import {
   GiftCard,
+  GiftCardActions,
   giftActionAvailability,
   groupContribuicoes,
   minimumEditableGiftQuantity,
@@ -60,7 +61,7 @@ describe('purchased gift edit controls', () => {
     expect(gift).toBeDefined();
     if (!gift) throw new Error('expected a grouped gift');
 
-    const tree = GiftCard({ item: gift, onEdit: () => undefined, onRemove });
+    const tree = GiftCardActions({ item: gift, onEdit: () => undefined, onRemove });
     const removeButton = findElementProps(tree, 'data-testid', 'gift-remove-btn');
     const reason = findElementProps(tree, 'id', 'gift-remove-reason-gift-1');
 
@@ -85,6 +86,33 @@ describe('purchased gift edit controls', () => {
     expect(css).toMatch(/button\.is-disabled[\s\S]*cursor: not-allowed;/);
   });
 
+  it('the painel card renders the shared actions only for editors (aperture-0vne4)', () => {
+    const [gift] = groupContribuicoes([
+      {
+        id: 'gift-shared',
+        nome: 'Body',
+        valor: 2000,
+        imagemUrl: null,
+        grupo: 'roupa',
+        quantidade: 1,
+        quantidadeRestante: 1,
+        indisponivel: false,
+      },
+    ]);
+    if (!gift) throw new Error('expected a grouped gift');
+    const noop = () => undefined;
+    expect(
+      findElementProps(GiftCard({ item: gift, onEdit: noop, onRemove: noop }), 'item', gift),
+    ).toBeDefined();
+    expect(
+      findElementProps(
+        GiftCard({ item: gift, onEdit: noop, onRemove: noop, podeEditar: false }),
+        'item',
+        gift,
+      ),
+    ).toBeUndefined();
+  });
+
   it('keeps the unsold trash control active', () => {
     const onRemove = vi.fn();
     const [gift] = groupContribuicoes([
@@ -101,7 +129,7 @@ describe('purchased gift edit controls', () => {
     ]);
     if (!gift) throw new Error('expected a grouped gift');
 
-    const tree = GiftCard({ item: gift, onEdit: () => undefined, onRemove });
+    const tree = GiftCardActions({ item: gift, onEdit: () => undefined, onRemove });
     const removeButton = findElementProps(tree, 'data-testid', 'gift-remove-btn');
 
     expect(removeButton).toMatchObject({ className: 'danger' });

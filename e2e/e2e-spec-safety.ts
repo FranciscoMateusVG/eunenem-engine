@@ -9,6 +9,8 @@
  * silently creating an unguarded payment path.
  */
 export const E2E_SPEC_SAFETY = [
+  // Seeds gifts (one with a synthetic sold item); edits/removes as the owner. No checkout.
+  { file: '0vne4-owner-edit-pagina.spec.ts', safety: 'non-payment' },
   { file: '118sb-clickthrough-gate.spec.ts', safety: 'non-payment' },
   { file: '1z18g-member-permissions-ui.spec.ts', safety: 'non-payment' },
   {

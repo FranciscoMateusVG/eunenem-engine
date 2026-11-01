@@ -69,7 +69,7 @@ describe('aperture-w8ajy gift minimum UI boundaries', () => {
     expect(todosValoresUnitariosPresentesValidos([10, 9.99])).toBe(false);
     for (const [start, end] of [
       ['const addCatalogItems = async', 'const addPresetItems = async'],
-      ['const addPresetItems = async', '// Plan 0016 / aperture-1l37i'],
+      ['const addPresetItems = async', '// ── Initial loading + error gates'],
     ]) {
       const action = functionSlice(listaSource, start, end);
       expect(action.indexOf('todosValoresUnitariosPresentesValidos')).toBeLessThan(

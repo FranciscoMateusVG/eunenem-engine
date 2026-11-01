@@ -8439,6 +8439,9 @@ dialog.config-modal::backdrop { background: #33233380; }
   font-size: 11px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase;
   white-space: nowrap;
 }
+/* aperture-0vne4 — owner's edit/remove buttons on the public card: bottom of
+   the photo, clear of the top-right "Presenteado" tag. */
+.pagina-gift-card .lista-card-actions { top: auto; bottom: 8px; right: 8px; z-index: 3; }
 .pagina-gift-nome {
   font-size: 24px; line-height: 1.1; color: var(--plum);
   margin: 16px 0 10px;

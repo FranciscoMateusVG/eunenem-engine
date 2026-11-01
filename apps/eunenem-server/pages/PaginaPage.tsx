@@ -9,6 +9,7 @@ import { HowTo } from '@/components/eunenem/HowTo';
 import { Marketplace } from '@/components/eunenem/Marketplace';
 import { Messages } from '@/components/eunenem/Messages';
 import { Navbar } from '@/components/eunenem/Navbar';
+import { PaginaOwnerGiftEditorProvider } from '@/components/eunenem/PaginaOwnerGiftEditor';
 import { Story } from '@/components/eunenem/Story';
 import { useTweaks } from '@/components/eunenem/TweaksContext';
 import { painelHref } from '@/lib/painelRoutes';
@@ -168,7 +169,9 @@ export function PaginaPage({
               fotoHistoria={data?.fotoHistoriaUrl ?? null}
               editable={false}
             />
-            <Marketplace slug={slug} ownerEditHref={ownerEditHref} relacao={data?.relacao} />
+            <PaginaOwnerGiftEditorProvider idCampanha={data?.idCampanha} isAdmin={isOwner && !preview}>
+              <Marketplace slug={slug} ownerEditHref={ownerEditHref} relacao={data?.relacao} />
+            </PaginaOwnerGiftEditorProvider>
             <HowTo relacao={data?.relacao} />
             <Messages slug={slug} />
           </main>
