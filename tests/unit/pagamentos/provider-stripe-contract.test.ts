@@ -27,6 +27,7 @@ function mockStripe() {
   const create = vi.fn().mockResolvedValue({
     id: 'cs_test_contract',
     client_secret: 'cs_test_contract_secret',
+    expires_at: 1800000000,
   });
   const stripe = {
     checkout: { sessions: { create } },
@@ -118,6 +119,7 @@ describe('PagamentoProviderStripe.criarSessaoCheckout — Stripe handoff contrac
       sessionId: 'cs_test_contract',
       clientSecret: 'cs_test_contract_secret',
       externalRef: 'cs_test_contract',
+      expiresAt: new Date(1800000000000),
     });
   });
 
@@ -193,6 +195,7 @@ describe('PagamentoProviderStripe.obterSessaoCheckout — recovery contract', ()
     const retrieve = vi.fn().mockResolvedValue({
       id: 'cs_test_contract',
       client_secret: 'cs_test_contract_secret',
+      expires_at: 1800000000,
       status: 'open',
       payment_status: 'unpaid',
       custom_fields: [],
@@ -212,6 +215,7 @@ describe('PagamentoProviderStripe.obterSessaoCheckout — recovery contract', ()
     await expect(provider.obterSessaoCheckout('cs_test_contract')).resolves.toMatchObject({
       sessionId: 'cs_test_contract',
       externalRef: 'cs_test_contract',
+      expiresAt: new Date(1800000000000),
       clientSecret: 'cs_test_contract_secret',
       paymentId,
       intentId,

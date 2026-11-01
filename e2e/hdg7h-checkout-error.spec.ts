@@ -124,3 +124,89 @@ test('oversized cookie rejects before operation creation in real HTTP + PG', asy
     await db.destroy();
   }
 });
+
+// Local fake PIX + real HTTP/PG: old browser capabilities cannot strand a new payment.
+test('9hkc1: browser evicts expired capabilities and preserves a live QR', async ({
+  page,
+  seededData,
+}) => {
+  const origin = 'http://localhost:3004';
+  await page.goto(`${origin}/pagina/${seededData.slug}`);
+  const db = createDatabase(
+    process.env.E2E_DATABASE_URL ?? 'postgresql://frame:frame@localhost:54320/frame',
+  );
+  const ids: string[] = [];
+  const pay = async (operationId: string) =>
+    page.evaluate(
+      async ({ operationId, slug, idContribuicao }) => {
+        const input = {
+          operationId,
+          slug,
+          metodo: 'pix',
+          itens: [{ idContribuicao, quantidade: 1 }],
+          contribuinte: { nome: 'Synthetic Guest', email: 'guest@example.test' },
+        };
+        const post = async () => {
+          const response = await fetch('/api/trpc/pagina.iniciarPagamentoCarrinho', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify(input),
+          });
+          return { status: response.status, body: await response.json() };
+        };
+        const prepared = await post();
+        if (prepared.body.result?.data?.tipo !== 'prepared') return prepared;
+        return post();
+      },
+      { operationId, slug: seededData.slug, idContribuicao: seededData.idContribuicao },
+    );
+  try {
+    for (let i = 0; i < 8; i++) {
+      const id = randomUUID();
+      ids.push(id);
+      expect((await pay(id)).body).toMatchObject({ result: { data: { tipo: 'pix_qr' } } });
+    }
+    const liveId = ids[7];
+    if (!liveId) throw new Error('fixture live id');
+    await db
+      .updateTable('payment_provider_operations')
+      .set({ provider_expires_at: new Date(Date.now() - 60_000) })
+      .where('operation_id', 'in', ids.slice(0, 7))
+      .execute();
+    // More than eight capability cookies, as left by earlier browser sessions.
+    await page.context().addCookies([
+      {
+        name: `__Host-eunenem_checkout_${randomUUID()}`,
+        value: 'A'.repeat(43),
+        domain: 'localhost',
+        path: '/',
+        secure: true,
+        httpOnly: true,
+        sameSite: 'Lax',
+      },
+    ]);
+    const nextId = randomUUID();
+    const result = await pay(nextId);
+    expect(result.status).toBe(200);
+    expect(result.body).toMatchObject({ result: { data: { tipo: 'pix_qr' } } });
+    const cookies = (await page.context().cookies()).filter((cookie) =>
+      cookie.name.startsWith('__Host-eunenem_checkout_'),
+    );
+    expect(cookies.map((cookie) => cookie.name).sort()).toEqual(
+      [liveId, nextId].map((id) => `__Host-eunenem_checkout_${id}`).sort(),
+    );
+    expect(
+      await db
+        .selectFrom('payment_provider_operations')
+        .select(['state', 'local_committed_at'])
+        .where('operation_id', '=', nextId)
+        .executeTakeFirstOrThrow(),
+    ).toMatchObject({ state: 'local_committed' });
+    // Resuming the valid QR still returns the same payment, not a fresh charge.
+    expect((await pay(liveId)).body).toMatchObject({
+      result: { data: { tipo: 'pix_qr', txid: liveId.replaceAll('-', '') } },
+    });
+  } finally {
+    await db.destroy();
+  }
+});

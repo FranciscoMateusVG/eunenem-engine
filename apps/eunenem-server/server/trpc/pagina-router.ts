@@ -13,7 +13,6 @@ import {
   type IdItemDoPagamento,
   type IdOpcaoContribuicao,
   type IdPagamento,
-  CheckoutOperationConflictError,
   iniciarPagamentoCarrinho,
   prepararPagamentoCarrinho,
   listarContribuicoesDeOpcao,
@@ -361,43 +360,76 @@ const checkoutProcedure = t.procedure.use(async ({ ctx, next }) => {
   return next();
 });
 
-function readCheckoutCapability(
+async function readCheckoutCapability(
   ctx: TrpcContext,
   operationId: string,
-): { readonly capability: string | null; readonly slotCount: number } {
+): Promise<{ readonly capability: string | null; readonly slotCount: number }> {
   const raw = ctx.headers.get('cookie') ?? '';
-  if (Buffer.byteLength(raw, 'utf8') > MAX_COOKIE_HEADER_BYTES) {
-    throw new TRPCError({ code: 'CONFLICT', message: 'Operação indisponível' });
-  }
+  const headerBytes = Buffer.byteLength(raw, 'utf8');
   const expectedName = checkoutCookieName(operationId);
+  const cookies = raw.split(';').map((segment) => segment.trim()).filter(Boolean);
+  const slots = cookies.filter((pair) => pair.startsWith(CHECKOUT_COOKIE_PREFIX));
+  const conflict = (reason: string): never => {
+    try {
+      ctx.deps.observability.logger.warn('checkout.cookie.conflict', {
+        reason, slotCount: slots.length, headerBytes, operationId,
+      });
+    } catch { /* Observability must not alter checkout semantics. */ }
+    throw new TRPCError({
+      code: 'CONFLICT',
+      message: reason === 'active_capability_slots_full'
+        ? 'Você tem pagamentos em aberto. Conclua um deles ou aguarde a expiração para iniciar outro.'
+        : 'Operação indisponível',
+    });
+  };
+  // Bound parsing/DB work, even for a forged request. Never delete unrelated cookies.
+  if (headerBytes > 65536 || slots.length > 64) conflict('cookie_input_limit');
   const seen = new Set<string>();
   let target: string | null = null;
-  let slots = 0;
-  for (const segment of raw.split(';')) {
-    const pair = segment.trim();
-    if (pair === '') continue;
+  const parsed: { name: string; pair: string }[] = [];
+  for (const pair of slots) {
     const separator = pair.indexOf('=');
-    if (separator <= 0) continue;
     const name = pair.slice(0, separator);
     const value = pair.slice(separator + 1);
-    if (!name.startsWith(CHECKOUT_COOKIE_PREFIX)) continue;
-    slots += 1;
-    if (
-      slots > MAX_CHECKOUT_COOKIE_SLOTS ||
-      seen.has(name) ||
-      !CHECKOUT_COOKIE_NAME.test(name) ||
-      !CHECKOUT_COOKIE_VALUE.test(value)
-    ) {
-      throw new TRPCError({ code: 'CONFLICT', message: 'Operação indisponível' });
-    }
+    if (!CHECKOUT_COOKIE_NAME.test(name)) conflict('invalid_capability_name');
+    if (!CHECKOUT_COOKIE_VALUE.test(value)) conflict('invalid_capability_value');
+    if (seen.has(name)) conflict('duplicate_capability');
     seen.add(name);
-    if (name === expectedName) {
-      target = value;
+    if (name === expectedName) target = value;
+    parsed.push({ name, pair });
+  }
+  let remaining = parsed.length;
+  let remainingBytes = headerBytes;
+  const now = ctx.deps.clock().getTime();
+  const needsSpace = remaining > MAX_CHECKOUT_COOKIE_SLOTS ||
+    (target === null && remaining >= MAX_CHECKOUT_COOKIE_SLOTS) || headerBytes > MAX_COOKIE_HEADER_BYTES;
+  for (const cookie of needsSpace ? parsed : []) {
+    // Never discard the operation being resumed, including ambiguous provider results.
+    if (cookie.name === expectedName) continue;
+    const id = cookie.name.slice(CHECKOUT_COOKIE_PREFIX.length);
+    const operation = await ctx.deps.checkoutOperationRepository.findById(id);
+    const payment = operation
+      ? await ctx.deps.pagamentoRepository.findById(operation.paymentId as IdPagamento)
+      : undefined;
+    const terminal = payment && ['aprovado', 'rejeitado', 'estornado'].includes(payment.status);
+    const expired = operation?.providerExpiresAt && operation.providerExpiresAt.getTime() <= now;
+    // In-flight/unknown/reserved operations with no proven expiry remain recoverable.
+    if (!operation || terminal || expired || (operation.abandonedAt && !operation.localCommittedAt)) {
+      clearCheckoutCapability(ctx, id);
+      remaining -= 1;
+      remainingBytes -= Buffer.byteLength(cookie.pair, 'utf8') + 2;
     }
   }
-  return { capability: target, slotCount: slots };
+  if (remainingBytes > MAX_COOKIE_HEADER_BYTES) conflict('cookie_header_size');
+  if (remaining > MAX_CHECKOUT_COOKIE_SLOTS || (target === null && remaining >= MAX_CHECKOUT_COOKIE_SLOTS)) {
+    conflict('active_capability_slots_full');
+  }
+  return { capability: target, slotCount: remaining };
 }
 
+// Seven-day browser ceiling remains for reservations/legacy unknown results.
+// New Stripe sessions persist expires_at; PIX persists its QR expiry. Slot pressure
+// removes expired/terminal entries earlier without stranding a valid payment.
 function setCheckoutCapability(ctx: TrpcContext, operationId: string, capability: string): void {
   ctx.resHeaders.append(
     'set-cookie',
@@ -677,11 +709,8 @@ export const paginaRouter = t.router({
             // flows) and for direct-URL visits.
             redirectOnCompletion: 'if_required' as const,
           };
-        const checkoutCookie = readCheckoutCapability(ctx, input.operationId);
+        const checkoutCookie = await readCheckoutCapability(ctx, input.operationId);
         if (checkoutCookie.capability === null) {
-          if (checkoutCookie.slotCount >= MAX_CHECKOUT_COOKIE_SLOTS) {
-            throw new CheckoutOperationConflictError();
-          }
           const capability = randomBytes(32).toString('base64url');
           const prepared = await prepararPagamentoCarrinho(deps, sagaInput, { capability });
           if (!prepared.created) throw new Error('checkout operation is unavailable');
@@ -823,11 +852,8 @@ export const paginaRouter = t.router({
             // + direct-URL visits + the legacy redirect path.
             redirectOnCompletion: 'if_required' as const,
           };
-        const checkoutCookie = readCheckoutCapability(ctx, input.operationId);
+        const checkoutCookie = await readCheckoutCapability(ctx, input.operationId);
         if (checkoutCookie.capability === null) {
-          if (checkoutCookie.slotCount >= MAX_CHECKOUT_COOKIE_SLOTS) {
-            throw new CheckoutOperationConflictError();
-          }
           const capability = randomBytes(32).toString('base64url');
           const prepared = await prepararPagamentoCarrinho(deps, sagaInput, { capability });
           if (!prepared.created) throw new Error('checkout operation is unavailable');

@@ -259,6 +259,9 @@ export class PagamentoProviderStripe implements PagamentoProvider, CheckoutSessi
         span.setStatus({ code: SpanStatusCode.OK });
         return {
           sessionId: session.id,
+          ...(Number.isSafeInteger(session.expires_at) && session.expires_at > 0
+            ? { expiresAt: new Date(session.expires_at * 1000) }
+            : {}),
           clientSecret: session.client_secret,
           externalRef: session.id,
         };
@@ -333,6 +336,9 @@ export class PagamentoProviderStripe implements PagamentoProvider, CheckoutSessi
         span.setStatus({ code: SpanStatusCode.OK });
         return {
           sessionId: session.id,
+          ...(Number.isSafeInteger(session.expires_at) && session.expires_at > 0
+            ? { expiresAt: new Date(session.expires_at * 1000) }
+            : {}),
           externalRef: session.id,
           paymentId: paymentId.success ? paymentId.data : null,
           intentId: intentId.success ? intentId.data : null,

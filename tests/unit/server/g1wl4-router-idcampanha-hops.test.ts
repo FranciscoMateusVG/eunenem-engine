@@ -1,3 +1,4 @@
+import { dispatchVerifiedStripeEvent } from '../../../apps/eunenem-server/server/webhooks/stripe-webhook.js';
 import { PixCobrancaProviderFake } from '../../../src/adapters/pagamentos/pix-cobranca-provider.fake.js';
 /**
  * aperture-g1wl4 (part 1) — THROUGH-THE-ROUTER suite for PR #344
@@ -1597,7 +1598,7 @@ describe('iytxa — public checkout capability slots', () => {
     expect(loserCtx.resHeaders.get('set-cookie')).toBeNull();
   });
 
-  it('rejects malformed, duplicate, excessive, and oversized capability cookies before provider I/O', async () => {
+  it('rejects malformed, duplicate, and unrelated oversized cookies with safe diagnostics', async () => {
     const rig = await buildRig();
     const user = await rig.addUser(uniqueEmail('checkout-cookie-boundary'));
     const [idContribuicao] = (
@@ -1613,14 +1614,9 @@ describe('iytxa — public checkout capability slots', () => {
     const capability = 'A'.repeat(43);
     const operationId = randomUUID();
     const cookieName = `__Host-eunenem_checkout_${operationId}`;
-    const excessiveSlots = Array.from(
-      { length: 9 },
-      () => `__Host-eunenem_checkout_${randomUUID()}=${capability}`,
-    ).join('; ');
     const cases = [
       `${cookieName}=short`,
       `${cookieName}=${capability}; ${cookieName}=${capability}`,
-      excessiveSlots,
       `ordinary=${'x'.repeat(8192)}`,
     ];
 
@@ -1646,7 +1642,14 @@ describe('iytxa — public checkout capability slots', () => {
     expect(providerCall).not.toHaveBeenCalled();
   });
 
-  it('refuses a ninth operation slot before reservation or provider I/O', async () => {
+  it.each([
+    { count: 8, padding: 0 },
+    { count: 9, padding: 0 },
+    { count: 60, padding: 3000 },
+  ])('evicts $count orphan capabilities, recovering header space too', async ({
+    count,
+    padding,
+  }) => {
     const rig = await buildRig();
     const user = await rig.addUser(uniqueEmail('checkout-slot-cap'));
     const [idContribuicao] = (
@@ -1663,9 +1666,9 @@ describe('iytxa — public checkout capability slots', () => {
     rig.anonCtx.headers.set(
       'cookie',
       Array.from(
-        { length: 8 },
+        { length: count },
         () => `__Host-eunenem_checkout_${randomUUID()}=${'A'.repeat(43)}`,
-      ).join('; '),
+      ).join('; ') + (padding ? `; ordinary=${'x'.repeat(padding)}` : ''),
     );
 
     await expect(
@@ -1675,12 +1678,109 @@ describe('iytxa — public checkout capability slots', () => {
         idContribuicao,
         metodo: 'credit_card',
       }),
-    ).rejects.toMatchObject({ code: 'CONFLICT', message: 'Operação indisponível' });
-    await expect(
-      rig.deps.checkoutOperationRepository.findById(operationId),
-    ).resolves.toBeUndefined();
+    ).resolves.toMatchObject({ tipo: 'prepared', operationId });
+    await expect(rig.deps.checkoutOperationRepository.findById(operationId)).resolves.toMatchObject(
+      { operationId },
+    );
     expect(providerCall).not.toHaveBeenCalled();
-    expect(rig.anonCtx.resHeaders.get('set-cookie')).toBeNull();
+    expect(
+      rig.anonCtx.resHeaders.getSetCookie().filter((cookie) => cookie.includes('Max-Age=0')),
+    ).toHaveLength(count);
+  });
+
+  it('preserves eight recoverable operations and reports the exact full-slot reason without secrets', async () => {
+    const rig = await buildRig();
+    const warn = vi.spyOn(rig.deps.observability.logger, 'warn');
+    const user = await rig.addUser(uniqueEmail('active-slots'));
+    const [idContribuicao] = (
+      await user.caller.contribuicao.create({
+        idCampanha: user.campanhaSignup.id,
+        nome: 'Active slots',
+        valor: 1000,
+        quantidade: 1,
+      })
+    ).ids;
+    if (!idContribuicao) throw new Error('fixture');
+    const pairs: string[] = [];
+    for (let i = 0; i < 8; i++) {
+      rig.anonCtx.resHeaders.delete('set-cookie');
+      await rig.anonCaller.pagina.iniciarPagamentoContribuicao({
+        operationId: randomUUID(),
+        slug: user.slug,
+        idContribuicao,
+        metodo: 'credit_card',
+      });
+      const pair = rig.anonCtx.resHeaders.getSetCookie()[0]?.split(';')[0];
+      if (!pair) throw new Error('fixture cookie');
+      pairs.push(pair);
+      rig.anonCtx.headers.set('cookie', pairs.join('; '));
+    }
+    rig.anonCtx.resHeaders.delete('set-cookie');
+    const operationId = randomUUID();
+    await expect(
+      rig.anonCaller.pagina.iniciarPagamentoContribuicao({
+        operationId,
+        slug: user.slug,
+        idContribuicao,
+        metodo: 'pix',
+      }),
+    ).rejects.toMatchObject({
+      code: 'CONFLICT',
+      message:
+        'Você tem pagamentos em aberto. Conclua um deles ou aguarde a expiração para iniciar outro.',
+    });
+    expect(rig.anonCtx.resHeaders.getSetCookie()).toEqual([]);
+    expect(warn).toHaveBeenCalledWith('checkout.cookie.conflict', {
+      reason: 'active_capability_slots_full',
+      operationId,
+      slotCount: 8,
+      headerBytes: Buffer.byteLength(pairs.join('; ')),
+    });
+    expect(JSON.stringify(warn.mock.calls)).not.toContain(pairs[0]?.split('=')[1]);
+    expect(await rig.deps.checkoutOperationRepository.findById(operationId)).toBeUndefined();
+
+    const firstId = pairs[0]?.split('=')[0]?.replace('__Host-eunenem_checkout_', '');
+    if (!firstId) throw new Error('fixture first id');
+    const expiresAt = new Date(rig.deps.clock().getTime() + 86_400_000);
+    const originalCreate = rig.deps.checkoutSessionProvider.criarSessaoCheckout.bind(
+      rig.deps.checkoutSessionProvider,
+    );
+    vi.spyOn(rig.deps.checkoutSessionProvider, 'criarSessaoCheckout').mockImplementation(
+      async (input) => ({ ...(await originalCreate(input)), expiresAt }),
+    );
+    await rig.anonCaller.pagina.iniciarPagamentoContribuicao({
+      operationId: firstId,
+      slug: user.slug,
+      idContribuicao,
+      metodo: 'credit_card',
+    });
+    const firstOperation = await rig.deps.checkoutOperationRepository.findById(firstId);
+    expect(firstOperation?.providerExpiresAt).toEqual(expiresAt);
+    Object.assign(rig.deps, {
+      pagamentoProvider: new PagamentoProviderFake({ statusResultado: 'rejeitado' }),
+    });
+    await dispatchVerifiedStripeEvent(rig.deps, noopTracer().startSpan('test'), {
+      id: 'evt_synthetic_expired',
+      type: 'checkout.session.expired',
+      data: { object: { id: firstOperation?.providerRef } },
+    } as Parameters<typeof dispatchVerifiedStripeEvent>[2]);
+    expect((await rig.deps.pagamentoRepository.findById(firstId as never))?.status).toBe(
+      'rejeitado',
+    );
+    rig.anonCtx.resHeaders.delete('set-cookie');
+    await expect(
+      rig.anonCaller.pagina.iniciarPagamentoContribuicao({
+        operationId,
+        slug: user.slug,
+        idContribuicao,
+        metodo: 'credit_card',
+      }),
+    ).resolves.toMatchObject({ tipo: 'prepared' });
+    expect(
+      rig.anonCtx.resHeaders.getSetCookie().filter((cookie) => cookie.includes('Max-Age=0')),
+    ).toEqual([
+      `__Host-eunenem_checkout_${firstId}=; Max-Age=0; Path=/; HttpOnly; Secure; SameSite=Lax`,
+    ]);
   });
 
   it('retains an in-progress slot and clears only that slot after a terminal payment state', async () => {

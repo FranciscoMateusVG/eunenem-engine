@@ -131,6 +131,8 @@ export interface CriarSessaoCheckoutInput {
 }
 
 export interface CriarSessaoCheckoutResult {
+  /** Authoritative provider session expiry, when supplied by the adapter. */
+  readonly expiresAt?: Date;
   /** Provider session id — the client-side mountable identifier. */
   readonly sessionId: string;
   /**
@@ -154,6 +156,7 @@ export interface CriarSessaoCheckoutResult {
  * (success page) and defensive lookups.
  */
 export interface ObterSessaoCheckoutResult {
+  readonly expiresAt?: Date;
   readonly sessionId: string;
   readonly externalRef: string;
   /** Server-stamped engine identities recovered from provider metadata. */
