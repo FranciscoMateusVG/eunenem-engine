@@ -53,6 +53,11 @@ export const E2E_SPEC_SAFETY = [
   { file: 'gf733-cart-no-persist-regression.spec.ts', safety: 'non-payment' },
   { file: 'gf733-onboarding-no-silent-loop-regression.spec.ts', safety: 'non-payment' },
   {
+    file: 'gu7u6-cart-change-resets-checkout.spec.ts',
+    safety: 'money-movement',
+    capability: 'Creates PIX and card checkouts through pagina.iniciarPagamentoCarrinho.',
+  },
+  {
     file: 'kuw0o-pix-qr-checkout.spec.ts',
     safety: 'money-movement',
     capability: 'Creates and reconciles PIX checkouts through the payment composition root.',
@@ -93,6 +98,7 @@ export const E2E_SPEC_SAFETY = [
   },
   { file: 'taxas-e-prazos.spec.ts', safety: 'non-payment' },
   { file: 'tqp4t-postlogin-routing-gaps.spec.ts', safety: 'non-payment' },
+  { file: 'tx50n-comprar-agora-modal-mobile.spec.ts', safety: 'non-payment' },
   { file: 'u38rz-nova-lista-create.spec.ts', safety: 'non-payment' },
   // Prévia da NFS-e (somente leitura, nada é enviado). Self-skips unless
   // launched by its ephemeral-DB runner (e2e/support/uj78j-nfse-ephemeral-run.mjs).
@@ -111,6 +117,7 @@ export const E2E_SPEC_SAFETY = [
   },
   // Deliberately safe: malformed checkout inputs assert validation rejection
   // before any provider call.
+  { file: 'w7v66-mobile-gift-cards.spec.ts', safety: 'non-payment' },
   { file: 'w2-enforcement-gate.spec.ts', safety: 'non-payment' },
 ] as const satisfies readonly E2ESpecSafetyEntry[];
 

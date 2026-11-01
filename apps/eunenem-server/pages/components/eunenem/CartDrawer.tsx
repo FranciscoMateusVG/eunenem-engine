@@ -12,7 +12,7 @@ import {
   type MetodoPagamento,
 } from "@/lib/paginaApi";
 import { PixIdentityForm, PixQrPanel } from "./PixCheckout";
-import { useCart, toSagaInput, type CartLine } from "@/lib/cart.js";
+import { useCart, sameCheckoutRequest, toSagaInput, type CartLine } from "@/lib/cart.js";
 import { useCampanhaRota } from "@/lib/campanha-rota";
 import { formatBRL } from "@/lib/formatBRL";
 import { getStripePromise } from "@/lib/stripeClient";
@@ -322,6 +322,22 @@ export function CartDrawer({ open, onClose, slug }: CartDrawerProps) {
     iniciar.reset();
     setPhase({ kind: "checkout", step: "pix_identity" });
   }, [iniciar]);
+
+  // aperture-gu7u6 — the checkout screen (identity form, QR, Stripe iframe)
+  // belongs to the cart it was generated from. The drawer stays mounted when
+  // closed mid-checkout, so a cart edit made meanwhile would otherwise reopen
+  // the OLD checkout with the old total. Back to the summary instead; the
+  // next Finalizar sends a new request (new fingerprint → new operation).
+  // The old charge is left alone: still payable and reconciled server-side,
+  // and its operation id stays bound to its own request in sessionStorage.
+  useEffect(() => {
+    if (phase.kind !== "checkout" || !checkoutSnapshot || iniciar.isPending) return;
+    if (sameCheckoutRequest(checkoutSnapshot.lines, cart.state.lines)) return;
+    pixRegenerandoRef.current = false;
+    iniciar.reset();
+    setCheckoutSnapshot(null);
+    setPhase({ kind: "summary" });
+  }, [phase.kind, checkoutSnapshot, cart.state.lines, iniciar]);
 
   const onStripeComplete = useCallback(() => {
     setPhase((cur) => (cur.kind === "checkout" ? { kind: "completed_pending" } : cur));
