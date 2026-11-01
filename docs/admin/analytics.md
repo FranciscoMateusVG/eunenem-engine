@@ -53,3 +53,24 @@ sum to 100%. Failed creation without an external reference is not generated.
 Every query scopes through the EuNeném platform. Vendas includes all platform
 payments (unlike the Funil active/non-QA acquisition population); it is not a
 reconciliation of the funnel population. Each query is a single SQL snapshot.
+
+## Saúde/erros
+
+- `provedor`: historical failed/unknown checkout attempt facts, plus Inter payout
+  attempt diagnostics joined through payout/campaign platform. Raw provider text
+  comes from the existing redacted-at-write private diagnostic columns, bounded
+  to 16 KiB, with additional auth-token pattern redaction on the admin response.
+- `checkout`: currently `failed`/`outcome_unknown` operations, at `updated_at`.
+- `webhook`: currently unprocessed rows with processing errors, at last processing
+  start (or received date). Explicit ingress platform wins; older null-ingress
+  rows need a payment/campaign proving platform. Unattributed rows are excluded.
+- `email`: currently failed/unknown lifecycle deliveries, at last claim (or event
+  occurrence). **No failure timestamp/history exists**, so these are proxies.
+  Other SMTP sends without durable delivery records cannot be measured here.
+
+These categories overlap: a provider attempt can also leave a failed checkout.
+Do not sum categories as unique incidents. Only provider attempts have durable
+historical failure evidence; recovery removes current errors from the other
+series. Dates do not claim complete historical failure rates. Totals and daily
+counts are independent of the 50-row newest-first recent list. No webhook
+payloads, signatures, checkout snapshots or email snapshots are returned.
