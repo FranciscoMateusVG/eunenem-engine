@@ -47,7 +47,7 @@ describe('Playwright remote money-movement selection', () => {
 
     expect(result.status).toBe(0);
     expect(result.output).toContain('host=staging.invalid verdict=REMOTE');
-    expect(result.output).toContain('remote money-movement blocked; excluded 9 specs');
+    expect(result.output).toContain('remote money-movement blocked; excluded 10 specs');
     expect(result.output).toContain('r5y94-repasse-admin-flow.spec.ts');
     expect(result.output).toContain('Total: 3 tests in 1 file');
   });
