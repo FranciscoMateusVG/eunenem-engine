@@ -1468,7 +1468,7 @@ export function ConfirmRemove({
         <p className="lista-remove-text">
           <b>&ldquo;{item.nome}&rdquo;</b> será removido da sua lista
           {item.qty > 1 ? <> ({item.qty} unidades)</> : null}. Você pode adicionar de novo a
-          qualquer momento.
+          qualquer momento. Pagamentos já iniciados continuam válidos, e o histórico é preservado.
         </p>
       </div>
       <div className="lista-modal-foot">

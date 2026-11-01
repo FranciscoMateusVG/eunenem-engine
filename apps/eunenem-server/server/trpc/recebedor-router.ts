@@ -430,6 +430,7 @@ async function buildExtratoStates(
       let contribuicao: { nome: string; imagemUrl: string | null } | undefined;
       const fetched = await ctx.deps.contribuicaoRepository.findById(
         lancamento.idContribuicao as never,
+        { incluirArquivadas: true },
       );
       if (fetched !== undefined && fetched !== null) {
         contribuicao = {

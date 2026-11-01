@@ -12,7 +12,7 @@ import type { AdminMensagensResponse } from './admin-recado-projection.js';
  *   1. `pagamentoRepository.findRecadosAdminByCampanha(idCampanha)` —
  *      the aprovado-with-mensagem rows on the campanha + their
  *      `lidaEm` + value + first-contribuição id.
- *   2. `contribuicaoRepository.findByCampanhaId(idCampanha)` — the
+ *   2. `contribuicaoRepository.findByCampanhaId(idCampanha, { incluirArquivadas: true })` — the
  *      full contribuição set for the campanha; one round-trip.
  *
  * Decoration is in-process: build a Map<IdContribuicao, nome>, then
@@ -46,7 +46,7 @@ export async function obterRecadosAdminDeCampanha(
 
       const [rows, contribuicoes] = await Promise.all([
         pagamentoRepository.findRecadosAdminByCampanha(idCampanha),
-        contribuicaoRepository.findByCampanhaId(idCampanha),
+        contribuicaoRepository.findByCampanhaId(idCampanha, { incluirArquivadas: true }),
       ]);
 
       const nomeByContribuicao = new Map<IdContribuicao, string>();

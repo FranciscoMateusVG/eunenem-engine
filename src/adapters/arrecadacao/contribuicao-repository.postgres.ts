@@ -133,7 +133,10 @@ export class ContribuicaoRepositoryPostgres implements ContribuicaoRepository {
     });
   }
 
-  async findById(id: IdContribuicao): Promise<Contribuicao | undefined> {
+  async findById(
+    id: IdContribuicao,
+    options?: { incluirArquivadas?: boolean },
+  ): Promise<Contribuicao | undefined> {
     return tracer.startActiveSpan('db.arrecadacao_contribuicoes.findById', async (span) => {
       span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'SELECT' });
       try {
@@ -141,6 +144,7 @@ export class ContribuicaoRepositoryPostgres implements ContribuicaoRepository {
           .selectFrom('contribuicoes')
           .selectAll()
           .where('id', '=', id)
+          .$if(!options?.incluirArquivadas, (q) => q.where('arquivada_em', 'is', null))
           .executeTakeFirst();
         span.setStatus({ code: SpanStatusCode.OK });
         return row ? toContribuicao(row) : undefined;
@@ -154,7 +158,10 @@ export class ContribuicaoRepositoryPostgres implements ContribuicaoRepository {
     });
   }
 
-  async findByCampanhaId(idCampanha: IdCampanha): Promise<readonly Contribuicao[]> {
+  async findByCampanhaId(
+    idCampanha: IdCampanha,
+    options?: { incluirArquivadas?: boolean },
+  ): Promise<readonly Contribuicao[]> {
     return tracer.startActiveSpan('db.arrecadacao_contribuicoes.findByCampanhaId', async (span) => {
       span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'SELECT' });
       try {
@@ -162,6 +169,7 @@ export class ContribuicaoRepositoryPostgres implements ContribuicaoRepository {
           .selectFrom('contribuicoes')
           .selectAll()
           .where('campanha_id', '=', idCampanha)
+          .$if(!options?.incluirArquivadas, (q) => q.where('arquivada_em', 'is', null))
           .execute();
         span.setStatus({ code: SpanStatusCode.OK });
         return rows.map(toContribuicao);
@@ -186,6 +194,7 @@ export class ContribuicaoRepositoryPostgres implements ContribuicaoRepository {
           .selectFrom('contribuicoes')
           .selectAll()
           .where('campanha_id', '=', idCampanha)
+          .where('arquivada_em', 'is', null)
           .where('id_opcao_contribuicao', '=', idOpcao)
           .execute();
         span.setStatus({ code: SpanStatusCode.OK });
@@ -202,9 +211,15 @@ export class ContribuicaoRepositoryPostgres implements ContribuicaoRepository {
 
   async deleteById(id: IdContribuicao): Promise<void> {
     return tracer.startActiveSpan('db.arrecadacao_contribuicoes.deleteById', async (span) => {
-      span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'DELETE' });
+      span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'UPDATE' });
       try {
-        await this.db.deleteFrom('contribuicoes').where('id', '=', id).execute();
+        // Archive even unreferenced gifts: no FK race with an in-flight checkout.
+        await this.db
+          .updateTable('contribuicoes')
+          .set({ arquivada_em: new Date() })
+          .where('id', '=', id)
+          .where('arquivada_em', 'is', null)
+          .execute();
         span.setStatus({ code: SpanStatusCode.OK });
       } catch (error: unknown) {
         span.recordException(error as Error);
@@ -224,6 +239,7 @@ export class ContribuicaoRepositoryPostgres implements ContribuicaoRepository {
           .selectFrom('contribuicoes')
           .select((eb) => eb.fn.countAll<string>().as('total'))
           .where('campanha_id', '=', idCampanha)
+          .where('arquivada_em', 'is', null)
           .where('id_opcao_contribuicao', '=', idOpcao)
           .executeTakeFirstOrThrow();
         span.setStatus({ code: SpanStatusCode.OK });
