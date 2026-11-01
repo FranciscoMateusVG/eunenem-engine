@@ -1783,6 +1783,65 @@ describe('iytxa — public checkout capability slots', () => {
     ]);
   });
 
+  it.each([
+    { ageHours: 25, freed: true },
+    { ageHours: 24, freed: false },
+    { ageHours: 1, freed: false },
+  ])('legacy Stripe NULL expiry: success age $ageHours hours (not reservation age)', async ({
+    ageHours,
+    freed,
+  }) => {
+    const rig = await buildRig();
+    const user = await rig.addUser(uniqueEmail('legacy-expiry'));
+    const [idContribuicao] = (
+      await user.caller.contribuicao.create({
+        idCampanha: user.campanhaSignup.id,
+        nome: 'Legacy',
+        valor: 1000,
+        quantidade: 1,
+      })
+    ).ids;
+    if (!idContribuicao) throw new Error('fixture');
+    const now = new Date('2026-11-02T12:00:00Z');
+    let clock = new Date(now.getTime() - 26 * 3600_000);
+    Object.assign(rig.deps, { clock: () => clock });
+    const pairs: string[] = [];
+    for (let i = 0; i < 8; i++) {
+      clock = new Date(now.getTime() - 26 * 3600_000);
+      const input = {
+        operationId: randomUUID(),
+        slug: user.slug,
+        idContribuicao,
+        metodo: 'credit_card' as const,
+      };
+      rig.anonCtx.resHeaders.delete('set-cookie');
+      await rig.anonCaller.pagina.iniciarPagamentoContribuicao(input);
+      const pair = rig.anonCtx.resHeaders.getSetCookie()[0]?.split(';')[0];
+      if (!pair) throw new Error('fixture cookie');
+      pairs.push(pair);
+      rig.anonCtx.headers.set('cookie', pairs.join('; '));
+      clock = new Date(now.getTime() - ageHours * 3600_000);
+      await rig.anonCaller.pagina.iniciarPagamentoContribuicao(input);
+    }
+    clock = now;
+    rig.anonCtx.resHeaders.delete('set-cookie');
+    const result = rig.anonCaller.pagina.iniciarPagamentoContribuicao({
+      operationId: randomUUID(),
+      slug: user.slug,
+      idContribuicao,
+      metodo: 'credit_card',
+    });
+    if (freed) {
+      await expect(result).resolves.toMatchObject({ tipo: 'prepared' });
+      expect(
+        rig.anonCtx.resHeaders.getSetCookie().filter((cookie) => cookie.includes('Max-Age=0')),
+      ).toHaveLength(8);
+    } else {
+      await expect(result).rejects.toMatchObject({ code: 'CONFLICT' });
+      expect(rig.anonCtx.resHeaders.getSetCookie()).toEqual([]);
+    }
+  });
+
   it('retains an in-progress slot and clears only that slot after a terminal payment state', async () => {
     const rig = await buildRig();
     const user = await rig.addUser(uniqueEmail('checkout-slot-terminal'));

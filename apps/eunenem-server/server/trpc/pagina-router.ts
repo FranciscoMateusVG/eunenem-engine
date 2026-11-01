@@ -413,8 +413,14 @@ async function readCheckoutCapability(
       : undefined;
     const terminal = payment && ['aprovado', 'rejeitado', 'estornado'].includes(payment.status);
     const expired = operation?.providerExpiresAt && operation.providerExpiresAt.getTime() <= now;
+    // Stripe bounds session lifetime to 24h from session creation. Success was
+    // observed AFTER creation, unlike the local reservation (which may be older).
+    // https://docs.stripe.com/api/checkout/sessions/create#checkout_session_create-expires_at
+    const legacyStripeExpired = operation?.provider === 'stripe' &&
+      operation.providerExpiresAt === null && operation.providerSucceededAt !== null &&
+      now - operation.providerSucceededAt.getTime() >= 25 * 60 * 60 * 1000;
     // In-flight/unknown/reserved operations with no proven expiry remain recoverable.
-    if (!operation || terminal || expired || (operation.abandonedAt && !operation.localCommittedAt)) {
+    if (!operation || terminal || expired || legacyStripeExpired || (operation.abandonedAt && !operation.localCommittedAt)) {
       clearCheckoutCapability(ctx, id);
       remaining -= 1;
       remainingBytes -= Buffer.byteLength(cookie.pair, 'utf8') + 2;
