@@ -1,4 +1,5 @@
 import { CartDrawer } from '@/components/eunenem/CartDrawer';
+import { CriarListaBanner } from '@/components/eunenem/CriarListaCta';
 import {
   CartDrawerProvider,
   useCartDrawer,
@@ -171,6 +172,7 @@ export function PaginaPage({
             <Marketplace slug={slug} ownerEditHref={ownerEditHref} relacao={data?.relacao} />
             <HowTo relacao={data?.relacao} />
             <Messages slug={slug} />
+            {!isOwner && !preview && <CriarListaBanner />}
           </main>
           <Footer />
           {isOwner && !preview && data?.idCampanha && <CustomizationShortcut slug={data.slug} idCampanha={data.idCampanha} />}

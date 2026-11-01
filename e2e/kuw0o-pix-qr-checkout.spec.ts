@@ -360,6 +360,13 @@ test.describe('kuw0o — PIX checkout routing (:3004, fake cobrança provider)',
     await expect(modal.getByText('recebemos seu carinho ♡')).toBeVisible({
       timeout: 10_000,
     });
+    // aperture-i06qu — completed payment: quiet guest → creator CTA.
+    const cta = modal.getByTestId('criar-lista-cta');
+    await expect(cta).toContainText('Esperando bebê?');
+    await expect(cta.getByRole('link', { name: /Crie sua lista grátis/ })).toHaveAttribute(
+      'href',
+      '/login?utm_source=eunenem&utm_medium=guest_success&utm_campaign=guest_to_creator',
+    );
   });
 });
 
