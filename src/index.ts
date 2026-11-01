@@ -1064,6 +1064,7 @@ export type {
 export {
   CheckoutOperationConflictError,
   CheckoutOperationPendingError,
+  CheckoutQuoteChangedError,
   IniciarPagamentoCarrinhoInputSchema,
   iniciarPagamentoCarrinho,
   prepararPagamentoCarrinho,

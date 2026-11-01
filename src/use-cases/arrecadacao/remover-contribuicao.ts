@@ -93,6 +93,12 @@ export async function removerContribuicao(
 
       span.setStatus({ code: SpanStatusCode.OK });
     } catch (error) {
+      logger.error('arrecadacao.contribuicao.remocao_falhou', {
+        idContribuicao: input.idContribuicao,
+        idCampanha: input.idCampanhaEsperada,
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
+      });
       span.recordException(error as Error);
       span.setStatus({ code: SpanStatusCode.ERROR, message: (error as Error).message });
       throw error;

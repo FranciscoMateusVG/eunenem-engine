@@ -25,7 +25,6 @@
 // `trpc.useUtils().contribuicao.list.invalidate()`. Mock-era manual
 // queryKey + useQueryClient dropped — trpc-react-query manages its own keys.
 
-import { TRPCClientError } from '@trpc/client';
 import { type SemIdCampanha, useCampanhaEscrita } from './campanha-escrita.js';
 import { useCampanhaRota } from './campanha-rota.js';
 import type {
@@ -141,6 +140,7 @@ export type ContribuicaoError =
   | { kind: 'minimum-value' }
   | { kind: 'not-found' }
   | { kind: 'unauthorized' }
+  | { kind: 'server' }
   | { kind: 'network' };
 
 /** pt-BR friendly message per error kind. */
@@ -156,6 +156,8 @@ export function contribuicaoErrorMessage(err: ContribuicaoError): string {
       return 'esse mimo não existe mais';
     case 'unauthorized':
       return 'sem permissão pra essa ação';
+    case 'server':
+      return 'não foi possível salvar a alteração — tenta de novo daqui a pouco ♡';
     case 'network':
       return 'deu ruim na conexão — tenta de novo daqui a pouco ♡';
   }
@@ -164,8 +166,8 @@ export function contribuicaoErrorMessage(err: ContribuicaoError): string {
 /**
  * Translate a thrown tRPC error into the UI's `ContribuicaoError` shape.
  * `TRPCClientError` (from @trpc/client) is the real wire client error type;
- * code lives at `err.data.code`. Anything else collapses to `network` so
- * the user sees a friendly retry instead of a stack trace.
+ * code lives at `err.data.code`. Server failures must not be mislabeled
+ * as connectivity failures; internal details never appear in the toast.
  */
 export function toContribuicaoError(err: unknown): ContribuicaoError {
   const code = extractTrpcCode(err);
@@ -181,22 +183,23 @@ export function toContribuicaoError(err: unknown): ContribuicaoError {
       if (message.includes(VALOR_UNITARIO_PRESENTE_MINIMO_MESSAGE)) {
         return { kind: 'minimum-value' };
       }
-      return { kind: 'network' };
+      return { kind: 'server' };
     case 'NOT_FOUND':
       return { kind: 'not-found' };
+    case 'FORBIDDEN':
     case 'UNAUTHORIZED':
       return { kind: 'unauthorized' };
     default:
-      return { kind: 'network' };
+      return { kind: code ? 'server' : 'network' };
   }
 }
 
 /** Duck-typed code extraction. Returns null for non-tRPC errors. */
 function extractTrpcCode(err: unknown): string | null {
-  if (err instanceof TRPCClientError) {
-    return typeof err.data?.code === 'string' ? err.data.code : null;
-  }
-  return null;
+  if (!err || typeof err !== 'object' || !('data' in err)) return null;
+  const data = err.data;
+  if (!data || typeof data !== 'object' || !('code' in data)) return null;
+  return typeof data.code === 'string' ? data.code : null;
 }
 
 // ── React Query hooks (real tRPC) ──────────────────────────────────────────

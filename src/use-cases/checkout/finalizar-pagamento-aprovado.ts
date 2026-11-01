@@ -243,7 +243,9 @@ async function finalizarPagamentoAprovadoInterno(
       }
       const idContribuicaoAnchor = anchorItem.idContribuicao;
 
-      const contribuicao = await contribuicaoRepository.findById(idContribuicaoAnchor);
+      const contribuicao = await contribuicaoRepository.findById(idContribuicaoAnchor, {
+        incluirArquivadas: true,
+      });
       if (!contribuicao) {
         throw new ArrecadacaoContribuicaoNaoEncontradaError(idContribuicaoAnchor);
       }

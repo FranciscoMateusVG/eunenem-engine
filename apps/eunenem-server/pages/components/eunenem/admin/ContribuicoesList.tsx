@@ -61,6 +61,7 @@ type Status = "todas" | "esgotada";
 type DateRange = "todo" | "ultimos-7d" | "ultimos-30d" | "ultimos-90d";
 
 type ContribuicaoRow = {
+  arquivada: boolean;
   id: string;
   nome: string;
   valorCentavos: number;
@@ -98,6 +99,7 @@ type ContribuicaoRow = {
  * shows all underlying rows' pagamentos together.
  */
 type ContribuicaoGroup = {
+  arquivada: boolean;
   representativeId: string;
   underlyingIds: string[];
   nome: string;
@@ -122,7 +124,7 @@ function groupRows(
   // they were inserted at different times during a multi-add batch.
   const groups = new Map<string, ContribuicaoGroup>();
   for (const c of contribuicoes) {
-    const key = `${c.nome}::${c.valorCentavos}::${c.idOpcaoContribuicao}`;
+    const key = `${c.nome}::${c.valorCentavos}::${c.idOpcaoContribuicao}::${c.arquivada}`;
     const existing = groups.get(key);
     if (existing) {
       existing.underlyingIds.push(c.id);
@@ -146,6 +148,7 @@ function groupRows(
     } else {
       groups.set(key, {
         representativeId: c.id,
+        arquivada: c.arquivada,
         underlyingIds: [c.id],
         nome: c.nome,
         valorCentavos: c.valorCentavos,
@@ -425,10 +428,12 @@ function Row({ group }: { group: ContribuicaoGroup }) {
       <span className="font-mono text-[12px] tabular-nums text-ink">
         {formatBRL(group.valorCentavos)}
       </span>
-      <QuantidadeBadge
+      {group.arquivada ? (
+        <span className="rounded-full border border-stone-300 bg-stone-100 px-2 py-1 font-mono text-[10px] uppercase text-stone-700">arquivado</span>
+      ) : <QuantidadeBadge
         quantidade={group.quantidade}
         quantidadeRestante={group.quantidadeRestante}
-      />
+      />}
       <span className="font-mono text-[11px] tabular-nums text-ink-mute">
         {formatCriadaEm(group.criadaEm)}
       </span>

@@ -79,6 +79,7 @@ export const IniciarPagamentoCarrinhoInputSchema = z.object({
   itens: z.array(CartItemInputSchema).min(1).max(50),
   metodo: MetodoPagamentoSchema,
   idPagamento: IdPagamentoSchema,
+  expectedTotalCents: z.number().int().nonnegative().optional(),
   idIntencaoPagamento: IdIntencaoPagamentoSchema,
   /**
    * Caller-controlled UUIDs threaded into each item's `id`. Must have
@@ -162,6 +163,13 @@ export interface CheckoutOperationAccess {
 export interface PrepararPagamentoCarrinhoResult {
   readonly operationId: string;
   readonly created: boolean;
+}
+
+export class CheckoutQuoteChangedError extends Error {
+  readonly _tag = 'CheckoutQuoteChangedError';
+  constructor() {
+    super('checkout quote changed');
+  }
 }
 
 export class CheckoutOperationConflictError extends Error {
@@ -408,6 +416,9 @@ async function runPagamentoCarrinho(
           0,
         );
         const totalPaid = totalReceiver + totalFee + totalSurcharge;
+        if (parsed.expectedTotalCents !== undefined && parsed.expectedTotalCents !== totalPaid) {
+          throw new CheckoutQuoteChangedError();
+        }
 
         const aggregate: SnapshotComposicaoValoresAggregate = {
           idCampanha: parsed.idCampanha,

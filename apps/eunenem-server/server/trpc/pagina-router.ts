@@ -5,6 +5,8 @@ import { initTRPC, TRPCError } from '@trpc/server';
 import { z } from 'zod/v4';
 import {
   calcularValorTaxaPercentual,
+  calcularComposicaoValoresParaItem,
+  calcularSurchargeParaCarrinho,
   type Campanha,
   computeCardSurchargeCents,
   quantidadeRestante,
@@ -193,6 +195,7 @@ export const IniciarPagamentoCarrinhoInputSchema = z.object({
   metodo: z.enum(['pix', 'credit_card']),
   // aperture-kuw0o: see IniciarPagamentoContribuicaoInputSchema.
   contribuinte: ContribuinteInputSchema.optional(),
+  expectedTotalCents: z.number().int().nonnegative().optional(),
 });
 
 /**
@@ -378,9 +381,7 @@ async function readCheckoutCapability(
     } catch { /* Observability must not alter checkout semantics. */ }
     throw new TRPCError({
       code: 'CONFLICT',
-      message: reason === 'active_capability_slots_full'
-        ? 'Você tem pagamentos em aberto. Conclua um deles ou aguarde a expiração para iniciar outro.'
-        : 'Operação indisponível',
+      message: 'Operação indisponível',
     });
   };
   // Bound parsing/DB work, even for a forged request. Never delete unrelated cookies.
@@ -404,6 +405,7 @@ async function readCheckoutCapability(
   const now = ctx.deps.clock().getTime();
   const needsSpace = remaining > MAX_CHECKOUT_COOKIE_SLOTS ||
     (target === null && remaining >= MAX_CHECKOUT_COOKIE_SLOTS) || headerBytes > MAX_COOKIE_HEADER_BYTES;
+  const recoverable: { name: string; pair: string; createdAt: number }[] = [];
   for (const cookie of needsSpace ? parsed : []) {
     // Never discard the operation being resumed, including ambiguous provider results.
     if (cookie.name === expectedName) continue;
@@ -420,12 +422,26 @@ async function readCheckoutCapability(
     const legacyStripeExpired = operation?.provider === 'stripe' &&
       operation.providerExpiresAt === null && operation.providerSucceededAt !== null &&
       now - operation.providerSucceededAt.getTime() >= 25 * 60 * 60 * 1000;
-    // In-flight/unknown/reserved operations with no proven expiry remain recoverable.
+    // Prefer pruning terminal/expired slots before evicting a live browser capability.
     if (!operation || terminal || expired || legacyStripeExpired || (operation.abandonedAt && !operation.localCommittedAt)) {
       clearCheckoutCapability(ctx, id);
       remaining -= 1;
       remainingBytes -= Buffer.byteLength(cookie.pair, 'utf8') + 2;
+    } else {
+      recoverable.push({ ...cookie, createdAt: operation.createdAt.getTime() });
     }
+  }
+  // Capability cookies are browser recovery handles, not payment validity.
+  // Evict oldest first (server timestamp, never request-cookie order), excluding
+  // the resumed operation above. Do not abandon/cancel/delete the operation or
+  // payment: provider callbacks and reconciliation must still settle it.
+  recoverable.sort((a, b) => a.createdAt - b.createdAt || a.name.localeCompare(b.name));
+  for (const cookie of recoverable) {
+    const slotLimit = target === null ? MAX_CHECKOUT_COOKIE_SLOTS - 1 : MAX_CHECKOUT_COOKIE_SLOTS;
+    if (remaining <= slotLimit && remainingBytes <= MAX_COOKIE_HEADER_BYTES) break;
+    clearCheckoutCapability(ctx, cookie.name.slice(CHECKOUT_COOKIE_PREFIX.length));
+    remaining -= 1;
+    remainingBytes -= Buffer.byteLength(cookie.pair, 'utf8') + 2;
   }
   if (remainingBytes > MAX_COOKIE_HEADER_BYTES) conflict('cookie_header_size');
   if (remaining > MAX_CHECKOUT_COOKIE_SLOTS || (target === null && remaining >= MAX_CHECKOUT_COOKIE_SLOTS)) {
@@ -436,7 +452,8 @@ async function readCheckoutCapability(
 
 // Seven-day browser ceiling remains for reservations/legacy unknown results.
 // New Stripe sessions persist expires_at; PIX persists its QR expiry. Slot pressure
-// removes expired/terminal entries earlier without stranding a valid payment.
+// prunes expired/terminal entries first, then the oldest non-target capability.
+// Eviction only drops browser recovery access; the payment itself remains valid.
 function setCheckoutCapability(ctx: TrpcContext, operationId: string, capability: string): void {
   ctx.resHeaders.append(
     'set-cookie',
@@ -487,6 +504,39 @@ function deterministicUuid(operationId: string, domain: string): string {
 // ── Router ────────────────────────────────────────────────────────────────
 
 export const paginaRouter = t.router({
+  /** Fresh cart quote: only current, same-campaign gifts; no provider side effects. */
+  revalidarCarrinho: t.procedure
+    .input(IniciarPagamentoCarrinhoInputSchema.pick({ slug: true, idCampanha: true, itens: true }).extend({ idsDisponiveis: z.array(z.string().uuid()).max(5000).optional() }))
+    .query(async ({ ctx, input }) => {
+      const { campanha, idOpcaoPresentes } = await resolvePaginaBySlug(ctx, input.slug, input.idCampanha);
+      const ids = [...new Set([...input.itens.map((i) => i.idContribuicao), ...(input.idsDisponiveis ?? [])])];
+      const sold = await ctx.deps.pagamentoRepository.somarQuantidadesContribuicoesEmPagamentosAprovados(ids);
+      const gifts = new Map((await ctx.deps.contribuicaoRepository.findByOpcao(campanha.id, idOpcaoPresentes)).map((gift) => [gift.id, gift]));
+      const itens = [];
+      let totalPixCents = 0;
+      let totalContributionCents = 0;
+      for (const id of ids) {
+        const gift = gifts.get(id);
+        if (!gift || gift.idCampanha !== campanha.id || gift.idOpcaoContribuicao !== idOpcaoPresentes) continue;
+        const qtyAvailable = Math.max(0, gift.quantidade - (sold.get(id) ?? 0));
+        const quantidade = Math.min(qtyAvailable, input.itens.filter((i) => i.idContribuicao === id).reduce((n, i) => n + i.quantidade, 0));
+        if (!qtyAvailable) continue;
+        const composition = await calcularComposicaoValoresParaItem(ctx.deps, {
+          idPlataforma: campanha.idPlataforma, idContribuicao: id, tipo: 'presente',
+          contributionUnitAmountCents: gift.valor, quantidade: Math.max(1, quantidade),
+        });
+        const valorCents = composition.receiverUnitAmountCents + composition.feeUnitAmountCents;
+        totalPixCents += valorCents * quantidade;
+        totalContributionCents += composition.contributionUnitAmountCents * quantidade;
+        itens.push({ idContribuicao: id, nome: gift.nome, quantidade, qtyAvailable, valorCents,
+          valorComTaxaCartaoCents: valorCents + computeCardSurchargeCents(gift.valor), imagemUrl: gift.imagemUrl });
+      }
+      const surcharge = totalPixCents > 0 ? await calcularSurchargeParaCarrinho(ctx.deps, {
+        totalContributionCents, metodo: 'credit_card',
+      }) : null;
+      return { itens, totalPixCents, totalCartaoCents: totalPixCents + (surcharge?.amountCents ?? 0) };
+    }),
+
   /**
    * Visitor-safe gift list. Resolves the slug → usuario → campanha →
    * `presente` opção, lists its contribuicoes, projects to the six fields
@@ -844,6 +894,7 @@ export const paginaRouter = t.router({
               quantidade: item.quantidade,
             })),
             metodo: input.metodo,
+            ...(input.expectedTotalCents === undefined ? {} : { expectedTotalCents: input.expectedTotalCents }),
             idPagamento,
             idIntencaoPagamento,
             idsItens,
@@ -890,6 +941,9 @@ export const paginaRouter = t.router({
       } catch (err) {
         if ((err as { _tag?: unknown })?._tag === 'CheckoutOperationAbandonedError') {
           return { tipo: 'retry_new_operation' as const, operationId: input.operationId };
+        }
+        if ((err as { _tag?: unknown })?._tag === 'CheckoutQuoteChangedError') {
+          throw new TRPCError({ code: 'CONFLICT', message: 'O valor do carrinho mudou. Confira o total atualizado e tente novamente.' });
         }
         if (err instanceof TRPCError) throw err;
         throw new TRPCError({
@@ -964,6 +1018,7 @@ export const paginaRouter = t.router({
       const contribuicao = primeiroItemContribuicao
         ? await ctx.deps.contribuicaoRepository.findById(
             primeiroItemContribuicao.idContribuicao as unknown as IdContribuicao,
+            { incluirArquivadas: true },
           )
         : undefined;
 

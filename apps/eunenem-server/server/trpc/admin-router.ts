@@ -938,6 +938,7 @@ const ContribuinteDTOSchema = z
   .nullable();
 
 const ContribuicaoAdminDTOSchema = z.object({
+  arquivada: z.boolean(),
   id: z.string(),
   nome: z.string(),
   valorCentavos: z.number().int().nonnegative(),
@@ -1029,6 +1030,7 @@ function toContribuicaoAdminDTO(
   const contribuinte = contribuintesByIdContribuicao.get(c.id) ?? null;
   return {
     id: c.id,
+    arquivada: c.arquivada === true,
     nome: c.nome,
     valorCentavos: c.valor as unknown as number,
     grupo: c.grupo,
@@ -1093,6 +1095,7 @@ const contribuicoesRouter = t.router({
       const contribuicoes =
         await ctx.deps.contribuicaoRepository.findByCampanhaId(
           input.idCampanha as IdCampanha,
+          { incluirArquivadas: true },
         );
       // Plan 0016 Phase 2 (aperture-eg1s2): bulk-fetch esgotada set +
       // contribuinte attribution in TWO indexed queries. The sums
@@ -1168,6 +1171,7 @@ const contribuicoesRouter = t.router({
     .query(async ({ ctx, input }) => {
       const contribuicao = await ctx.deps.contribuicaoRepository.findById(
         input.idContribuicao as IdContribuicao,
+        { incluirArquivadas: true },
       );
       if (!contribuicao) return { items: [] };
       const campanha = await ctx.deps.campanhaRepository.findById(
@@ -1271,6 +1275,7 @@ const contribuicoesRouter = t.router({
     .query(async ({ ctx, input }) => {
       const contribuicao = await ctx.deps.contribuicaoRepository.findById(
         input.idContribuicao as IdContribuicao,
+        { incluirArquivadas: true },
       );
       if (!contribuicao) return null;
 
@@ -1442,6 +1447,7 @@ const financeiroRouter = t.router({
       // cross-plataforma. Matches contribuicoes.findById behavior.
       const contribuicao = await ctx.deps.contribuicaoRepository.findById(
         input.idContribuicao as IdContribuicao,
+        { incluirArquivadas: true },
       );
       if (!contribuicao) return { lancamentosByPagamento: [] };
       const campanha = await ctx.deps.campanhaRepository.findById(
@@ -1934,6 +1940,7 @@ const pagamentosRouter = t.router({
     .query(async ({ ctx, input }) => {
       const contribuicao = await ctx.deps.contribuicaoRepository.findById(
         input.idContribuicao as IdContribuicao,
+        { incluirArquivadas: true },
       );
       if (!contribuicao) return { pagamentos: [] };
 
@@ -1978,6 +1985,7 @@ const pagamentosRouter = t.router({
           const found =
             await ctx.deps.contribuicaoRepository.findById(
               id as IdContribuicao,
+              { incluirArquivadas: true },
             );
           if (found) contribuicaoNomesById.set(id, found.nome);
         }),
@@ -2050,6 +2058,7 @@ const pagamentosRouter = t.router({
       const contribuicoes =
         await ctx.deps.contribuicaoRepository.findByCampanhaId(
           input.idCampanha as IdCampanha,
+          { incluirArquivadas: true },
         );
 
       // Fan-out + dedupe by pagamento.id. A single pagamento can reference
@@ -2147,6 +2156,7 @@ const pagamentosRouter = t.router({
         Array.from(referencedIds).map(async (id) => {
           const found = await ctx.deps.contribuicaoRepository.findById(
             id as IdContribuicao,
+            { incluirArquivadas: true },
           );
           if (found) contribuicaoNomesById.set(id, found.nome);
         }),
@@ -2428,6 +2438,7 @@ async function resolveAdminPagamentoContext(
   if (firstContribuicaoItem) {
     contribuicao = await ctx.deps.contribuicaoRepository.findById(
       firstContribuicaoItem.idContribuicao as unknown as IdContribuicao,
+      { incluirArquivadas: true },
     );
   }
   if (!contribuicao) {

@@ -52,3 +52,42 @@ test('web manifest is served and names EuNeném', async ({ request }) => {
     expect((await request.get(icon.src)).status(), icon.src).toBe(200);
   }
 });
+
+test('robots and sitemap expose institutional pages without changing existing indexing', async ({
+  request,
+}) => {
+  const robots = await request.get('/robots.txt', { maxRedirects: 0 });
+  expect(robots.status()).toBe(200);
+  expect(robots.headers()['content-type']).toContain('text/plain');
+  const text = await robots.text();
+  expect(text).toContain('User-agent: *');
+  for (const path of ['/painel', '/admin', '/login', '/campanhas', '/api/']) {
+    expect(text).toContain(`Disallow: ${path}`);
+  }
+  expect(text).not.toMatch(/^Disallow: \/pagina\/?$/m);
+  const sitemapUrl = text.match(/^Sitemap: (.+)$/m)?.[1];
+  expect(sitemapUrl).toBeDefined();
+  const sitemap = await request.get('/sitemap.xml', { maxRedirects: 0 });
+  expect(sitemap.status()).toBe(200);
+  expect(sitemap.headers()['content-type']).toContain('application/xml');
+  const xml = await sitemap.text();
+  expect(xml).toContain('http://www.sitemaps.org/schemas/sitemap/0.9');
+  const locations = [...xml.matchAll(/<loc>([^<]+)<\/loc>/g)].map((m) => m[1]);
+  const origin = new URL(sitemapUrl ?? '').origin;
+  expect(locations).toEqual(
+    expect.arrayContaining(
+      ['/', '/faq', '/taxas-e-prazos', '/termos-de-uso'].map((p) => `${origin}${p}`),
+    ),
+  );
+  expect(
+    locations.every(
+      (location) =>
+        location &&
+        (new URL(location).pathname.startsWith('/pagina/') ||
+          ['/', '/faq', '/taxas-e-prazos', '/termos-de-uso'].includes(new URL(location).pathname)),
+    ),
+  ).toBe(true);
+  // The sitemap is not a new privacy/indexing policy for existing family pages.
+  const familyHtml = await (await request.get('/pagina/maria')).text();
+  expect(familyHtml).not.toContain('name="robots" content="noindex');
+});

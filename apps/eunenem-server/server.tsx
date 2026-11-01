@@ -49,6 +49,7 @@ import {
 import { appRouter } from './server/trpc/router.js';
 import { resolverUsuarioAutenticadoOuNull } from './server/trpc/session-resolver.js';
 import { seoHead, WEB_MANIFEST } from './server/seo.js';
+import { createSeoDiscoveryRoutes } from './server/seo-discovery.js';
 import { createStripeWebhookHandler } from './server/webhooks/stripe-webhook.js';
 import { mountInterPixWebhookRoutesWhenBound } from './server/webhooks/inter-pix-webhook.js';
 import { captureGlitchTipRequestFailure } from './src/lib/glitchtip/instrument.js';
@@ -211,6 +212,7 @@ for (const icon of [
 ]) {
   app.get(icon, serveStatic({ root: './public' }));
 }
+app.route('/', createSeoDiscoveryRoutes(deps.db, env.BETTER_AUTH_URL));
 app.get('/site.webmanifest', (c) =>
   c.body(JSON.stringify(WEB_MANIFEST), 200, { 'Content-Type': 'application/manifest+json' }),
 );

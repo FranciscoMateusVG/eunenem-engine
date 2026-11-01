@@ -171,6 +171,7 @@ export interface Contas {
 }
 
 export interface Contribuicoes {
+  arquivada_em: Timestamp | null;
   campanha_id: string;
   criada_em: Generated<Timestamp>;
   grupo: string | null;

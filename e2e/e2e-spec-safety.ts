@@ -9,6 +9,13 @@
  * silently creating an unguarded payment path.
  */
 export const E2E_SPEC_SAFETY = [
+  // Isolated synthetic pending/rejected rows; no provider calls.
+  { file: 'vcrxu-remover-presente.spec.ts', safety: 'non-payment' },
+  {
+    file: 'fub3k-cart-revalidation.spec.ts',
+    safety: 'money-movement',
+    capability: 'Creates fake PIX after server cart revalidation; isolated local runner only.',
+  },
   // Seeds gifts (one with a synthetic sold item); edits/removes as the owner. No checkout.
   { file: '0vne4-owner-edit-pagina.spec.ts', safety: 'non-payment' },
   { file: '118sb-clickthrough-gate.spec.ts', safety: 'non-payment' },
