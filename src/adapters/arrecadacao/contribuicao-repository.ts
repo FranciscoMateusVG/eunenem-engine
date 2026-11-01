@@ -30,7 +30,10 @@ export interface ContribuicaoRepository {
     contribuicoes: readonly Contribuicao[],
     context?: ArrecadacaoRepositoryContext,
   ): Promise<void>;
-  findById(id: IdContribuicao): Promise<Contribuicao | undefined>;
+  findById(
+    id: IdContribuicao,
+    options?: { incluirArquivadas?: boolean },
+  ): Promise<Contribuicao | undefined>;
   findByCampanhaId(idCampanha: IdCampanha): Promise<readonly Contribuicao[]>;
   /**
    * Lista as contribuições associadas a uma opção dentro de uma campanha
@@ -52,7 +55,9 @@ export interface ContribuicaoRepository {
   /**
    * Remove uma contribuição pelo id (aperture-d6atj). Caller (use-case
    * `removerContribuicao`) já validou status + autorização — o adapter só
-   * executa o DELETE. Idempotente: deletar um id inexistente é no-op.
+   * arquiva, preservando referências históricas. Leituras normais excluem
+   * arquivadas; incluirArquivadas é exclusivo da finalização de pagamentos
+   * já existentes. Idempotente: id inexistente é no-op.
    */
   deleteById(id: IdContribuicao): Promise<void>;
 }

@@ -38,6 +38,21 @@ export function describeContribuicaoRepositoryConformance(
       expect(found).toEqual(contribuicao);
     });
 
+    it('archives idempotently, hides active reads, retains explicit history after save', async () => {
+      const gift = makeContribuicao();
+      await options.seedForContribuicao?.(gift);
+      await repo.save(gift);
+      await repo.deleteById(gift.id);
+      await repo.deleteById(gift.id);
+      await repo.deleteById(randomUUID());
+      await repo.save(gift); // a stale admin edit must not resurrect the gift
+      expect(await repo.findById(gift.id)).toBeUndefined();
+      expect(await repo.findById(gift.id, { incluirArquivadas: true })).toEqual(gift);
+      expect(await repo.findByCampanhaId(gift.idCampanha)).toEqual([]);
+      expect(await repo.findByOpcao(gift.idCampanha, gift.idOpcaoContribuicao)).toEqual([]);
+      expect(await repo.countByOpcao(gift.idCampanha, gift.idOpcaoContribuicao)).toBe(0);
+    });
+
     it('returns undefined for non-existent ID', async () => {
       const found = await repo.findById(randomUUID());
       expect(found).toBeUndefined();

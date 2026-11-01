@@ -17,6 +17,8 @@ const DB_ATTRS = {
 export class ContribuicaoRepositoryMemory implements ContribuicaoRepository {
   private readonly contribuicoes = new Map<IdContribuicao, Contribuicao>();
 
+  private readonly arquivadas = new Set<IdContribuicao>();
+
   async save(contribuicao: Contribuicao): Promise<void> {
     return tracer.startActiveSpan('db.arrecadacao_contribuicoes.save', async (span) => {
       span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'UPSERT' });
@@ -66,11 +68,17 @@ export class ContribuicaoRepositoryMemory implements ContribuicaoRepository {
     });
   }
 
-  async findById(id: IdContribuicao): Promise<Contribuicao | undefined> {
+  async findById(
+    id: IdContribuicao,
+    options?: { incluirArquivadas?: boolean },
+  ): Promise<Contribuicao | undefined> {
     return tracer.startActiveSpan('db.arrecadacao_contribuicoes.findById', async (span) => {
       span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'SELECT' });
       try {
-        const result = this.contribuicoes.get(id);
+        const result =
+          !options?.incluirArquivadas && this.arquivadas.has(id)
+            ? undefined
+            : this.contribuicoes.get(id);
         span.setStatus({ code: SpanStatusCode.OK });
         return result;
       } catch (error: unknown) {
@@ -87,7 +95,9 @@ export class ContribuicaoRepositoryMemory implements ContribuicaoRepository {
     return tracer.startActiveSpan('db.arrecadacao_contribuicoes.findByCampanhaId', async (span) => {
       span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'SELECT' });
       try {
-        const result = [...this.contribuicoes.values()].filter((c) => c.idCampanha === idCampanha);
+        const result = [...this.contribuicoes.values()].filter(
+          (c) => !this.arquivadas.has(c.id) && c.idCampanha === idCampanha,
+        );
         span.setStatus({ code: SpanStatusCode.OK });
         return result;
       } catch (error: unknown) {
@@ -108,7 +118,10 @@ export class ContribuicaoRepositoryMemory implements ContribuicaoRepository {
       span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'SELECT' });
       try {
         const result = [...this.contribuicoes.values()].filter(
-          (c) => c.idCampanha === idCampanha && c.idOpcaoContribuicao === idOpcao,
+          (c) =>
+            !this.arquivadas.has(c.id) &&
+            c.idCampanha === idCampanha &&
+            c.idOpcaoContribuicao === idOpcao,
         );
         span.setStatus({ code: SpanStatusCode.OK });
         return result;
@@ -124,9 +137,9 @@ export class ContribuicaoRepositoryMemory implements ContribuicaoRepository {
 
   async deleteById(id: IdContribuicao): Promise<void> {
     return tracer.startActiveSpan('db.arrecadacao_contribuicoes.deleteById', async (span) => {
-      span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'DELETE' });
+      span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'UPDATE' });
       try {
-        this.contribuicoes.delete(id);
+        if (this.contribuicoes.has(id)) this.arquivadas.add(id);
         span.setStatus({ code: SpanStatusCode.OK });
       } catch (error: unknown) {
         span.recordException(error as Error);
@@ -144,7 +157,12 @@ export class ContribuicaoRepositoryMemory implements ContribuicaoRepository {
       try {
         let count = 0;
         for (const c of this.contribuicoes.values()) {
-          if (c.idCampanha === idCampanha && c.idOpcaoContribuicao === idOpcao) count++;
+          if (
+            !this.arquivadas.has(c.id) &&
+            c.idCampanha === idCampanha &&
+            c.idOpcaoContribuicao === idOpcao
+          )
+            count++;
         }
         span.setStatus({ code: SpanStatusCode.OK });
         return count;
