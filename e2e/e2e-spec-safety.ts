@@ -37,6 +37,8 @@ export const E2E_SPEC_SAFETY = [
     capability: 'Creates, reconciles, and refunds PIX payments.',
   },
   { file: 'acr3t-switcher-mobile.spec.ts', safety: 'non-payment' },
+  // Guest page CTA + signup first touch; seeds a campaign, never pays.
+  { file: 'i06qu-guest-cta.spec.ts', safety: 'non-payment' },
   // Deliberately safe: only denied anonymous/non-admin approval attempts with
   // an impossible id. Keeping this runnable remotely preserves the auth gate.
   { file: 'admin-authz-denial.spec.ts', safety: 'non-payment' },
