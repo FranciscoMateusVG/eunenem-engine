@@ -1,6 +1,9 @@
 import { createRequire } from 'node:module';
 import { expect, it } from 'vitest';
-import { EstatisticasPainel } from '../../../apps/eunenem-server/pages/AdminEstatisticasPage.js';
+import {
+  EstatisticasLayout,
+  EstatisticasPainel,
+} from '../../../apps/eunenem-server/pages/AdminEstatisticasPage.js';
 import { agregarEstatisticas } from '../../../apps/eunenem-server/pages/lib/estatisticas.js';
 
 const req = createRequire(`${process.cwd()}/apps/eunenem-server/package.json`);
@@ -28,7 +31,13 @@ it('grade preenchida, base zero indefinida e média móvel inclui zeros', () => 
     media4Semanas: 3,
     parcial: true,
   });
-  const html = renderToStaticMarkup(React.createElement(EstatisticasPainel, { data: p }));
+  const html = renderToStaticMarkup(
+    React.createElement(
+      EstatisticasLayout,
+      { secao: 'funil', meses: 3, onMeses: () => {} },
+      React.createElement(EstatisticasPainel, { data: p, meses: 3 }),
+    ),
+  );
   expect(html).toContain('Estatísticas');
   expect(html).toContain('value="3" selected');
   expect(html.match(/data-testid="estatisticas-mes"/g)).toHaveLength(3);
