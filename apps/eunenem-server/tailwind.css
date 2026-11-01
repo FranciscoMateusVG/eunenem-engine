@@ -455,22 +455,53 @@ h4 {
   margin-top: 4px;
 }
 
+/* aperture-tx50n: on phones the five pieces of a card no longer sit on one
+   row (they overflowed the modal at 320–375px). Icon on the left; title +
+   price on the first line; the micro note and the sub line stack below. */
 @media (max-width: 480px) {
   .metodo-grid {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
   .metodo-card {
-    min-height: 120px;
-    padding: 18px 14px;
-    flex-direction: row;
-    justify-content: flex-start;
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-template-areas:
+      "icon title price"
+      "icon micro micro"
+      "icon sub sub";
     align-items: center;
+    justify-items: start;
+    column-gap: 14px;
+    row-gap: 2px;
+    min-width: 0;
+    min-height: 0;
+    padding: 14px;
     text-align: left;
-    gap: 16px;
   }
   .metodo-card-icon {
-    font-size: 36px;
+    grid-area: icon;
+    font-size: 32px;
     margin: 0;
+  }
+  .metodo-card-title {
+    grid-area: title;
+    font-size: 24px;
+  }
+  .metodo-card-price {
+    grid-area: price;
+    justify-self: end;
+    font-size: 20px;
+    margin: 0;
+    white-space: nowrap;
+  }
+  .metodo-card-micro {
+    grid-area: micro;
+    font-size: 17px;
+    white-space: nowrap;
+  }
+  .metodo-card-sub {
+    grid-area: sub;
+    max-width: 100%;
   }
   .metodo-card-title,
   .metodo-card-micro,
