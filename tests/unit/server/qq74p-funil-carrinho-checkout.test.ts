@@ -312,6 +312,7 @@ describe('checkout_falhou — mutation REJECTED, finite code, never the message'
           metodo: 'credit_card',
           valor_centavos: 9900,
           codigo: 'CONFLICT',
+          error_name: 'UnknownError',
           quantidade_itens: 2,
         },
       },

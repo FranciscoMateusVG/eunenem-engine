@@ -43,6 +43,7 @@ import { createPainelAccessMiddleware } from './server/painel-access.js';
 import {
   createRequestObservabilityMiddleware,
   reportTrpcInternalFailure,
+  reportCheckoutFailure,
   REQUEST_ID_HEADER,
 } from './server/request-observability.js';
 import { appRouter } from './server/trpc/router.js';
@@ -239,7 +240,8 @@ app.all('/api/trpc/*', (c) =>
       headers: req.headers,
       resHeaders,
     }),
-    onError: ({ error, path }) => {
+    onError: ({ error, path, input }) => {
+      reportCheckoutFailure(c, {code: error.code, path, input});
       if (error.code === 'INTERNAL_SERVER_ERROR') {
         reportTrpcInternalFailure(c, { error, path: path ?? undefined });
       }

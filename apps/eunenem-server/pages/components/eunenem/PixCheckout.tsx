@@ -92,6 +92,8 @@ interface PixIdentityFormProps {
   submitting: boolean;
   /** Mutation error to surface (initiation failed server-side). */
   submitError: boolean;
+  errorMessage?: string;
+  retrySeconds?: number;
   /** Pre-fill (e.g. retry after an expired QR — don't make them re-type). */
   initial?: ContribuinteInput | null;
   onSubmit: (contribuinte: ContribuinteInput) => void;
@@ -107,6 +109,8 @@ export function PixIdentityForm({
   valorCents,
   submitting,
   submitError,
+  errorMessage,
+  retrySeconds = 0,
   initial,
   onSubmit,
   onBack,
@@ -125,6 +129,7 @@ export function PixIdentityForm({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (submitting || retrySeconds > 0) return;
     if (Object.keys(errors).length > 0) {
       setShowErrors(true);
       return;
@@ -223,17 +228,17 @@ export function PixIdentityForm({
             margin: "14px 0 0",
           }}
         >
-          não conseguimos iniciar o pix agora — tenta de novo?
+          {errorMessage ?? "Não foi possível iniciar o PIX. Tente novamente."}
         </p>
       )}
 
       <button
         type="submit"
         className="btn-lilac"
-        disabled={submitting}
+        disabled={submitting || retrySeconds > 0}
         style={{ width: "100%", marginTop: 20, opacity: submitting ? 0.7 : 1 }}
       >
-        {submitting ? "gerando o pix…" : "continuar para o pix ♡"}
+        {submitting ? "gerando o pix…" : retrySeconds > 0 ? `Aguarde ${retrySeconds} s` : "continuar para o pix ♡"}
       </button>
       <button
         type="button"

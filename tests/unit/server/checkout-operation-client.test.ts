@@ -158,3 +158,27 @@ it('k0tg1: explicit abandoned reply rotates only next action; double click share
   }
   expect(ids[0]).not.toBe(ids[1]);
 });
+
+it('hdg7h: exposes exact cooldown and code without a server call, then permits retry', async () => {
+  const storage = new StorageMemory();
+  const input = { metodo: 'pix', valor: 3161 };
+  const key = await checkoutRequestStorageKey('hdg7h', input, storage);
+  const now = Date.now();
+  vi.spyOn(Date, 'now').mockReturnValue(now);
+  storage.setItem(`${key}:retryAt`, String(now + 5000));
+  const request = vi.fn(async () => ({ tipo: 'pix_qr' }));
+  const args = { storageKey: 'hdg7h', requestInput: input, storage, request };
+  try {
+    await expect(executeRecoverableCheckout(args)).rejects.toMatchObject({
+      code: 'CHECKOUT_COOLDOWN',
+      retryAt: now + 5000,
+      message: 'Aguarde 5 s antes de tentar novamente.',
+    });
+    expect(request).not.toHaveBeenCalled();
+    vi.spyOn(Date, 'now').mockReturnValue(now + 5000);
+    await expect(executeRecoverableCheckout(args)).resolves.toEqual({ tipo: 'pix_qr' });
+    expect(request).toHaveBeenCalledTimes(1);
+  } finally {
+    vi.restoreAllMocks();
+  }
+});
