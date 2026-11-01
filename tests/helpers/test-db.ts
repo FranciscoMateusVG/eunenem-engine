@@ -42,8 +42,15 @@ export interface TestDatabase {
   teardown: () => Promise<void>;
 }
 
-export async function createTestDatabase(): Promise<TestDatabase> {
-  const sharedUri = process.env.TEST_DATABASE_URL;
+/**
+ * Opt into a dedicated container for suites whose global/since-start aggregates
+ * cannot be scoped to fixture IDs. Default remains the shared container.
+ * Uses the same migration and teardown path as standalone integration runs.
+ */
+export async function createTestDatabase(
+  options: { readonly isolated?: boolean } = {},
+): Promise<TestDatabase> {
+  const sharedUri = options.isolated ? undefined : process.env.TEST_DATABASE_URL;
 
   if (sharedUri) {
     // SHARED MODE — vitest globalSetup spun up the container.
