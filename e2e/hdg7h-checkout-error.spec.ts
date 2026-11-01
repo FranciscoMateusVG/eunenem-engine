@@ -1,6 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import { createDatabase } from '../src/adapters/database.js';
 import { expect, test } from './fixtures.js';
+import { classifyTarget } from './target-classifier.js';
+
+test.skip(
+  !classifyTarget(process.env.E2E_BASE_URL).isLocal,
+  'Isolated local fake-provider stack only',
+);
 
 for (const surface of ['cart', 'gift'] as const) {
   test(`${surface}: local storage replaces old banner; cooldown disables and retry calls HTTP`, async ({

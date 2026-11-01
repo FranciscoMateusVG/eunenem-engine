@@ -62,6 +62,12 @@ export const E2E_SPEC_SAFETY = [
     safety: 'money-movement',
     capability: 'Creates and reconciles PIX checkouts through the payment composition root.',
   },
+  {
+    file: 'hdg7h-checkout-error.spec.ts',
+    safety: 'money-movement',
+    capability:
+      'Local fake-provider checkout rejection probes; never run against a remote deployment.',
+  },
   { file: 'llol4-isolation-gates.spec.ts', safety: 'non-payment' },
   { file: 'n06ca-invite-required-date.spec.ts', safety: 'non-payment' },
   { file: 'no4n5-login-entry.spec.ts', safety: 'non-payment' },
