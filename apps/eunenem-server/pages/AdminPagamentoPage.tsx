@@ -1,3 +1,4 @@
+import { ContestacoesMed } from "@/components/eunenem/admin/ContestacoesMed";
 import { AdminShell } from "@/components/eunenem/admin/AdminShell";
 import { DddBadge } from "@/components/eunenem/admin/DddBadge";
 import {
@@ -64,6 +65,7 @@ export function AdminPagamentoPage({ idPagamento }: { idPagamento: string }) {
       {!isLoading && !error && data && (
         <section className="space-y-6">
           <PageHeader idPagamento={idPagamento} />
+          <ContestacoesMed idPagamento={idPagamento} />
           {/* Render the exact same PagamentoCard the list context uses —
               the wire shape is identical so no projection happens here. */}
           <PagamentoCard

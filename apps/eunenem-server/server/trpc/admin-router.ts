@@ -1,3 +1,5 @@
+import { FinanceiroContestacaoMedError } from "../../../../src/errors/pagamentos/financeiro/contestacao-med.error.js";
+import { ContestacaoInvalidaError, registrarContestacao, resolverContestacao, listarContestacoes } from "../admin-pix-contestacoes.js";
 import { loadEstatisticas } from '../admin-estatisticas.js';
 import { loadReceitaComLucro } from "../admin-lucro.js";
 import { consultarRecuperacaoRepasse, recuperarRepasse, RecoveryInputSchema } from '../../../../src/use-cases/pagamentos/financeiro/consultar-recuperacao-repasse.js';
@@ -2898,6 +2900,7 @@ const repassesRouter = t.router({
           totalCents: result.repasse.amountCents as unknown as number,
         };
       } catch (error: unknown) {
+        if (error instanceof FinanceiroContestacaoMedError) throw new TRPCError({code: "CONFLICT", message: error.message});
         if (error instanceof FinanceiroRepasseNaoEncontradoError) {
           throw new TRPCError({
             code: "NOT_FOUND",
@@ -3070,6 +3073,7 @@ const repassesRouter = t.router({
           numLancamentosLiberados: result.lancamentosLiberados,
         };
       } catch (error: unknown) {
+        if (error instanceof FinanceiroContestacaoMedError) throw new TRPCError({code: "CONFLICT", message: error.message});
         if (error instanceof FinanceiroRepasseNaoEncontradoError) {
           throw new TRPCError({
             code: "NOT_FOUND",
@@ -3126,6 +3130,7 @@ const repassesRouter = t.router({
           transferAttempts: result.repasse.transferAttempts,
         };
       } catch (error: unknown) {
+        if (error instanceof FinanceiroContestacaoMedError) throw new TRPCError({code: "CONFLICT", message: error.message});
         if (error instanceof FinanceiroRepasseNaoEncontradoError) {
           throw new TRPCError({
             code: "NOT_FOUND",
@@ -3201,6 +3206,7 @@ const repassesRouter = t.router({
           needsManualResolution: result.repasse.needsManualResolution,
         };
       } catch (error: unknown) {
+        if (error instanceof FinanceiroContestacaoMedError) throw new TRPCError({code: "CONFLICT", message: error.message});
         if (error instanceof FinanceiroRepasseNaoEncontradoError) {
           throw new TRPCError({
             code: "NOT_FOUND",
@@ -4973,6 +4979,30 @@ export const adminRouter = t.router({
 
   /** Nested sub-router for pagamentos lifecycle list per contribuicao (W4). */
   pagamentos: pagamentosRouter,
+  contestacoes: t.router({
+    listar: adminProcedure.input(z.object({idPagamento: z.string().uuid().optional(), idCampanha: z.string().uuid().optional()}))
+      .query(({ctx, input}) => listarContestacoes(ctx.deps.db, ID_PLATAFORMA_EUNENEM, input)),
+    registrar: adminProcedure.input(z.object({
+      pagamentoOuE2e: z.string().trim().min(1).max(100), casoId: z.string().trim().min(1).max(100).optional(),
+      valorCents: z.number().int().positive(), ocorridaEm: z.coerce.date(), notas: z.string().max(2000),
+    })).mutation(async ({ctx, input}) => {
+      try { return await registrarContestacao(ctx.deps.db, ID_PLATAFORMA_EUNENEM, ctx.adminUsuario.id, input); }
+      catch (error) {
+        if (error instanceof ContestacaoInvalidaError) throw new TRPCError({code: "BAD_REQUEST", message: error.message});
+        throw error;
+      }
+    }),
+    resolver: adminProcedure.input(z.object({
+      id: z.string().uuid(), estado: z.enum(["liberada", "devolvida"]), resolvidaEm: z.coerce.date(), notas: z.string().max(2000),
+    })).mutation(async ({ctx, input}) => {
+      try { return await resolverContestacao(ctx.deps.db, ID_PLATAFORMA_EUNENEM, ctx.adminUsuario.id, input); }
+      catch (error) {
+        if (error instanceof ContestacaoInvalidaError) throw new TRPCError({code: "BAD_REQUEST", message: error.message});
+        throw error;
+      }
+    }),
+  }),
+
 
   /** Receita EuNeném — taxas da plataforma por evento (aperture-9bpre). */
   estatisticas: adminProcedure.query(({ctx}) => loadEstatisticas(ctx.deps.db, ID_PLATAFORMA_EUNENEM, ctx.deps.clock())),

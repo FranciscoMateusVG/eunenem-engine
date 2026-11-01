@@ -256,10 +256,10 @@ describe('Receita 1b — notas e aviso', () => {
     );
   });
 
-  it('o rodapé declara que estorno parcial, disputa e chargeback ficam fora', () => {
+  it('o rodapé distingue MED registrado da estimativa contábil', () => {
     const t = texto(render(painel()));
     expect(t).toContain(
-      'Estornos parciais, disputas e chargebacks não são registrados e ficam fora.',
+      'Estornos parciais e chargebacks ficam fora. Contestações PIX (MED) são registradas separadamente no admin e retêm repasses, mas não ajustam esta estimativa nem o ledger.',
     );
   });
 

@@ -368,6 +368,12 @@ export function marcarRepasseFalhou(repasse: RepasseRecebedor, erro: string): Re
  * same transaction (funds return to the disponivel bucket). A cancelled
  * repasse can never be retried (iniciarTransferencia rejects it).
  */
+/** Only the repository may invoke this after proving a linked MED and no sent money. */
+export function cancelarRepasseRetidoMed(repasse: RepasseRecebedor): RepasseRecebedor {
+  assertStatus(repasse, ['solicitado', 'aprovado', 'falhou'], 'cancelado');
+  return { ...repasse, status: 'cancelado' };
+}
+
 export function cancelarRepasse(repasse: RepasseRecebedor): RepasseRecebedor {
   assertStatus(repasse, ['falhou'], 'cancelado');
   return {
