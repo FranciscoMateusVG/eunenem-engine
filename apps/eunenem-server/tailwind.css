@@ -8425,3 +8425,84 @@ dialog.config-modal::backdrop { background: #33233380; }
 }
 
 .gift-sort-trigger::-webkit-details-marker { display: none; }
+
+/* ----- Public gift card (/pagina/<slug>, GiftCard.tsx) — aperture-w7v66 -----
+   Desktop values mirror the original inline styles. Below sm the grid is two
+   ~150px columns: tag, CTAs and stepper shrink to one line, the "presente"
+   label next to the price goes away, and names clamp to 3 lines with the
+   space reserved so every card's name block has the same height. */
+.pagina-gift-card { padding: 18px; border-radius: 24px; min-width: 0; }
+.pagina-gift-tag {
+  position: absolute; top: 14px; right: 14px; z-index: 2;
+  padding: 4px 12px; border-radius: 999px;
+  background: var(--green); color: var(--plum);
+  font-size: 11px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase;
+  white-space: nowrap;
+}
+.pagina-gift-nome {
+  font-size: 24px; line-height: 1.1; color: var(--plum);
+  margin: 16px 0 10px;
+  display: -webkit-box; -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3; line-clamp: 3; overflow: hidden;
+  overflow-wrap: anywhere;
+}
+.pagina-gift-preco {
+  font-family: var(--font-patrick-hand), cursive;
+  font-size: 30px; line-height: 1; color: var(--plum); white-space: nowrap;
+}
+.pagina-gift-preco-rotulo {
+  font-family: var(--font-caveat), cursive; font-size: 18px; color: var(--coral-pink);
+}
+.pagina-gift-cta { width: 100%; justify-content: center; white-space: nowrap; }
+.pagina-gift-cta-presenteado {
+  padding: 12px 18px; border-radius: 999px; border: none;
+  background: var(--cream-2); color: var(--ink-mute);
+  font-size: 13px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase;
+  cursor: not-allowed;
+}
+.pagina-gift-stepper {
+  display: flex; align-items: center; justify-content: space-between; gap: 6px;
+  padding: 8px 12px; border-radius: 999px;
+  background: var(--lilac-soft); border: 1px solid var(--lilac-deep);
+}
+.pagina-gift-stepper-qtd {
+  font-family: var(--font-patrick-hand), cursive;
+  font-size: 22px; line-height: 1; color: var(--plum);
+  font-variant-numeric: tabular-nums; white-space: nowrap; min-width: 0;
+}
+.pagina-gift-stepper-btn { width: 30px; height: 30px; font-size: 18px; }
+.pagina-gift-disponiveis {
+  font-family: var(--font-caveat), cursive; font-size: 17px; line-height: 1.2;
+  color: var(--ink-soft); margin: 0 0 14px;
+}
+.pagina-gift-comprar-agora {
+  background: transparent; border: none; color: var(--ink-mute);
+  font-size: 12px; cursor: pointer; padding: 4px 6px; align-self: center;
+  white-space: nowrap;
+}
+@media (max-width: 639px) {
+  .pagina-gift-disponiveis { font-size: 14px; margin-bottom: 8px; }
+  .pagina-gift-comprar-agora { font-size: 11px; padding: 4px 0; }
+  .pagina-gift-card { padding: 10px; border-radius: 18px; }
+  .pagina-gift-tag {
+    top: 8px; right: 8px; padding: 3px 8px;
+    font-size: 9.5px; letter-spacing: 0.04em;
+  }
+  .pagina-gift-nome { font-size: 17px; margin: 10px 0 6px; min-height: 3.3em; }
+  .pagina-gift-preco { font-size: 22px; }
+  .pagina-gift-preco-rotulo { display: none; }
+  .pagina-gift-cta.btn-lilac,
+  .pagina-gift-cta-presenteado {
+    padding: 11px 8px; font-size: 11px; letter-spacing: 0.03em; gap: 4px;
+    box-shadow: none;
+  }
+  .pagina-gift-stepper { padding: 5px 6px; gap: 4px; }
+  .pagina-gift-stepper-qtd { font-size: 18px; }
+  .pagina-gift-stepper-btn { width: 28px; height: 28px; font-size: 16px; }
+  /* "1 no carrinho" → "1" visually; screen readers keep the full text. */
+  .pagina-gift-stepper-sufixo {
+    position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+    overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
+  }
+  .pagina-gift-cta-ja { display: none; }
+}
