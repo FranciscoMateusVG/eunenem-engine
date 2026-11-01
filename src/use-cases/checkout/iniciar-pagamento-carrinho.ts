@@ -747,7 +747,7 @@ async function obtainProviderMaterial(
         sessionId: created.sessionId,
         clientSecret: created.clientSecret,
         externalRef: created.externalRef,
-        providerExpiresAt: null,
+        providerExpiresAt: created.expiresAt ?? null,
       };
     }
     const recovered = await stripe.obterSessaoCheckout(operation.providerRef ?? '');
@@ -768,7 +768,7 @@ async function obtainProviderMaterial(
       sessionId: recovered.sessionId,
       clientSecret: recovered.clientSecret,
       externalRef: recovered.externalRef,
-      providerExpiresAt: null,
+      providerExpiresAt: recovered.expiresAt ?? null,
     };
   }
   if (claimKind === 'create') {

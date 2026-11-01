@@ -102,6 +102,61 @@ const capabilityHash = 'a'.repeat(64);
 const requestHmac = 'b'.repeat(64);
 
 describe('CheckoutOperationRepositoryPostgres', () => {
+  it('9hkc1: retains authoritative Stripe expiry through attempt and local commit in PG', async () => {
+    const { pagamento, snapshot, platformId } = buildFixture();
+    await seedPagamentoParents(testDb.db, pagamento);
+    const repo = new CheckoutOperationRepositoryPostgres(testDb.db);
+    const now = new Date('2026-11-01T12:00:00Z');
+    const expiresAt = new Date('2026-11-02T12:00:00Z');
+    await repo.prepare({
+      pagamento,
+      operationId: pagamento.id,
+      platformId,
+      campaignId: snapshot.campaignId,
+      provider: 'stripe',
+      method: snapshot.method,
+      capabilityHash,
+      requestHmac,
+      snapshot,
+      now,
+    });
+    const claim = await repo.claim({
+      operationId: pagamento.id,
+      capabilityHash,
+      requestHmac,
+      now,
+      leaseUntil: new Date(now.getTime() + 30_000),
+    });
+    if (claim.status !== 'claimed') throw new Error('fixture claim');
+    const providerRef = 'cs_test_expiry';
+    expect(
+      await repo.completeAttempt({
+        operationId: pagamento.id,
+        attemptNo: claim.attemptNo,
+        fenceToken: claim.fenceToken,
+        outcome: 'provider_succeeded',
+        diagnostic: null,
+        providerRef,
+        providerExpiresAt: expiresAt,
+        now,
+      }),
+    ).toBe(true);
+    expect((await repo.findById(pagamento.id))?.providerExpiresAt).toEqual(expiresAt);
+    expect(
+      await repo.commitLocal({
+        operationId: pagamento.id,
+        fenceToken: claim.fenceToken,
+        providerRef,
+        providerExpiresAt: expiresAt,
+        now,
+      }),
+    ).toBe(true);
+    expect(await repo.findById(pagamento.id)).toMatchObject({
+      state: 'local_committed',
+      providerExpiresAt: expiresAt,
+    });
+  });
+
   it('abandons only uncommitted PIX failure, fences late results and preserves audit', async () => {
     const { pagamento, snapshot, platformId } = buildFixture();
     await seedPagamentoParents(testDb.db, pagamento);
