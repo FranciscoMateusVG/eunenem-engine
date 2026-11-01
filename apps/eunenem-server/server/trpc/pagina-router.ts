@@ -1,3 +1,4 @@
+import { readPixStatus } from './pix-status.js';
 import { campanhaNoAr, isCampaignPublicOwner } from './campaign-public-address.js';
 import { createHash, randomBytes } from 'node:crypto';
 import { initTRPC, TRPCError } from '@trpc/server';
@@ -1075,7 +1076,8 @@ export const paginaRouter = t.router({
    * D1-compliant (deviation log): this is a READ — pagamento status from
    * OUR DB first (the webhook/poller pipeline via Rex's verified-result
    * seam is what transitions state), falling back to an authoritative
-   * provider consult for DISPLAY only (the QR screen can flip to
+   * provider consult for DISPLAY only after 60s without a terminal DB update,
+   * admitted at most once per payment/minute across processes (the QR screen can flip to
    * "confirmado" the moment Inter reports CONCLUIDA, before bookkeeping
    * lands). No state transition happens here, ever.
    *
@@ -1127,25 +1129,7 @@ export const paginaRouter = t.router({
         return { status: 'rejeitado' as const };
       }
 
-      // Pending in our DB + a configured PIX provider → authoritative
-      // consult for display. Transitory provider errors degrade to
-      // 'pendente' with a safe backoff signal; a public query must not
-      // surface transport details.
-      if (ctx.deps.cobrancaPixProviderKind !== 'stripe') {
-        try {
-          const cobranca = await ctx.deps.pixCobrancaProvider.consultarCobranca(input.txid);
-          if (cobranca.status === 'concluida') {
-            return { status: 'confirmado' as const };
-          }
-          if (cobranca.status === 'removida') {
-            return { status: 'expirado' as const };
-          }
-        } catch {
-          return { status: 'pendente' as const, retryableError: true }; // no provider details
-        }
-      }
-
-      return { status: 'pendente' as const };
+      return readPixStatus(ctx.deps, pagamento, input.txid);
     }),
 });
 
