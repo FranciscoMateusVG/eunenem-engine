@@ -138,6 +138,8 @@ const CODIGO_TRPC = /^[A-Z][A-Z_]{2,40}$/;
  */
 export function codigoErroTrpc(err: unknown): string {
   if (typeof err !== 'object' || err === null) return 'desconhecido';
+  const localCode = (err as { code?: unknown }).code;
+  if (typeof localCode === 'string' && /^CHECKOUT_[A-Z_]{1,40}$/.test(localCode)) return localCode;
   const data = (err as { data?: unknown }).data;
   if (typeof data !== 'object' || data === null) return 'desconhecido';
   const code = (data as { code?: unknown }).code;
@@ -160,8 +162,11 @@ export function emitirCheckoutFalhou(
     metodo: input.metodo,
     valor_centavos: input.valorCentavos,
     codigo: codigoErroTrpc(input.erro),
+    error_name: input.erro instanceof Error && /^[A-Za-z][A-Za-z0-9_]{0,79}$/.test(input.erro.name) ? input.erro.name : 'UnknownError',
   };
   if (input.quantidadeItens !== undefined) props.quantidade_itens = input.quantidadeItens;
+  // Never serialize the exception/input: provider bodies and contributor PII stay out.
+  console.warn('checkout.failed', props);
   emitir(EVENTO_CHECKOUT_FALHOU, props);
 }
 

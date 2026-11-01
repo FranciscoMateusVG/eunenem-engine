@@ -427,7 +427,7 @@ export function CartDrawer({ open, onClose, slug }: CartDrawerProps) {
             onFinalizar={onFinalizar}
             isPending={iniciar.isPending}
             isError={iniciar.isError}
-            errorMessage={iniciar.error?.message}
+            errorMessage={iniciar.errorMessage}
             configLoading={configLoading}
             configError={configError}
             configResolved={configCheckout.isSuccess}
@@ -442,6 +442,8 @@ export function CartDrawer({ open, onClose, slug }: CartDrawerProps) {
               valorCents={cart.totalPixCents}
               submitting={iniciar.isPending}
               submitError={iniciar.isError}
+              errorMessage={iniciar.errorMessage}
+              retrySeconds={iniciar.retrySeconds}
               initial={pixContribuinte}
               onSubmit={onSubmitPixIdentity}
               onBack={() => setPhase({ kind: "summary" })}
