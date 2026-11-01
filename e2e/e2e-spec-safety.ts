@@ -11,6 +11,8 @@
 export const E2E_SPEC_SAFETY = [
   { file: '118sb-clickthrough-gate.spec.ts', safety: 'non-payment' },
   { file: '1z18g-member-permissions-ui.spec.ts', safety: 'non-payment' },
+  // Read-only, anonymous: server HTML head + icon/manifest fetches.
+  { file: '4nnys-seo-head.spec.ts', safety: 'non-payment' },
   {
     file: '4uvgf-admin-estorno.spec.ts',
     safety: 'money-movement',
