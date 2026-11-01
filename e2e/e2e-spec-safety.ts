@@ -98,6 +98,7 @@ export const E2E_SPEC_SAFETY = [
   },
   { file: 'taxas-e-prazos.spec.ts', safety: 'non-payment' },
   { file: 'tqp4t-postlogin-routing-gaps.spec.ts', safety: 'non-payment' },
+  { file: 'tx50n-comprar-agora-modal-mobile.spec.ts', safety: 'non-payment' },
   { file: 'u38rz-nova-lista-create.spec.ts', safety: 'non-payment' },
   // Prévia da NFS-e (somente leitura, nada é enviado). Self-skips unless
   // launched by its ephemeral-DB runner (e2e/support/uj78j-nfse-ephemeral-run.mjs).
