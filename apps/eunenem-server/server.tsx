@@ -48,6 +48,7 @@ import {
 } from './server/request-observability.js';
 import { appRouter } from './server/trpc/router.js';
 import { resolverUsuarioAutenticadoOuNull } from './server/trpc/session-resolver.js';
+import { seoHead, WEB_MANIFEST } from './server/seo.js';
 import { createStripeWebhookHandler } from './server/webhooks/stripe-webhook.js';
 import { mountInterPixWebhookRoutesWhenBound } from './server/webhooks/inter-pix-webhook.js';
 import { captureGlitchTipRequestFailure } from './src/lib/glitchtip/instrument.js';
@@ -198,6 +199,21 @@ app.use('/public/*', serveStatic({ root: './' }));
 // on-disk files at the prefix-less URLs the client expects.
 app.use('/products/*', serveStatic({ root: './public' }));
 app.use('/listas-prontas/*', serveStatic({ root: './public' }));
+
+// aperture-4nnys — browsers and crawlers request icons at the site root.
+for (const icon of [
+  '/favicon.ico',
+  '/favicon.svg',
+  '/apple-touch-icon.png',
+  '/icon-192.png',
+  '/icon-512.png',
+  '/icon-maskable-512.png',
+]) {
+  app.get(icon, serveStatic({ root: './public' }));
+}
+app.get('/site.webmanifest', (c) =>
+  c.body(JSON.stringify(WEB_MANIFEST), 200, { 'Content-Type': 'application/manifest+json' }),
+);
 
 // Readiness only: admission open after workers + listen, not DB/bank convergence.
 app.get('/healthz', (c) => c.text('ok'));
@@ -366,7 +382,7 @@ app.get('*', async (c) => {
     </StrictMode>,
   );
   c.status(status as 200 | 404);
-  return c.html(envelope(ssrHtml, url.pathname));
+  return c.html(envelope(ssrHtml, url.pathname, seoHead(route, url.pathname, env.BETTER_AUTH_URL)));
 });
 
 // aperture-ga4gtm: GA4 measurement IDs are "G-XXXXXXXXXX", GTM container IDs
@@ -409,7 +425,7 @@ function googleTagManagerBodySnippet(): string {
       height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>`;
 }
 
-function envelope(ssrHtml: string, pathname: string): string {
+function envelope(ssrHtml: string, pathname: string, head: string): string {
   return `<!doctype html>
 <html lang="pt-BR" class="h-full antialiased">
   <head>
@@ -434,7 +450,7 @@ function envelope(ssrHtml: string, pathname: string): string {
          default) WITHOUT a client rebuild. Serialized with < escaped so an
          operator-set value can never break out of this script tag. -->
     ${clientRuntimeEnvScript(process.env, browserArtifactRelease)}
-    <title>eunenem · ${escapeHtml(pathname)}</title>
+    ${head}
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Caveat:wght@500;600;700&family=DM+Mono:wght@400;500&family=DM+Sans:wght@400;500;600;700&family=Dancing+Script:wght@400;500;600;700&family=Handlee&family=Patrick+Hand&family=Shadows+Into+Light&display=swap" rel="stylesheet" />
@@ -457,14 +473,6 @@ function envelope(ssrHtml: string, pathname: string): string {
 </html>`;
 }
 
-function escapeHtml(s: string): string {
-  return s
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;')
-    .replaceAll("'", '&#39;');
-}
 
 const httpServer = serve({ fetch: app.fetch, port: PORT }, (info) => {
   if (!lifecycle.markReady()) return;
