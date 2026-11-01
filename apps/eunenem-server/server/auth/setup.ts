@@ -1176,7 +1176,7 @@ export function buildServerDeps(
   const useFakeProviderSeam =
     env.NODE_ENV !== 'production' && env.E2E_FAKE_PAGAMENTO_PROVIDER === '1';
   if (env.STRIPE_SECRET_KEY.length > 0 && !useFakeProviderSeam) {
-    const stripeAdapter = new PagamentoProviderStripe({ stripe: getStripe() });
+    const stripeAdapter = new PagamentoProviderStripe({ stripe: getStripe(), diagnosticSecrets: [process.env.STRIPE_SECRET_KEY ?? ""] });
     pagamentoProvider = stripeAdapter;
     checkoutSessionProvider = stripeAdapter;
   } else {

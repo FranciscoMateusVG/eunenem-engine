@@ -3,6 +3,8 @@ import { sql } from 'kysely';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { CheckoutOperationSnapshot } from '../../src/adapters/pagamentos/checkout-operation-repository.js';
 import { CheckoutOperationRepositoryPostgres } from '../../src/adapters/pagamentos/checkout-operation-repository.postgres.js';
+import { readPersistedCheckoutProviderDiagnostic } from '../../src/adapters/pagamentos/checkout-provider-diagnostic.js';
+import { PixCobrancaProviderInter } from '../../src/adapters/pagamentos/pix-cobranca-provider.inter.js';
 import { PagamentoRepositoryPostgres } from '../../src/adapters/pagamentos/repository.postgres.js';
 import type { Pagamento } from '../../src/domain/pagamentos/entities/pagamento.js';
 import { makePagamento } from '../helpers/pagamento-repository.conformance.js';
@@ -175,7 +177,7 @@ describe('CheckoutOperationRepositoryPostgres', () => {
     expect(facts.rows[0]?.n).toBe('2');
   });
 
-  it('persists a realistic provider-500 diagnostic without rolling back the attempt', async () => {
+  it('4s1y3: persists the full Inter 500 response in real PG, without our request auth', async () => {
     const { pagamento, snapshot, platformId } = buildFixture();
     await seedPagamentoParents(testDb.db, pagamento);
     const repo = new CheckoutOperationRepositoryPostgres(testDb.db);
@@ -185,11 +187,26 @@ describe('CheckoutOperationRepositoryPostgres', () => {
       operationId: pagamento.id,
       platformId,
       campaignId: pagamento.intencao.idCampanha,
-      provider: 'stripe',
+      provider: 'inter',
       method: pagamento.intencao.metodo,
       capabilityHash,
       requestHmac,
-      snapshot,
+      snapshot: {
+        operationId: snapshot.operationId,
+        platformId,
+        campaignId: snapshot.campaignId,
+        paymentId: snapshot.paymentId,
+        intentId: snapshot.intentId,
+        method: 'pix',
+        provider: 'inter',
+        items: snapshot.items,
+        totalChargedCents: snapshot.totalChargedCents,
+        totalReceiverCents: snapshot.totalReceiverCents,
+        totalSurchargeCents: snapshot.totalSurchargeCents,
+        txid: pagamento.id.replaceAll('-', ''),
+        idempotencyKey: pagamento.id.replaceAll('-', ''),
+        expirationSeconds: 600,
+      },
       now,
     });
     const claim = await repo.claim({
@@ -200,16 +217,43 @@ describe('CheckoutOperationRepositoryPostgres', () => {
       leaseUntil: new Date(now.getTime() + 30000),
     });
     if (claim.status !== 'claimed') throw new Error('claim');
+    const body =
+      '{ "title": "Erro interno.", "detail": "Tente novamente mais tarde.", "violacoes": [{"razao":"Falha de processamento","propriedade":"pix"}], "extra": {"numero": 17} }';
+    const provider = new PixCobrancaProviderInter(
+      {
+        baseUrl: 'https://inter.invalid',
+        clientId: 'OUR_CLIENT',
+        clientSecret: 'OUR_SECRET',
+        certPem: 'OUR_CERT',
+        keyPem: 'OUR_KEY',
+        scope: 'cob.write',
+        pixKey: 'synthetic-key',
+      },
+      async (_method, path) =>
+        path.includes('oauth')
+          ? {
+              statusCode: 200,
+              body: JSON.stringify({ access_token: 'OUR_BEARER', expires_in: 3600 }),
+            }
+          : { statusCode: 500, body },
+    );
+    let failure: unknown;
+    try {
+      await provider.criarCobranca({
+        idPagamento: pagamento.id,
+        idIntencaoPagamento: pagamento.intencao.id,
+        amountCents: pagamento.intencao.composicaoValoresAggregate.totalPaidCents,
+      });
+    } catch (error) {
+      failure = error;
+    }
     const diagnostic = JSON.stringify({
       code: 'provider_call_failed',
-      provider: 'stripe',
-      endpoint: '/v1/checkout/sessions',
-      httpStatus: 500,
-      title: 'Internal Server Error',
-      detail: 'Service temporarily unavailable',
+      provider: 'inter',
+      ...readPersistedCheckoutProviderDiagnostic(failure),
       latencyMs: 1250,
       operationId: pagamento.id,
-      txid: null,
+      txid: pagamento.id.replaceAll('-', ''),
     });
     expect(diagnostic.length).toBeGreaterThan(250);
     await expect(
@@ -229,6 +273,15 @@ describe('CheckoutOperationRepositoryPostgres', () => {
       WHERE operation_id = ${pagamento.id} AND diagnostic IS NOT NULL
     `.execute(testDb.db);
     expect(facts.rows).toEqual([{ diagnostic, outcome: 'outcome_unknown' }]);
+    expect(JSON.parse(facts.rows[0]?.diagnostic ?? '{}')).toMatchObject({
+      httpStatus: 500,
+      title: 'Erro interno.',
+      detail: 'Tente novamente mais tarde.',
+      body,
+    });
+    expect(facts.rows[0]?.diagnostic).not.toMatch(
+      /OUR_CLIENT|OUR_SECRET|OUR_CERT|OUR_KEY|OUR_BEARER|Authorization/,
+    );
     expect(await repo.findById(pagamento.id)).toMatchObject({ state: 'outcome_unknown' });
   });
 
