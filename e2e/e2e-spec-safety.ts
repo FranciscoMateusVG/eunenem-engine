@@ -111,6 +111,7 @@ export const E2E_SPEC_SAFETY = [
   },
   // Deliberately safe: malformed checkout inputs assert validation rejection
   // before any provider call.
+  { file: 'w7v66-mobile-gift-cards.spec.ts', safety: 'non-payment' },
   { file: 'w2-enforcement-gate.spec.ts', safety: 'non-payment' },
 ] as const satisfies readonly E2ESpecSafetyEntry[];
 

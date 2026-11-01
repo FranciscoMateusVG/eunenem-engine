@@ -41,11 +41,10 @@ export function GiftCard({ gift, onPick, onAdd }: GiftCardProps) {
       data-gift-nome={gift.nome}
       onMouseEnter={() => !isTaken && setHover(true)}
       onMouseLeave={() => setHover(false)}
+      className="pagina-gift-card"
       style={{
         background: "var(--paper)",
         border: "1px solid var(--line)",
-        borderRadius: 24,
-        padding: 18,
         boxShadow: hover ? "var(--shadow-md)" : "var(--shadow-sm)",
         display: "flex",
         flexDirection: "column",
@@ -69,26 +68,7 @@ export function GiftCard({ gift, onPick, onAdd }: GiftCardProps) {
           background: gift.bgColor,
         }}
       >
-        {isTaken && (
-          <span
-            style={{
-              position: "absolute",
-              top: 14,
-              right: 14,
-              background: "var(--green)",
-              color: "var(--plum)",
-              padding: "4px 12px",
-              borderRadius: 999,
-              fontSize: 11,
-              fontWeight: 700,
-              letterSpacing: "0.06em",
-              textTransform: "uppercase",
-              zIndex: 2,
-            }}
-          >
-            ✓ Presenteado
-          </span>
-        )}
+        {isTaken && <span className="pagina-gift-tag">✓ Presenteado</span>}
         {gift.imagemUrl ? (
           // aperture-actmy: pin the image to fill the thumb and carry the
           // SAME border-radius as its container. Safari/Firefox anti-alias
@@ -129,15 +109,8 @@ export function GiftCard({ gift, onPick, onAdd }: GiftCardProps) {
           shows. Without this, cards in the same grid row have CTAs at
           inconsistent vertical positions. */}
       <div style={{ flex: 1, display: "flex", flexDirection: "column" }}>
-        <h3
-          style={{
-            fontSize: 24,
-            color: "var(--plum)",
-            marginTop: 16,
-            marginBottom: 10,
-            lineHeight: 1.1,
-          }}
-        >
+        {/* aperture-w7v66: clamped to 3 lines; title keeps the full name. */}
+        <h3 className="pagina-gift-nome" title={gift.nome}>
           {gift.nome}
         </h3>
 
@@ -149,39 +122,13 @@ export function GiftCard({ gift, onPick, onAdd }: GiftCardProps) {
             marginBottom: showQtyTag ? 8 : 16,
           }}
         >
-          <span
-            style={{
-              fontFamily: "var(--font-patrick-hand), cursive",
-              fontSize: 30,
-              color: "var(--plum)",
-              lineHeight: 1,
-              whiteSpace: "nowrap",
-            }}
-          >
-            {formatBRL(gift.valorCents)}
-          </span>
-          <span
-            style={{
-              fontFamily: "var(--font-caveat), cursive",
-              fontSize: 18,
-              color: "var(--coral-pink)",
-            }}
-          >
-            presente
-          </span>
+          <span className="pagina-gift-preco">{formatBRL(gift.valorCents)}</span>
+          {/* aperture-w7v66: decorative label, hidden below sm. */}
+          <span className="pagina-gift-preco-rotulo">presente</span>
         </div>
 
         {showQtyTag && (
-          <p
-            style={{
-              fontFamily: "var(--font-caveat), cursive",
-              fontSize: 17,
-              color: "var(--ink-soft)",
-              marginBottom: 14,
-              marginTop: 0,
-              lineHeight: 1.2,
-            }}
-          >
+          <p className="pagina-gift-disponiveis">
             {gift.qtyAvailable > 0
               ? `${gift.qtyAvailable} de ${gift.qtyTotal} disponíveis ♡`
               : `todos os ${gift.qtyTotal} já foram ♡`}
@@ -190,24 +137,8 @@ export function GiftCard({ gift, onPick, onAdd }: GiftCardProps) {
       </div>
 
       {isTaken ? (
-        <button
-          type="button"
-          disabled
-          style={{
-            width: "100%",
-            padding: "12px 18px",
-            borderRadius: 999,
-            background: "var(--cream-2)",
-            color: "var(--ink-mute)",
-            fontWeight: 700,
-            fontSize: 13,
-            letterSpacing: "0.06em",
-            textTransform: "uppercase",
-            cursor: "not-allowed",
-            border: "none",
-          }}
-        >
-          Já presenteado ♡
+        <button type="button" disabled className="pagina-gift-cta pagina-gift-cta-presenteado">
+          <span className="pagina-gift-cta-ja">Já </span>presenteado ♡
         </button>
       ) : inCartQty > 0 ? (
         <InCartStepper gift={gift} inCartQty={inCartQty} onPick={onPick} />
@@ -215,8 +146,7 @@ export function GiftCard({ gift, onPick, onAdd }: GiftCardProps) {
         <button
           type="button"
           onClick={() => onAdd(gift)}
-          className="btn-lilac"
-          style={{ width: "100%", justifyContent: "center" }}
+          className="btn-lilac pagina-gift-cta"
         >
           + Adicionar
         </button>
@@ -244,42 +174,26 @@ function InCartStepper({
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          padding: "8px 12px",
-          borderRadius: 999,
-          background: "var(--lilac-soft)",
-          border: "1px solid var(--lilac-deep)",
-        }}
-      >
+      <div className="pagina-gift-stepper">
         <button
           type="button"
           onClick={() => cart.decrement(gift.nome, "card")}
           aria-label={`Diminuir ${gift.nome}`}
+          className="pagina-gift-stepper-btn"
           style={stepperBtnStyle(false)}
         >
           −
         </button>
-        <span
-          aria-live="polite"
-          style={{
-            fontFamily: "var(--font-patrick-hand), cursive",
-            fontSize: 22,
-            color: "var(--plum)",
-            fontVariantNumeric: "tabular-nums",
-            lineHeight: 1,
-          }}
-        >
-          {inCartQty} no carrinho
+        <span aria-live="polite" className="pagina-gift-stepper-qtd">
+          {inCartQty}
+          <span className="pagina-gift-stepper-sufixo"> no carrinho</span>
         </span>
         <button
           type="button"
           onClick={() => cart.increment(gift.nome, "card")}
           disabled={!canIncrement}
           aria-label={`Aumentar ${gift.nome}`}
+          className="pagina-gift-stepper-btn"
           style={stepperBtnStyle(!canIncrement)}
         >
           +
@@ -288,15 +202,7 @@ function InCartStepper({
       <button
         type="button"
         onClick={() => onPick(gift)}
-        style={{
-          background: "transparent",
-          border: "none",
-          color: "var(--ink-mute)",
-          fontSize: 12,
-          cursor: "pointer",
-          padding: "4px 6px",
-          alignSelf: "center",
-        }}
+        className="pagina-gift-comprar-agora"
       >
         ou comprar agora →
       </button>
@@ -306,13 +212,10 @@ function InCartStepper({
 
 function stepperBtnStyle(disabled: boolean): React.CSSProperties {
   return {
-    width: 30,
-    height: 30,
     background: "var(--paper)",
     border: "1px solid var(--lilac-deep)",
     borderRadius: 999,
     color: disabled ? "var(--ink-mute)" : "var(--plum)",
-    fontSize: 18,
     lineHeight: 1,
     cursor: disabled ? "not-allowed" : "pointer",
     opacity: disabled ? 0.4 : 1,
