@@ -399,3 +399,48 @@ it('health includes Inter payout diagnostics and excludes foreign platform attem
     mensagem: 'Inter: chave inválida [our-auth-redacted]',
   });
 });
+
+it('health full detail remains admin/platform scoped while list messages are bounded', async () => {
+  const c = await campaign(randomUUID());
+  const payout = randomUUID();
+  const attempt = randomUUID();
+  const message = 'Provider detail '.repeat(250);
+  await t.db
+    .insertInto('repasses_recebedor')
+    .values({
+      id: payout,
+      id_campanha: c,
+      amount_cents: 1000,
+      status: 'falhou',
+      solicitado_em: now,
+    })
+    .execute();
+  await t.db
+    .insertInto('repasse_transfer_attempts')
+    .values({
+      id: attempt,
+      repasse_id: payout,
+      attempt_no: 1,
+      referencia: payout,
+      started_at: new Date('2038-10-19T15:00:00Z'),
+      operation: 'pagar_pix',
+      outcome: 'falhou',
+      provider_error_body_private: message,
+      provider_error_body_truncated: false,
+    })
+    .execute();
+  const id = `provider-payout:${attempt}`;
+  const recent = (await caller().admin.analytics.saude()).recentes.find((r) => r.id === id);
+  expect(recent?.mensagem).toHaveLength(2048);
+  expect(recent?.truncado).toBe(true);
+  expect((await caller().admin.analytics.saudeDetalhe({ id }))?.mensagem).toBe(message);
+  await expect(caller(false).admin.analytics.saudeDetalhe({ id })).rejects.toMatchObject({
+    code: 'FORBIDDEN',
+  });
+  await t.db
+    .updateTable('campanhas')
+    .set({ id_plataforma: randomUUID() })
+    .where('id', '=', c)
+    .execute();
+  expect(await caller().admin.analytics.saudeDetalhe({ id })).toBeNull();
+});

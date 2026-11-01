@@ -7,11 +7,12 @@ export type SaudeCategoria = typeof SAUDE_CATEGORIAS[number];
 export type SaudeContagens = Record<SaudeCategoria, number>;
 export interface SaudeRecente {
   id: string; em: string; categoria: SaudeCategoria; provedor: 'inter' | 'stripe' | null;
-  operacao: string | null; mensagem: string;
+  operacao: string | null; mensagem: string; truncado: boolean;
   referencia: { tipo: 'pagamento' | 'webhook' | 'email' | 'repasse' | null; id: string | null };
 }
 interface HealthDay { dia: string; categoria: SaudeCategoria; quantidade: number }
-/** Defense in depth for diagnostic text; raw provider bodies are redacted at persistence.
+/** Defense in depth for diagnostic text; stored bodies retain raw provider responses.
+ * Our request credentials/headers are not persisted by the provider boundary.
  * Never serialize request snapshots, webhook payloads, signature headers or environment values.
  */
 export function safeAdminDiagnostic(message: string): string {
@@ -19,24 +20,24 @@ export function safeAdminDiagnostic(message: string): string {
     .replace(/\bBearer\s+[^\s"'<>]+/gi, 'Bearer [redacted]')
     .replace(/\b(?:sk|rk)_(?:live|test)_[A-Za-z0-9_]+\b/g, '[redacted]')
     .replace(/((?:authorization|client_secret|access_token|refresh_token|password)\s*["']?\s*[:=]\s*["']?)[^\s,"'}]+/gi, '$1[redacted]')
-    .slice(0, 16_384);
+;
 }
 /** Provider attempts are historical; the other categories are currently unresolved rows.
  * Webhook date = last processing start (fallback received); email date = last claim
  * (fallback event date), because these tables do not retain a failure timestamp/history.
  */
-export async function loadAnalyticsSaude(db: Database, platformId: string, now: Date, months: AnalyticsMonths) {
+export async function loadAnalyticsSaude(db: Database, platformId: string, now: Date, months: AnalyticsMonths, detailId: string | null = null) {
   const period = analyticsPeriod(now, months);
   const { rows } = await sql<{ dias: HealthDay[]; recentes: SaudeRecente[] }>`WITH events AS (
     SELECT 'provider-checkout:' || f.id::text AS id, f.recorded_at AS em, 'provedor' AS categoria,
       o.provider AS provedor, 'checkout:' || o.method AS operacao,
-      left(coalesce(f.diagnostic, f.outcome, 'Falha do provedor'), 16384) AS mensagem,
+      coalesce(f.diagnostic, f.outcome, 'Falha do provedor') AS mensagem,
       'pagamento' AS ref_tipo, o.payment_id::text AS ref_id
     FROM payment_provider_operation_attempt_facts f JOIN payment_provider_operations o ON o.operation_id = f.operation_id
     WHERE o.platform_id = ${platformId}::uuid AND f.fact_kind = 'result' AND f.outcome IN ('failed', 'outcome_unknown')
     UNION ALL
     SELECT 'provider-payout:' || a.id::text, coalesce(a.finished_at, a.started_at), 'provedor', 'inter',
-      a.operation, left(coalesce(a.provider_error_body_private, a.error, a.diagnostic_reason, a.outcome, 'Falha do repasse'), 16384),
+      a.operation, coalesce(a.provider_error_body_private, a.error, a.diagnostic_reason, a.outcome, 'Falha do repasse'),
       'repasse', a.repasse_id::text
     FROM repasse_transfer_attempts a JOIN repasses_recebedor r ON r.id = a.repasse_id JOIN campanhas c ON c.id = r.id_campanha
     WHERE c.id_plataforma = ${platformId}::uuid AND (a.error IS NOT NULL OR a.provider_error_body_private IS NOT NULL
@@ -57,14 +58,16 @@ export async function loadAnalyticsSaude(db: Database, platformId: string, now: 
     FROM lifecycle_email_deliveries d JOIN lifecycle_email_events e ON e.id = d.event_id
     WHERE d.tenant_id = ${platformId} AND e.tenant_id = ${platformId} AND d.state IN ('failed','unknown')
   ), scoped AS (
-    SELECT * FROM events WHERE em >= (${period.periodo.de}::date::timestamp AT TIME ZONE 'America/Sao_Paulo') AND em < ${now}
+    SELECT * FROM events WHERE (${detailId}::text IS NOT NULL OR (em >= (${period.periodo.de}::date::timestamp AT TIME ZONE 'America/Sao_Paulo') AND em < ${now}))
+      AND (${detailId}::text IS NULL OR id = ${detailId})
   ), daily AS (
     SELECT to_char(em AT TIME ZONE 'America/Sao_Paulo', 'YYYY-MM-DD') AS dia, categoria, count(*)::int AS quantidade
     FROM scoped GROUP BY 1, 2
   ), recent AS (
     SELECT id, to_char(em AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS em, categoria,
       CASE WHEN provedor IN ('inter','stripe') THEN provedor ELSE NULL END AS provedor,
-      operacao, mensagem, json_build_object('tipo', ref_tipo, 'id', ref_id) AS referencia
+      operacao, CASE WHEN ${detailId}::text IS NULL THEN left(mensagem, 2048) ELSE mensagem END AS mensagem,
+      (${detailId}::text IS NULL AND length(mensagem) > 2048) AS truncado, json_build_object('tipo', ref_tipo, 'id', ref_id) AS referencia
     FROM scoped ORDER BY em DESC, id DESC LIMIT 50
   ) SELECT coalesce((SELECT json_agg(daily ORDER BY dia, categoria) FROM daily), '[]'::json) AS dias,
     coalesce((SELECT json_agg(recent ORDER BY em DESC, id DESC) FROM recent), '[]'::json) AS recentes`.execute(db);

@@ -58,8 +58,12 @@ reconciliation of the funnel population. Each query is a single SQL snapshot.
 
 - `provedor`: historical failed/unknown checkout attempt facts, plus Inter payout
   attempt diagnostics joined through payout/campaign platform. Raw provider text
-  comes from the existing redacted-at-write private diagnostic columns, bounded
-  to 16 KiB, with additional auth-token pattern redaction on the admin response.
+  comes from existing private diagnostic columns: the stored body is the raw
+  provider response, while OUR request credentials/headers are never persisted.
+  Additional auth-token pattern redaction protects the admin response. Recent
+  messages are bounded to 2 KiB characters with `truncado`; admin-only
+  `admin.analytics.saudeDetalhe({id})` returns the complete stored diagnostic
+  with that same credential-pattern defense for an expanded view.
 - `checkout`: currently `failed`/`outcome_unknown` operations, at `updated_at`.
 - `webhook`: currently unprocessed rows with processing errors, at last processing
   start (or received date). Explicit ingress platform wins; older null-ingress
