@@ -3,6 +3,7 @@ import { useState } from "react";
 import { useCart } from "@/lib/cart.js";
 import { formatBRL } from "@/lib/formatBRL";
 import type { VisitorGift } from "@/lib/visitorGift";
+import { OwnerGiftActions } from "./PaginaOwnerGiftEditor";
 
 // aperture-3d9t (visual) + aperture-3xgch (data shape swap — VisitorGift)
 // + aperture-16flf (visitor-cart MVP — replace direct PRESENTEAR CTA with
@@ -101,6 +102,7 @@ export function GiftCard({ gift, onPick, onAdd }: GiftCardProps) {
             {gift.emoji}
           </span>
         )}
+        <OwnerGiftActions gift={gift} />
       </div>
 
       {/* aperture-nwxkq: wrap the middle content (name + price + qty tag) in a

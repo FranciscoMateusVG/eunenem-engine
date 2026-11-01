@@ -507,6 +507,53 @@ export function giftActionAvailability(hasClaimed: boolean, groupedRowCount = 1)
   };
 }
 
+/** aperture-0vne4 — the card's edit/remove buttons, shared with the owner view of /pagina. */
+export function GiftCardActions({
+  item,
+  onEdit,
+  onRemove,
+}: {
+  item: GroupedGift;
+  onEdit: (i: GroupedGift) => void;
+  onRemove: (i: GroupedGift) => void;
+}) {
+  const actions = giftActionAvailability(item.hasClaimed, item.ids.length);
+  const removeReasonId = actions.removeReason ? `gift-remove-reason-${item.ids[0]}` : undefined;
+  return (
+    <div className="lista-card-actions">
+      <button
+        type="button"
+        onClick={() => onEdit(item)}
+        aria-label={`Editar ${item.nome}`}
+        disabled={actions.editDisabled}
+        title={actions.editReason}
+        data-testid="gift-edit-btn"
+      >
+        {icon.edit}
+      </button>
+      <button
+        type="button"
+        className={'danger' + (actions.removeDisabled ? ' is-disabled' : '')}
+        onClick={() => {
+          if (!actions.removeDisabled) onRemove(item);
+        }}
+        aria-label={`Remover ${item.nome}`}
+        aria-disabled={actions.removeDisabled || undefined}
+        aria-describedby={removeReasonId}
+        title={actions.removeReason}
+        data-testid="gift-remove-btn"
+      >
+        {icon.trash}
+      </button>
+      {actions.removeReason && (
+        <span id={removeReasonId} className="sr-only">
+          {actions.removeReason}
+        </span>
+      )}
+    </div>
+  );
+}
+
 export function GiftCard({
   item,
   onEdit,
@@ -522,7 +569,6 @@ export function GiftCard({
   const pct = item.qty > 0 ? Math.min(100, (item.received / item.qty) * 100) : 0;
   const isComplete = item.received >= item.qty;
   const actions = giftActionAvailability(item.hasClaimed, item.ids.length);
-  const removeReasonId = actions.removeReason ? `gift-remove-reason-${item.ids[0]}` : undefined;
   return (
     <div className={'lista-card' + (isComplete ? ' is-complete' : '')} data-testid="lista-card">
       <div className="lista-card-thumb" style={{ background: item.bgColor }}>
@@ -553,39 +599,7 @@ export function GiftCard({
             field + filter chips). The underlying category data model stays
             intact (chipLabel/category still computed in groupContribuicoes)
             in case this is reactivated later. */}
-        {podeEditar && (
-        <div className="lista-card-actions">
-          <button
-            type="button"
-            onClick={() => onEdit(item)}
-            aria-label={`Editar ${item.nome}`}
-            disabled={actions.editDisabled}
-            title={actions.editReason}
-            data-testid="gift-edit-btn"
-          >
-            {icon.edit}
-          </button>
-          <button
-            type="button"
-            className={'danger' + (actions.removeDisabled ? ' is-disabled' : '')}
-            onClick={() => {
-              if (!actions.removeDisabled) onRemove(item);
-            }}
-            aria-label={`Remover ${item.nome}`}
-            aria-disabled={actions.removeDisabled || undefined}
-            aria-describedby={removeReasonId}
-            title={actions.removeReason}
-            data-testid="gift-remove-btn"
-          >
-            {icon.trash}
-          </button>
-          {actions.removeReason && (
-            <span id={removeReasonId} className="sr-only">
-              {actions.removeReason}
-            </span>
-          )}
-        </div>
-        )}
+        {podeEditar && <GiftCardActions item={item} onEdit={onEdit} onRemove={onRemove} />}
         {isComplete && <span className="lista-card-stamp">recebido ♡</span>}
       </div>
       <div className="lista-card-body">
@@ -1428,7 +1442,7 @@ export function minimumEditableGiftQuantity(purchasedQty: number): number {
 }
 
 /* ─── Remove confirm ─── */
-function ConfirmRemove({
+export function ConfirmRemove({
   item,
   onClose,
   onConfirm,
@@ -1474,6 +1488,159 @@ function ConfirmRemove({
       </div>
     </Modal>
   );
+}
+
+/**
+ * aperture-0vne4 — the edit + remove flow (state, mutations, modals) shared by
+ * the painel list editor and the owner's view of the public /pagina. Writes go
+ * to the route campanha (CampanhaRotaProvider); the server enforces
+ * presentes:gerenciar and the purchased-gift rules.
+ */
+export function useGiftItemEditor({
+  onStale,
+  onChanged,
+}: {
+  /** The edited row no longer exists server-side: refetch the list. */
+  onStale: () => void;
+  /** Called after a successful edit or removal. */
+  onChanged?: () => void;
+}) {
+  const deleteMut = useContribuicaoDelete();
+  const updateMut = useContribuicaoUpdate();
+  const [editItem, setEditItem] = useState<GroupedGift | null>(null);
+  const [removeItem, setRemoveItem] = useState<GroupedGift | null>(null);
+
+  // Plan 0016 / aperture-1l37i + aperture-1saoe — fully atomic edit.
+  //
+  // Rex's aperture-putz5 engine PR (#176) extended
+  // AtualizarContribuicaoInputSchema to accept quantidade end-to-end, so
+  // EVERY edit — including qty changes — now flows through a single
+  // `contribuicao.update` Network round-trip. Preserves the
+  // contribuicao.id across the edit (critical for the
+  // intencao_items.idContribuicao FK introduced by Plan 0016), emits
+  // ONE request instead of the pre-1l37i 5-request cascade, and avoids
+  // the broken legacy delete+createBulk path which was 400'ing under
+  // Rex's post-rename schema (aperture-1saoe P0 regression).
+  //
+  // The (now-retired) legacy path was: delete(ids) → createBulk(...).
+  // It survived briefly during the parallel-work window between
+  // aperture-1l37i and aperture-putz5 to cover qty changes. Once
+  // aperture-putz5 merged, the fallback became unnecessary; once the
+  // create-flow schema rename shipped, it became actively broken. This
+  // change retires it in saveEdit only — delete + createBulk hooks
+  // remain wired for confirmRemove + the addCatalogItems / addPresetItems
+  // create flows, which still need them.
+  //
+  // Multi-id legacy groups are deliberately not passed to this path:
+  // GiftCard disables their Edit action because this mutation updates one
+  // entity and cannot safely define group-wide allocation semantics.
+  //
+  // Recovery on NOT_FOUND: when the stable id no longer exists server-
+  // side (sibling tab deleted, DB reset, etc.) the toast surfaces a
+  // calmer "essa lista mudou — atualizamos para você" message + the list
+  // refetches so the user can retry against fresh data. The pre-1l37i
+  // flow landed on a dead-end "esse presente não existe mais" toast with no
+  // refetch.
+  const saveEdit = async (draft: DraftFields) => {
+    if (!editItem) return;
+    const price = parseValorBRL(draft.price);
+    if (!valorUnitarioPresenteInputValido(draft.price)) {
+      toast.error(VALOR_UNITARIO_PRESENTE_MINIMO_MESSAGE);
+      return;
+    }
+    const newQty = Number(draft.qty) || 1;
+    if (newQty < editItem.received) {
+      toast.error('A quantidade não pode ser menor que o total já comprado.');
+      return;
+    }
+    // aperture-qxntg follow-up — `editItem.emoji` is a UI-only display
+    // fallback derived from the grupo when the row has no real image
+    // URL. It MUST NOT be sent as the wire value: ImagemUrlSchema
+    // requires `/^(\/|https?:\/\/)/` and a glyph like "🪒" fails zod,
+    // returning a 400 on update. Operator's "Kit Tesoura e Cortador de
+    // Unha" repro (no imageUrl, emoji fallback) hit exactly this. The
+    // update mutation accepts `imagemUrl: ImagemUrlSchema.nullable()`
+    // — `null` is the right "no image" wire value.
+    // aperture-tua9o — honor the edited image (draft.imageUrl): the edit form
+    // pre-fills it from the item, so unchanged = same value, and a new upload /
+    // removal flows through. Still NEVER the emoji glyph (draft.imageUrl is a
+    // real publicUrl or null, never an emoji).
+    const imagemUrl = draft.imageUrl ?? null;
+    const idToUpdate = editItem.ids[0];
+    if (!idToUpdate) {
+      toast.error('Não consegui identificar esse presente — recarrega a página ♡');
+      return;
+    }
+    try {
+      await updateMut.mutateAsync({
+        id: idToUpdate,
+        nome: draft.title,
+        valor: centsFromBRL(price),
+        imagemUrl,
+        grupo: draft.category,
+        quantidade: newQty,
+      });
+      setEditItem(null);
+      onChanged?.();
+      toast.success('Alterações salvas ♡');
+    } catch (err) {
+      const error = toContribuicaoError(err);
+      // Stale-row recovery: the slot was deleted between the visitor's
+      // fetch + this edit. Invalidate so the next render reflects
+      // reality + nudge the visitor with a calmer message than the
+      // dead-end "esse presente não existe mais" the legacy flow used.
+      if (error.kind === 'not-found') {
+        onStale();
+        setEditItem(null);
+        toast('essa lista mudou — atualizamos para você ♡');
+        return;
+      }
+      toast.error(contribuicaoErrorMessage(error));
+    }
+  };
+
+  const confirmRemove = async () => {
+    if (!removeItem) return;
+    try {
+      await deleteMut.mutateAsync({ ids: removeItem.ids });
+      onChanged?.();
+      toast('Presente removido');
+      setRemoveItem(null);
+    } catch (err) {
+      toast.error(contribuicaoErrorMessage(toContribuicaoError(err)));
+    }
+  };
+
+  const modals = (
+    <>
+    {editItem && (
+      <EditItemModal
+        initial={{
+          title: editItem.nome,
+          price: editItem.price.toFixed(2).replace('.', ','),
+          qty: editItem.qty,
+          category: editItem.category,
+          // aperture-tua9o — pre-fill the existing image so editing keeps it
+          // (and lets the user change/remove it via the same control).
+          imageUrl: editItem.imageUrl ?? null,
+        }}
+        purchasedQty={editItem.received}
+        onClose={() => setEditItem(null)}
+        onSubmit={saveEdit}
+        submitting={updateMut.isPending}
+      />
+    )}
+    {removeItem && (
+      <ConfirmRemove
+        item={removeItem}
+        onClose={() => setRemoveItem(null)}
+        onConfirm={confirmRemove}
+        submitting={deleteMut.isPending}
+      />
+    )}
+    </>
+  );
+  return { setEditItem, setRemoveItem, modals };
 }
 
 /* ─── Preset detail modal (aperture-wo5ql) ─── */
@@ -1738,8 +1905,8 @@ export function ListaPresentesBody({ slug }: PainelSectionBodyProps) {
   const recebidoCents = summaryQuery.data?.totalRecebidoCents ?? null;
   const createMut = useContribuicaoCreate();
   const createBulkMut = useContribuicaoCreateBulk();
-  const deleteMut = useContribuicaoDelete();
-  const updateMut = useContribuicaoUpdate();
+  // aperture-0vne4 — edit/remove flow shared with the public page's owner view.
+  const editor = useGiftItemEditor({ onStale: () => void listQuery.refetch() });
 
   // aperture-wpsfp / aperture-7tyqh — modal/panel open-states gate the catalog +
   // listas-prontas polls below, so ALL local state is declared before the
@@ -1749,8 +1916,6 @@ export function ListaPresentesBody({ slug }: PainelSectionBodyProps) {
   const [presetDetail, setPresetDetail] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [cat, setCat] = useState<CatFilter>('all');
-  const [editItem, setEditItem] = useState<GroupedGift | null>(null);
-  const [removeItem, setRemoveItem] = useState<GroupedGift | null>(null);
   // aperture-wpsfp — true only while an explicit picker-open refetch is in flight.
   // Gates the picker loading state so a just-deactivated item can't be selected
   // during THAT refetch — without flashing loading on the 3s background poll.
@@ -1940,104 +2105,6 @@ export function ListaPresentesBody({ slug }: PainelSectionBodyProps) {
     }
   };
 
-  // Plan 0016 / aperture-1l37i + aperture-1saoe — fully atomic edit.
-  //
-  // Rex's aperture-putz5 engine PR (#176) extended
-  // AtualizarContribuicaoInputSchema to accept quantidade end-to-end, so
-  // EVERY edit — including qty changes — now flows through a single
-  // `contribuicao.update` Network round-trip. Preserves the
-  // contribuicao.id across the edit (critical for the
-  // intencao_items.idContribuicao FK introduced by Plan 0016), emits
-  // ONE request instead of the pre-1l37i 5-request cascade, and avoids
-  // the broken legacy delete+createBulk path which was 400'ing under
-  // Rex's post-rename schema (aperture-1saoe P0 regression).
-  //
-  // The (now-retired) legacy path was: delete(ids) → createBulk(...).
-  // It survived briefly during the parallel-work window between
-  // aperture-1l37i and aperture-putz5 to cover qty changes. Once
-  // aperture-putz5 merged, the fallback became unnecessary; once the
-  // create-flow schema rename shipped, it became actively broken. This
-  // change retires it in saveEdit only — delete + createBulk hooks
-  // remain wired for confirmRemove + the addCatalogItems / addPresetItems
-  // create flows, which still need them.
-  //
-  // Multi-id legacy groups are deliberately not passed to this path:
-  // GiftCard disables their Edit action because this mutation updates one
-  // entity and cannot safely define group-wide allocation semantics.
-  //
-  // Recovery on NOT_FOUND: when the stable id no longer exists server-
-  // side (sibling tab deleted, DB reset, etc.) the toast surfaces a
-  // calmer "essa lista mudou — atualizamos para você" message + the list
-  // refetches so the user can retry against fresh data. The pre-1l37i
-  // flow landed on a dead-end "esse presente não existe mais" toast with no
-  // refetch.
-  const saveEdit = async (draft: DraftFields) => {
-    if (!editItem) return;
-    const price = parseValorBRL(draft.price);
-    if (!valorUnitarioPresenteInputValido(draft.price)) {
-      toast.error(VALOR_UNITARIO_PRESENTE_MINIMO_MESSAGE);
-      return;
-    }
-    const newQty = Number(draft.qty) || 1;
-    if (newQty < editItem.received) {
-      toast.error('A quantidade não pode ser menor que o total já comprado.');
-      return;
-    }
-    // aperture-qxntg follow-up — `editItem.emoji` is a UI-only display
-    // fallback derived from the grupo when the row has no real image
-    // URL. It MUST NOT be sent as the wire value: ImagemUrlSchema
-    // requires `/^(\/|https?:\/\/)/` and a glyph like "🪒" fails zod,
-    // returning a 400 on update. Operator's "Kit Tesoura e Cortador de
-    // Unha" repro (no imageUrl, emoji fallback) hit exactly this. The
-    // update mutation accepts `imagemUrl: ImagemUrlSchema.nullable()`
-    // — `null` is the right "no image" wire value.
-    // aperture-tua9o — honor the edited image (draft.imageUrl): the edit form
-    // pre-fills it from the item, so unchanged = same value, and a new upload /
-    // removal flows through. Still NEVER the emoji glyph (draft.imageUrl is a
-    // real publicUrl or null, never an emoji).
-    const imagemUrl = draft.imageUrl ?? null;
-    const idToUpdate = editItem.ids[0];
-    if (!idToUpdate) {
-      toast.error('Não consegui identificar esse presente — recarrega a página ♡');
-      return;
-    }
-    try {
-      await updateMut.mutateAsync({
-        id: idToUpdate,
-        nome: draft.title,
-        valor: centsFromBRL(price),
-        imagemUrl,
-        grupo: draft.category,
-        quantidade: newQty,
-      });
-      setEditItem(null);
-      toast.success('Alterações salvas ♡');
-    } catch (err) {
-      const error = toContribuicaoError(err);
-      // Stale-row recovery: the slot was deleted between the visitor's
-      // fetch + this edit. Invalidate so the next render reflects
-      // reality + nudge the visitor with a calmer message than the
-      // dead-end "esse presente não existe mais" the legacy flow used.
-      if (error.kind === 'not-found') {
-        void listQuery.refetch();
-        setEditItem(null);
-        toast('essa lista mudou — atualizamos para você ♡');
-        return;
-      }
-      toast.error(contribuicaoErrorMessage(error));
-    }
-  };
-
-  const confirmRemove = async () => {
-    if (!removeItem) return;
-    try {
-      await deleteMut.mutateAsync({ ids: removeItem.ids });
-      toast('Presente removido');
-      setRemoveItem(null);
-    } catch (err) {
-      toast.error(contribuicaoErrorMessage(toContribuicaoError(err)));
-    }
-  };
 
   // ── Initial loading + error gates ────────────────────────────────────────
 
@@ -2060,14 +2127,6 @@ export function ListaPresentesBody({ slug }: PainelSectionBodyProps) {
   }
 
   const addSubmitting = createMut.isPending || createBulkMut.isPending;
-  // Plan 0016 / aperture-1saoe: edit submission is now a single atomic
-  // contribuicao.update call. The legacy delete+createBulk path retired
-  // once Rex's engine accepted quantidade in update; tracking those
-  // mutations for editSubmitting would surface false-positive spinners
-  // when ConfirmRemove or the addCatalogItems / addPresetItems flows
-  // are in-flight.
-  const editSubmitting = updateMut.isPending;
-  const removeSubmitting = deleteMut.isPending;
   const presetSubmitting = createBulkMut.isPending;
 
   // ── Render ───────────────────────────────────────────────────────────────
@@ -2305,8 +2364,8 @@ export function ListaPresentesBody({ slug }: PainelSectionBodyProps) {
               <GiftCard
                 key={it.nome}
                 item={it}
-                onEdit={setEditItem}
-                onRemove={setRemoveItem}
+                onEdit={editor.setEditItem}
+                onRemove={editor.setRemoveItem}
                 podeEditar={podeEditar}
               />
             ))}
@@ -2339,31 +2398,7 @@ export function ListaPresentesBody({ slug }: PainelSectionBodyProps) {
           onRetryCatalog={() => void catalogQuery.refetch()}
         />
       )}
-      {editItem && (
-        <EditItemModal
-          initial={{
-            title: editItem.nome,
-            price: editItem.price.toFixed(2).replace('.', ','),
-            qty: editItem.qty,
-            category: editItem.category,
-            // aperture-tua9o — pre-fill the existing image so editing keeps it
-            // (and lets the user change/remove it via the same control).
-            imageUrl: editItem.imageUrl ?? null,
-          }}
-          purchasedQty={editItem.received}
-          onClose={() => setEditItem(null)}
-          onSubmit={saveEdit}
-          submitting={editSubmitting}
-        />
-      )}
-      {removeItem && (
-        <ConfirmRemove
-          item={removeItem}
-          onClose={() => setRemoveItem(null)}
-          onConfirm={confirmRemove}
-          submitting={removeSubmitting}
-        />
-      )}
+      {editor.modals}
       {presetDetail &&
         (() => {
           // aperture-tb0rh F2 — listasProntas is a string-indexed record now, so
