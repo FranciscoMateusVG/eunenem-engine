@@ -1362,6 +1362,10 @@ export class LivroFinanceiroRepositoryPostgres implements LivroFinanceiroReposit
               throw new FinanceiroRepasseNaoEncontradoError(input.idRepasse);
             }
             const existingRepasse = repasseFromRow(existing);
+            // A released MED intentionally remains eligible for cancellation:
+            // the queued job may have exhausted retries while held. Cancel +
+            // re-request is the recovery path, without silently re-enqueuing money.
+            // The batch must still be solicitado/aprovado and have NO sent credit.
             const med = await sql<{ allowed: boolean }>`SELECT
               EXISTS (SELECT 1 FROM pix_contestacoes WHERE id_pagamento = ANY(${[...idsPagamento]}::uuid[]))
               AND NOT EXISTS (SELECT 1 FROM lancamentos_financeiros WHERE id_repasse = ${input.idRepasse}

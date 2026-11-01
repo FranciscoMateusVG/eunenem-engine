@@ -219,6 +219,15 @@ describe('MED administrative persistence', () => {
       (await listarContestacoes(rig.db, platformId, { idPagamento: l.idPagamento }))[0]?.exposicao,
     ).toBe(true);
     expect((await repo.findLancamentosByIdPagamento(l.idPagamento))[0]?.transferidoEm).toEqual(now);
+    expect(
+      (await listarContestacoes(rig.db, platformId, { idPagamento: l.idPagamento }))[0]
+        ?.repasseCancelavel,
+    ).toBeNull();
+    await expect(
+      repo.cancelarRepasseTransaction({ idRepasse: repasse.id, canceladoPor: 'admin', agora: now }),
+    ).rejects.toThrow();
+    expect((await repo.findRepasseById(repasse.id))?.status).toBe('aprovado');
+    expect((await repo.findLancamentosByIdPagamento(l.idPagamento))[0]?.transferidoEm).toEqual(now);
     const payment = await sql<{
       status: string;
     }>`SELECT status FROM pagamentos WHERE id = ${l.idPagamento}`.execute(rig.db);
@@ -313,4 +322,37 @@ it.each([
       requestSummary: 'stale-job',
     }),
   ).resolves.toMatchObject({ acao: 'concluido' });
+});
+
+it('allows cancellation after MED release to recover an approved job that exhausted retries while held', async () => {
+  const { l, platformId, input } = await adminFixture();
+  const { repasse } = await request(l);
+  await repo.aprovarRepassePixTransaction(
+    { idRepasse: repasse.id, aprovadoEm: now, transferReferencia: 'test' },
+    async () => {},
+  );
+  const med = await registrarContestacao(rig.db, platformId, 'admin', input);
+  await expect(
+    repo.iniciarTransferenciaTransaction({
+      idRepasse: repasse.id,
+      agora: now,
+      requestSummary: 'held-job',
+    }),
+  ).rejects.toThrow(/MED/);
+  await resolverContestacao(rig.db, platformId, 'admin', {
+    id: med.id,
+    estado: 'liberada',
+    resolvidaEm: now,
+    notas: 'Banco liberou',
+  });
+  expect(
+    (
+      await repo.cancelarRepasseTransaction({
+        idRepasse: repasse.id,
+        canceladoPor: 'admin',
+        agora: now,
+      })
+    ).repasse.status,
+  ).toBe('cancelado');
+  expect((await request(l)).repasse.amountCents).toBe(2000);
 });

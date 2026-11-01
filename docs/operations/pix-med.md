@@ -10,6 +10,8 @@
    Para pagar os demais créditos, cancele o lote solicitado e solicite novamente.
 4. Com desfecho confirmado pelo banco, marque `liberada` (restaura elegibilidade) ou
    `devolvida` (mantém retenção permanente). Datas e atores ficam registrados.
+   Se um job aprovado esgotou as tentativas enquanto retido, use **Cancelar lote MED**
+   e solicite novamente, inclusive após a liberação. Não re-enfileiramos dinheiro automaticamente.
    Não há reabertura/edição de desfecho no MVP. Não use refund comum para simular MED.
 5. Um repasse já iniciado/enviado/pago não pode ser recuperado aqui. O registro mostra
    **exposição financeira**. A reconciliação de dinheiro já enviado continua permitida;

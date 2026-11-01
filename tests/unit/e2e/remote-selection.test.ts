@@ -2,6 +2,7 @@ import { spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
+import { REMOTE_MONEY_MOVEMENT_SPECS } from '../../../e2e/e2e-spec-safety.js';
 
 const projectRoot = fileURLToPath(new URL('../../..', import.meta.url));
 const playwrightCli = createRequire(import.meta.url).resolve('@playwright/test/cli');
@@ -47,7 +48,10 @@ describe('Playwright remote money-movement selection', () => {
 
     expect(result.status).toBe(0);
     expect(result.output).toContain('host=staging.invalid verdict=REMOTE');
-    expect(result.output).toContain('remote money-movement blocked; excluded 11 specs');
+    expect(result.output).toContain(
+      `remote money-movement blocked; excluded ${REMOTE_MONEY_MOVEMENT_SPECS.length} specs`,
+    );
+    for (const spec of REMOTE_MONEY_MOVEMENT_SPECS) expect(result.output).toContain(spec.file);
     expect(result.output).toContain('r5y94-repasse-admin-flow.spec.ts');
     expect(result.output).toContain('hdg7h-checkout-error.spec.ts');
     expect(result.output).toContain('Total: 3 tests in 1 file');
