@@ -5021,6 +5021,8 @@ export const adminRouter = t.router({
   analytics: t.router({
     saudeDetalhe: adminProcedure.input(z.object({ id: z.string().regex(/^(provider-checkout|provider-payout|webhook|checkout|email):[0-9a-f-]{36}$/) }))
       .query(async ({ ctx, input }) => (await loadAnalyticsSaude(ctx.deps.db, ID_PLATAFORMA_EUNENEM, ctx.deps.clock(), 12, input.id)).recentes[0] ?? null),
+    trafego: adminProcedure.input(z.object({ meses: z.union([z.literal(3), z.literal(6), z.literal(12)]).default(3) }).default({ meses: 3 }))
+      .query(({ ctx, input }) => ctx.deps.adminTraffic.load(ctx.deps.clock(), input.meses)),
     saude: adminProcedure.input(z.object({ meses: z.union([z.literal(3), z.literal(6), z.literal(12)]).default(3) }).default({ meses: 3 }))
       .query(({ ctx, input }) => loadAnalyticsSaude(ctx.deps.db, ID_PLATAFORMA_EUNENEM, ctx.deps.clock(), input.meses)),
     funil: adminProcedure.input(z.object({ meses: z.union([z.literal(3), z.literal(6), z.literal(12)]).default(3) }).default({ meses: 3 }))

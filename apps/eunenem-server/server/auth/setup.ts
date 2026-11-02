@@ -1,3 +1,4 @@
+import { AdminTrafficReader } from '../admin-analytics-traffic.js';
 import { InterFeeSync } from '../../../../src/use-cases/pagamentos/inter-fee-sync.js';
 import { InterProcessingFeeReader } from '../../../../src/adapters/pagamentos/inter-processing-fee-reader.js';
 import { ProviderFeeSync } from '../../../../src/use-cases/pagamentos/provider-fee-sync.js';
@@ -329,6 +330,7 @@ export interface ServerDeps {
    * the same "never throw into a request" guarantee the sink itself upholds.
    */
   readonly serverAnalytics: ServerAnalytics;
+  readonly adminTraffic: AdminTrafficReader;
   /**
    * aperture-vvh2j — automated PIX repasse infrastructure.
    *
@@ -687,6 +689,11 @@ const ServerEnvSchema = z
      * dark (mounts-dark, NO boot-guard — analytics is non-critical).
      */
     MIXPANEL_TOKEN: z.string().default(''),
+    // Server-only read credentials: NEVER include these in client runtime env.
+    MIXPANEL_PROJECT_ID: z.string().default(''),
+    MIXPANEL_SERVICE_ACCOUNT_USERNAME: z.string().default(''),
+    MIXPANEL_SERVICE_ACCOUNT_SECRET: z.string().default(''),
+    MIXPANEL_API_REGION: z.string().default('US'),
     /**
      * Google OAuth credentials (aperture-8655f). Both OPTIONAL so the server
      * still boots in environments without them — when EITHER is absent the
@@ -1377,6 +1384,7 @@ export function buildServerDeps(
     webhookEventArchive,
     objectStorage,
     serverAnalytics,
+    adminTraffic: new AdminTrafficReader(env),
     boss,
     repasseJobEnqueuer,
     transferenciaProvider,

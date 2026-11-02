@@ -78,3 +78,36 @@ historical failure evidence; recovery removes current errors from the other
 series. Dates do not claim complete historical failure rates. Totals and daily
 counts are independent of the 50-row newest-first recent list. No webhook
 payloads, signatures, checkout snapshots or email snapshots are returned.
+
+## Tráfego (Mixpanel)
+
+Production composition constructs `AdminTrafficReader` from four server-only env
+vars: `MIXPANEL_PROJECT_ID`, `MIXPANEL_SERVICE_ACCOUNT_USERNAME`,
+`MIXPANEL_SERVICE_ACCOUNT_SECRET`, `MIXPANEL_API_REGION` (US/EU/IN). Both compose
+files pass these at runtime, never as build args or browser runtime data.
+
+Read-only [Segmentation API](https://docs.mixpanel.com/reference/segmentation-query),
+service-account Basic auth, fixed region hosts, redirects forbidden. This legacy
+endpoint is in maintenance; current saved Insights requires a bookmark and does
+not document dynamic date overrides. No reports/project settings are mutated.
+Peppy verified project 4045181 timezone is **US/Pacific**, with no saved ordered
+entry→signup funnel. Charts therefore explicitly use America/Los_Angeles days,
+not São Paulo. No silent hourly/daily timezone conversion is attempted.
+
+Visits mean `page_view_custom` events (not sessions); signup means `conta_criada`
+events (lazy server emission; not necessarily the original signup instant).
+`visitantes` and `conversaoPct` are null: summing daily uniques is not unique
+visitors, and dividing independent event counts is not an ordered funnel.
+Sources are event `utm_source`, not proven signup attribution; absent source is
+unknown, never direct. First-touch DB attribution remains in Funil. The top 50
+source values are grouped into finite safe labels; remaining source values are
+not detailed, and totals are queried separately to avoid top-N undercounting.
+Mixpanel may include imported/legacy events and traffic outside DB cohort rules.
+
+Four requests per 12-month refresh, at most four concurrent, one shared 8-second
+abort deadline including body reads, 2 MiB response cap each, schema/count
+validation. One in-flight request and one cache per server instance, shared by
+all 3/6/12 selectors: 20-minute success TTL, 5-minute failure TTL. No upstream
+errors/auth/URLs/raw source strings are surfaced. Failure returns `disponivel:
+false` with a safe Portuguese reason (zero placeholders are not observed data).
+Cache is process-local; multiple server instances have independent limits.
