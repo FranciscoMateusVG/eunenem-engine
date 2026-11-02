@@ -2,6 +2,7 @@ import { createRequire } from 'node:module';
 import { describe, expect, it } from 'vitest';
 import {
   FinanceiroSecao,
+  horasOuNaoMedido,
   textoHoras,
 } from '../../../apps/eunenem-server/pages/components/eunenem/admin/estatisticas/FinanceiroSecao.js';
 import type { FinanceiroData } from '../../../apps/eunenem-server/pages/components/eunenem/admin/estatisticas/types.js';
@@ -35,6 +36,8 @@ const data = {
   repasses: {
     solicitadoAteTransferido: { p50Horas: 18, p95Horas: 96, observados: 12 },
     aprovadoAteTransferido: { p50Horas: null, p95Horas: null, observados: 0 },
+    solicitadoAteAceito: { p50Horas: 6, p95Horas: 30, observados: 9 },
+    coberturaAceite: cob('NOTA-ACEITE'),
     aging: [
       { estado: 'solicitado', faixa: '0_2d', quantidade: 2, valorCents: 30_000 },
       { estado: 'solicitado', faixa: 'mais_30d', quantidade: 1, valorCents: 9_900 },
@@ -65,6 +68,15 @@ describe('Financeiro', () => {
     expect(html).toContain('7 de 10 pagamentos com o dado');
   });
 
+  it('prazo principal é o aceite do banco, rotulado como não sendo crédito', () => {
+    expect(html).toContain('Prazo até o banco aceitar');
+    expect(html).toContain('6 h');
+    expect(html).toContain('aceite do banco, não confirmação de crédito');
+    expect(html).toContain('NOTA-ACEITE');
+    // Prazo estrito sem confirmações: não medido, não "—".
+    expect(html).toMatch(/Aprovação → crédito confirmado<\/div><div[^>]*>não medido</);
+  });
+
   it('prazos em horas/dias e aging por estado × idade', () => {
     expect(html).toContain('18 h');
     expect(html).toContain('4 dias');
@@ -82,6 +94,13 @@ describe('Financeiro', () => {
     expect(html).not.toMatch(/Total/);
     expect(html).toContain('NOTA-EXPOSICAO');
   });
+});
+
+it('horasOuNaoMedido', () => {
+  expect(horasOuNaoMedido({ p50Horas: null, p95Horas: null, observados: 0 })).toBe('não medido');
+  expect(horasOuNaoMedido({ p50Horas: 12, p95Horas: 72, observados: 3 }, 'p95Horas')).toBe(
+    '3 dias',
+  );
 });
 
 it('textoHoras', () => {
