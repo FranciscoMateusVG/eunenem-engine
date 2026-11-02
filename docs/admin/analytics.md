@@ -173,3 +173,31 @@ count. Percentages are 0–100; absent/nonpositive denominators yield null.
   platform** remains null: refund to payer, released MED reserve and collection
   from a creator are not equivalent. There is no complete chargeback/receipt
   event history; absence of a recorded case is not proof of no exposure.
+
+## Additional funnel, price and email coverage
+
+- `funil.checkout` cohorts provider operations by reservation date. Current state
+  counts do not claim ordered browser stages. Failed/unknown result attempts are
+  deduplicated to operation; recovery requires later provider success evidence
+  (or local commit) on the same operation. Provider success is not approval of
+  payment. Recovery denominator is operations with recorded error, not attempts
+  or visitors. Cross-operation logical purchases and PIX→card switches remain
+  null: existing IDs cannot establish those links reliably.
+- `vendas.faixasPreco` contrasts **current** available non-archived gift units,
+  after approved-payment consumption, against gross paid item snapshots first
+  approved in the window. Bounds are exclusive at the upper end, in cents.
+  Refunded gifts remain historical purchases; their current availability follows
+  the existing catalog rule. Missing historical prices are excluded from bands
+  and reduce observed coverage. Current catalog is not historical exposure,
+  replenishable quantities are not a stable completion denominator.
+- `saude.emailCobertura` counts registered lifecycle event cohorts by occurrence
+  with current eligible recipient states. Campaign events require eligible
+  ownership; user events require an eligible user. Recipient QA exclusions apply
+  separately. Event counts are distinct, states count delivery records (multiple
+  recipients per event). Admission may omit events without an eligible recipient,
+  so registered events are not all potential eligible users. Sent means accepted
+  for sending, not delivery; no inferred click, causality or missing history.
+
+Each additional block includes a Portuguese limitation note and explicit
+observed/denominator counts. Codes remain raw for client translation. All queries
+stay admin-only and tenant-scoped; no payer/recipient identities are returned.
