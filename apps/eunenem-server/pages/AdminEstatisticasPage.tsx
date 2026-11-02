@@ -3,6 +3,8 @@ import { AdminShell } from '@/components/eunenem/admin/AdminShell';
 import { EstatisticasTabs, PeriodoSelect } from '@/components/eunenem/admin/estatisticas/EstatisticasNav';
 import { FunilSecao } from '@/components/eunenem/admin/estatisticas/FunilSecao';
 import { GraficoBarras } from '@/components/eunenem/admin/estatisticas/GraficoBarras';
+import { SaudeSecao } from '@/components/eunenem/admin/estatisticas/SaudeSecao';
+import { TrafegoSecao } from '@/components/eunenem/admin/estatisticas/TrafegoSecao';
 import { VendasSecao } from '@/components/eunenem/admin/estatisticas/VendasSecao';
 import { trpc } from '@/lib/trpc.js';
 import {
@@ -91,6 +93,26 @@ function SecaoVendas({meses}:{meses:MesesPeriodo}) {
   return <Carregando q={q}>{d=><VendasSecao data={d}/>}</Carregando>;
 }
 
+function SecaoSaude({meses}:{meses:MesesPeriodo}) {
+  const q=trpc.admin.analytics.saude.useQuery({meses},{staleTime:30000});
+  return <Carregando q={q}>{d=><SaudeSecao data={d}/>}</Carregando>;
+}
+
+function SecaoTrafego({meses}:{meses:MesesPeriodo}) {
+  const q=trpc.admin.analytics.trafego.useQuery({meses},{staleTime:5*60000});
+  return <Carregando q={q}>{d=><TrafegoSecao data={d}/>}</Carregando>;
+}
+
+function Secao({secao,meses}:{secao:SecaoEstatisticas;meses:MesesPeriodo}) {
+  switch (secao) {
+    case 'funil': return <SecaoFunil meses={meses}/>;
+    case 'vendas': return <SecaoVendas meses={meses}/>;
+    case 'trafego': return <SecaoTrafego meses={meses}/>;
+    case 'saude': return <SecaoSaude meses={meses}/>;
+    default: return <SecaoEmPreparo secao={secao}/>;
+  }
+}
+
 /** Período da URL; lido depois da hidratação porque o SSR só vê o pathname. */
 function useMesesDaUrl(secao:SecaoEstatisticas) {
   const [meses,setMeses]=useState<MesesPeriodo>(MESES_PADRAO);
@@ -109,7 +131,7 @@ export function AdminEstatisticasPage({secao}:{secao:SecaoEstatisticas}) {
     breadcrumb={secao==='funil'?[{label:'admin',href:'/admin'},{label:'estatisticas'}]:[{label:'admin',href:'/admin'},{label:'estatisticas',href:'/admin/estatisticas'},{label:label.toLowerCase()}]}
     bcContext="métricas do EuNeném">
     <EstatisticasLayout secao={secao} meses={meses} onMeses={setMeses}>
-      {secao==='funil'?<SecaoFunil meses={meses}/>:secao==='vendas'?<SecaoVendas meses={meses}/>:<SecaoEmPreparo secao={secao}/>}
+      <Secao secao={secao} meses={meses}/>
     </EstatisticasLayout>
   </AdminShell>;
 }
