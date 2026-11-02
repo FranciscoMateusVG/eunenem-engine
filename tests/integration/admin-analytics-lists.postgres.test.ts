@@ -594,3 +594,63 @@ it('operation recovery, mutable price mix and observed email coverage have expli
   expect((await caller.admin.analytics.vendas({ meses: 3 })).faixasPreco.faixas).toHaveLength(5);
   expect((await caller.admin.analytics.saude({ meses: 3 })).emailCobertura.tipos).toHaveLength(1);
 });
+
+it('bank acceptance timing is separate from paid evidence and ignores failure, approval and future markers', async () => {
+  const tenant = randomUUID();
+  const campaign = await list(
+    '2039-09-01T12:00:00Z',
+    'bank-acceptance@customer.invalid',
+    undefined,
+    tenant,
+  );
+  const request = new Date('2039-10-10T12:00:00Z');
+  const ids = Array.from({ length: 5 }, () => randomUUID());
+  await t.db
+    .insertInto('repasses_recebedor')
+    .values(
+      ids.map((id, index) => ({
+        id,
+        id_campanha: campaign,
+        amount_cents: 1000,
+        status: index < 2 ? 'enviado_ao_banco' : 'aprovado',
+        inter_codigo_solicitacao: index < 2 ? randomUUID() : null,
+        solicitado_em: request,
+        aprovado_em: new Date('2039-10-10T13:00:00Z'),
+        enviado_ao_banco_em:
+          index === 0
+            ? new Date('2039-10-11T12:00:00Z')
+            : index === 1
+              ? new Date('2039-10-13T12:00:00Z')
+              : null,
+      })),
+    )
+    .execute();
+  for (const [index, attempt, outcome, date] of [
+    [1, 1, 'aceito_pelo_banco', '2039-10-12'],
+    [1, 2, 'aceito_pelo_banco', '2039-10-14'],
+    [2, 1, 'falhou', '2039-10-11'],
+    [3, 1, 'aceito_pelo_banco', '2039-10-21'],
+    [4, 1, 'aceito_pelo_banco', '2039-10-09'],
+  ] as const) {
+    await t.db
+      .insertInto('repasse_transfer_attempts')
+      .values({
+        id: randomUUID(),
+        repasse_id: ids[index] ?? '',
+        attempt_no: attempt,
+        referencia: randomUUID(),
+        operation: 'pagar_pix',
+        started_at: request,
+        finished_at: new Date(`${date}T12:00:00Z`),
+        outcome,
+      })
+      .execute();
+  }
+  const result = await loadAnalyticsFinanceiro(t.db, tenant, now, 3);
+  expect(result.repasses).toMatchObject({
+    solicitadoAteAceito: { p50Horas: 36, p95Horas: 46.8, observados: 2 },
+    coberturaAceite: { denominador: 5, observados: 2, parcial: true },
+    solicitadoAteTransferido: { p50Horas: null, p95Horas: null, observados: 0 },
+  });
+  expect(result.repasses.coberturaAceite.nota).toContain('não confirmação de crédito');
+});
