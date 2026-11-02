@@ -1,7 +1,9 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { AdminShell } from '@/components/eunenem/admin/AdminShell';
 import { EstatisticasTabs, PeriodoSelect } from '@/components/eunenem/admin/estatisticas/EstatisticasNav';
+import { FunilSecao } from '@/components/eunenem/admin/estatisticas/FunilSecao';
 import { GraficoBarras } from '@/components/eunenem/admin/estatisticas/GraficoBarras';
+import { VendasSecao } from '@/components/eunenem/admin/estatisticas/VendasSecao';
 import { trpc } from '@/lib/trpc.js';
 import {
   hrefSecao,
@@ -41,6 +43,8 @@ export function EstatisticasPainel({data,meses}:{data:Estatisticas;meses:MesesPe
 const DESCRICAO: Record<SecaoEstatisticas,string> = {
   funil:'Do cadastro ao primeiro presente recebido · calendário de São Paulo',
   vendas:'Volume de presentes, ticket médio e PIX × cartão',
+  listas:'Comportamento das listas: primeiro presente, turmas, pagantes e listas em risco',
+  financeiro:'Margem por lista, prazo de repasse e exposição a estornos/MED',
   trafego:'Visitas e origens do site (Mixpanel)',
   saude:'Falhas de provedor, webhooks, checkout e e-mails',
 };
@@ -64,11 +68,27 @@ function SecaoEmPreparo({secao}:{secao:SecaoEstatisticas}) {
   </p>;
 }
 
+function Carregando<T>({q,children}:{q:{error:{message:string}|null;data:T|undefined};children:(data:T)=>ReactNode}) {
+  if (q.error) return <p role="alert" className="rounded-md border border-red-200 bg-red-50 p-4 text-red-800">Não foi possível carregar as estatísticas. {q.error.message}</p>;
+  if (q.data===undefined) return <p role="status">Carregando estatísticas…</p>;
+  return <>{children(q.data)}</>;
+}
+
 function SecaoFunil({meses}:{meses:MesesPeriodo}) {
-  const q=trpc.admin.estatisticas.useQuery(undefined,{staleTime:30000});
-  if (q.error) return <p role="alert">Não foi possível carregar as estatísticas. {q.error.message}</p>;
-  if (!q.data) return <p role="status">Carregando estatísticas…</p>;
-  return <EstatisticasPainel data={q.data} meses={meses}/>;
+  const funil=trpc.admin.analytics.funil.useQuery({meses},{staleTime:30000});
+  const contas=trpc.admin.estatisticas.useQuery(undefined,{staleTime:30000});
+  return <div className="flex min-w-0 flex-col gap-10">
+    <Carregando q={funil}>{d=><FunilSecao data={d}/>}</Carregando>
+    <section aria-label="Crescimento de contas" className="flex min-w-0 flex-col gap-4">
+      <h2 className="text-lg font-semibold">Crescimento de contas</h2>
+      <Carregando q={contas}>{d=><EstatisticasPainel data={d} meses={meses}/>}</Carregando>
+    </section>
+  </div>;
+}
+
+function SecaoVendas({meses}:{meses:MesesPeriodo}) {
+  const q=trpc.admin.analytics.vendas.useQuery({meses},{staleTime:30000});
+  return <Carregando q={q}>{d=><VendasSecao data={d}/>}</Carregando>;
 }
 
 /** Período da URL; lido depois da hidratação porque o SSR só vê o pathname. */
@@ -89,7 +109,7 @@ export function AdminEstatisticasPage({secao}:{secao:SecaoEstatisticas}) {
     breadcrumb={secao==='funil'?[{label:'admin',href:'/admin'},{label:'estatisticas'}]:[{label:'admin',href:'/admin'},{label:'estatisticas',href:'/admin/estatisticas'},{label:label.toLowerCase()}]}
     bcContext="métricas do EuNeném">
     <EstatisticasLayout secao={secao} meses={meses} onMeses={setMeses}>
-      {secao==='funil'?<SecaoFunil meses={meses}/>:<SecaoEmPreparo secao={secao}/>}
+      {secao==='funil'?<SecaoFunil meses={meses}/>:secao==='vendas'?<SecaoVendas meses={meses}/>:<SecaoEmPreparo secao={secao}/>}
     </EstatisticasLayout>
   </AdminShell>;
 }

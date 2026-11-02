@@ -226,7 +226,7 @@ export function resolveRoute(pathname: string):
     return { kind: 'admin-migrados' };
   }
   // aperture-lcug3 — Estatísticas em sub-seções, uma rota por aba:
-  // /admin/estatisticas (Funil), /vendas, /trafego, /saude.
+  // /admin/estatisticas (Funil), /vendas, /listas, /financeiro, /trafego, /saude.
   const secaoEstatisticas = secaoFromPath(pathname);
   if (secaoEstatisticas) return { kind: 'admin-estatisticas', secao: secaoEstatisticas };
   if (pathname === '/admin' || pathname === '/admin/') {
