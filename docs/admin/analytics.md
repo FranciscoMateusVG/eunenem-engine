@@ -201,3 +201,16 @@ count. Percentages are 0–100; absent/nonpositive denominators yield null.
 Each additional block includes a Portuguese limitation note and explicit
 observed/denominator counts. Codes remain raw for client translation. All queries
 stay admin-only and tenant-scoped; no payer/recipient identities are returned.
+
+### Payout bank acceptance (follow-up)
+
+The primary payout timing is `repasses.solicitadoAteAceito` (p50/p95 hours,
+observed count), with `coberturaAceite` using all requests in the selected cohort
+as denominator. It measures **bank acceptance, not confirmation of credit**:
+the earliest valid `enviado_ao_banco_em` or finished attempt with outcome
+`aceito_pelo_banco`. Repeated accepts do not add observations or inflate elapsed
+time. Markers before the request or at/after the snapshot are excluded; internal
+approval, failed attempts and arbitrary finished attempts never qualify.
+The existing strictly paid-evidence timings are unchanged and remain unmeasured
+when no confirmations exist. Open-payout aging is elapsed since request, **not**
+time spent in the current bank state. No payout state or ledger is altered.
