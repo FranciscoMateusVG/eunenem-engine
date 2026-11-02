@@ -1,3 +1,4 @@
+import { useId } from "react";
 import {
   hrefSecao,
   isMesesPeriodo,
@@ -54,10 +55,13 @@ export function PeriodoSelect({
   meses: MesesPeriodo;
   onChange: (meses: MesesPeriodo) => void;
 }) {
+  const id = useId();
   return (
-    <label className="flex items-center gap-2 text-sm">
+    <label htmlFor={id} className="flex items-center gap-2 text-sm">
       Período
       <select
+        id={id}
+        name="meses"
         aria-label="Período mensal"
         className="rounded-lg border border-line bg-white p-2"
         value={meses}

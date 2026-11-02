@@ -22,7 +22,9 @@ const SERIE_CADASTROS: readonly SerieGrafico[] = [
 export function TrafegoSecao({ data }: { data: TrafegoData }) {
   const aviso = (
     <p data-testid="trafego-aviso" className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
-      {data.aviso} Atualizado em {formatInstante(data.atualizadoEm)}.
+      {data.aviso} O Mixpanel conta eventos do site de todos os ambientes e visitantes, por isso
+      não é comparável ao Funil, que lê só o banco desta instalação. Atualizado em{" "}
+      {formatInstante(data.atualizadoEm)}.
     </p>
   );
   if (!data.disponivel)
