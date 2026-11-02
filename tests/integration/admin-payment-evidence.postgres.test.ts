@@ -115,7 +115,9 @@ async function insertPayment(input: {
   rawStatus?: string;
   contributorName?: string;
   contributorEmail?: string;
+  createdAt?: Date;
 }): Promise<void> {
+  const createdAt = input.createdAt ?? CREATED_AT;
   const externalTransaction = input.provider
     ? {
         id: `external-${input.id.slice(-1)}`,
@@ -152,12 +154,12 @@ async function insertPayment(input: {
     ) VALUES (
       ${input.id}::uuid,
       ${input.status},
-      ${CREATED_AT},
-      ${CREATED_AT},
+      ${createdAt},
+      ${createdAt},
       ${randomUUID()}::uuid,
       ${input.campaignId ?? CAMPAIGN_ID}::uuid,
       ${input.method},
-      ${CREATED_AT},
+      ${createdAt},
       1_800,
       100,
       1_700,
@@ -208,6 +210,54 @@ async function insertUnmatchedEvidence(input: {
 }
 
 describe('listAdminPaymentEvidence — Postgres', () => {
+  it('filters a civil day in America/Sao_Paulo, including 23:30 when UTC is the next day', async () => {
+    await insertPayment({
+      id: PAYMENT_IDS[0],
+      method: 'pix',
+      status: 'aprovado',
+      provider: 'inter',
+      createdAt: new Date('2026-09-09T02:30:00.000Z'),
+    });
+    await insertPayment({
+      id: PAYMENT_IDS[1],
+      method: 'pix',
+      status: 'aprovado',
+      provider: 'inter',
+      createdAt: new Date('2026-09-08T15:00:00.000Z'),
+    });
+    await insertPayment({
+      id: PAYMENT_IDS[2],
+      method: 'pix',
+      status: 'aprovado',
+      provider: 'inter',
+      createdAt: new Date('2026-09-09T03:00:00.000Z'),
+    });
+
+    const result = await listAdminPaymentEvidence(testDb.db, {
+      ...LIST_CONTEXT,
+      platformId: ID_PLATAFORMA_EUNENEM,
+      cursor: null,
+      limit: 1,
+      provider: 'inter',
+      status: 'aprovado',
+      day: '2026-09-08',
+    });
+    const next = await listAdminPaymentEvidence(testDb.db, {
+      ...LIST_CONTEXT,
+      platformId: ID_PLATAFORMA_EUNENEM,
+      cursor: result.nextCursor,
+      limit: 1,
+      provider: 'inter',
+      status: 'aprovado',
+      day: '2026-09-08',
+    });
+
+    expect(result.totalCount).toBe(2);
+    expect(result.rows.map((row) => row.paymentId)).toEqual([PAYMENT_IDS[0]]);
+    expect(next.totalCount).toBe(2);
+    expect(next.rows.map((row) => row.paymentId)).toEqual([PAYMENT_IDS[1]]);
+  });
+
   it('applies platform scope before deterministic cursor pagination and totalCount', async () => {
     await insertPayment({
       id: PAYMENT_IDS[0],

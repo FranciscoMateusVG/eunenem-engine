@@ -32,6 +32,16 @@ const SAFE_STORED_TEXT = /^[^\u0000-\u001f\u007f-\u009f\u2028\u2029\p{Cf}]*$/u;
 export const PaymentEvidencePayerQuerySchema = z.string().max(160).regex(SAFE_STORED_TEXT);
 export const PaymentEvidenceCampaignQuerySchema = z.string().max(1024).regex(SAFE_STORED_TEXT);
 export const PaymentEvidenceExactReferenceSchema = z.string().max(255).regex(SAFE_STORED_TEXT);
+export const PaymentEvidenceDaySchema = z.string().refine((value) => {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const [year, month, day] = value.split("-").map(Number);
+  const date = new Date(Date.UTC(year!, month! - 1, day!));
+  return (
+    date.getUTCFullYear() === year &&
+    date.getUTCMonth() === month! - 1 &&
+    date.getUTCDate() === day
+  );
+});
 export const PaymentEvidenceReferenceResolutionSchema = z.enum([
   "not_requested",
   "unique",
@@ -297,6 +307,7 @@ export interface ListAdminPaymentEvidenceInput {
   readonly payerQuery?: string;
   readonly campaignQuery?: string;
   readonly exactReference?: string;
+  readonly day?: string;
   readonly publicOrigin: string;
   readonly cursorSecret: string;
 }
@@ -561,12 +572,16 @@ export async function listAdminPaymentEvidence(
     input.exactReference,
     PaymentEvidenceExactReferenceSchema,
   );
+  const day = input.day && PaymentEvidenceDaySchema.safeParse(input.day).success
+    ? input.day
+    : null;
   const digest = paymentFiltersDigest(input.cursorSecret, {
     provider: input.provider,
     status: input.status,
     payerQuery,
     campaignFilter,
     exactReference,
+    day,
   });
   const cursor =
     input.cursor === null
@@ -673,6 +688,13 @@ export async function listAdminPaymentEvidence(
       AND ${campaignPredicate}
       AND (${exactPaymentId}::uuid IS NULL OR p.id = ${exactPaymentId}::uuid)
       AND (
+        ${day}::text IS NULL
+        OR (
+          p.criado_em >= (${day}::date::timestamp AT TIME ZONE 'America/Sao_Paulo')
+          AND p.criado_em < ((${day}::date + 1)::timestamp AT TIME ZONE 'America/Sao_Paulo')
+        )
+      )
+      AND (
         ${cursorCreatedAt}::timestamptz IS NULL
         OR p.criado_em < ${cursorCreatedAt}::timestamptz
         OR (p.criado_em = ${cursorCreatedAt}::timestamptz AND p.id < ${cursorPaymentId}::uuid)
@@ -694,6 +716,13 @@ export async function listAdminPaymentEvidence(
       ))
       AND ${campaignPredicate}
       AND (${exactPaymentId}::uuid IS NULL OR p.id = ${exactPaymentId}::uuid)
+      AND (
+        ${day}::text IS NULL
+        OR (
+          p.criado_em >= (${day}::date::timestamp AT TIME ZONE 'America/Sao_Paulo')
+          AND p.criado_em < ((${day}::date + 1)::timestamp AT TIME ZONE 'America/Sao_Paulo')
+        )
+      )
   `.execute(db);
 
   const hasNext = rowsResult.rows.length > input.limit;

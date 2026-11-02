@@ -18,6 +18,23 @@ export type UnmatchedPaymentEvidenceRow =
 
 const PAGE_SIZE = 50;
 const FILTER_DEBOUNCE_MS = 300;
+const PAYMENT_DAY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+
+export function validPaymentDay(value: string | null | undefined): string {
+  if (!value || !PAYMENT_DAY_PATTERN.test(value)) return "";
+  const [year, month, day] = value.split("-").map(Number);
+  const date = new Date(Date.UTC(year!, month! - 1, day!));
+  return date.getUTCFullYear() === year &&
+    date.getUTCMonth() === month! - 1 &&
+    date.getUTCDate() === day
+    ? value
+    : "";
+}
+
+function initialPaymentDay(): string {
+  if (typeof window === "undefined") return "";
+  return validPaymentDay(new URLSearchParams(window.location.search).get("dia"));
+}
 
 export type PaymentSearchDraft = {
   payerQuery: string;
@@ -53,6 +70,7 @@ export function AdminPagamentosPage() {
   const [status, setStatus] = useState<
     "pendente" | "processing" | "aprovado" | "rejeitado" | "estornado" | null
   >(null);
+  const [day, setDay] = useState(initialPaymentDay);
   const [cursor, setCursor] = useState<string | null>(null);
   const [cursorStack, setCursorStack] = useState<Array<string | null>>([]);
   const [searchDraft, setSearchDraft] = useState<PaymentSearchDraft>(
@@ -94,8 +112,16 @@ export function AdminPagamentosPage() {
   const clearSearch = useCallback(() => {
     setSearchDraft(EMPTY_PAYMENT_SEARCH);
     setSearchQuery(EMPTY_PAYMENT_SEARCH);
+    setDay("");
     resetCursor();
   }, [resetCursor]);
+
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    if (day) url.searchParams.set("dia", day);
+    else url.searchParams.delete("dia");
+    window.history.replaceState(window.history.state, "", url);
+  }, [day]);
 
   const queryInput = useMemo(
     () => ({
@@ -103,9 +129,10 @@ export function AdminPagamentosPage() {
       limit: PAGE_SIZE,
       provider,
       status,
+      day: day || undefined,
       ...paymentEvidenceSearchInput(searchQuery),
     }),
-    [cursor, provider, status, searchQuery],
+    [cursor, day, provider, status, searchQuery],
   );
   const query = trpc.admin.pagamentos.listEvidencePaginated.useQuery(queryInput, {
     staleTime: 30_000,
@@ -154,6 +181,7 @@ export function AdminPagamentosPage() {
         <PaymentEvidenceFilters
           provider={provider}
           status={status}
+          day={day}
           search={searchDraft}
           onProviderChange={(next) => {
             setProvider(next);
@@ -161,6 +189,10 @@ export function AdminPagamentosPage() {
           }}
           onStatusChange={(next) => {
             setStatus(next);
+            resetCursor();
+          }}
+          onDayChange={(next) => {
+            setDay(validPaymentDay(next));
             resetCursor();
           }}
           onSearchChange={onSearchChange}
@@ -222,23 +254,28 @@ export function AdminPagamentosPage() {
 export function PaymentEvidenceFilters({
   provider,
   status,
+  day,
   search,
   onProviderChange,
   onStatusChange,
+  onDayChange,
   onSearchChange,
   onClearSearch,
 }: {
   provider: "stripe" | "inter" | null;
   status: "pendente" | "processing" | "aprovado" | "rejeitado" | "estornado" | null;
+  day: string;
   search: PaymentSearchDraft;
   onProviderChange: (provider: "stripe" | "inter" | null) => void;
   onStatusChange: (
     status: "pendente" | "processing" | "aprovado" | "rejeitado" | "estornado" | null,
   ) => void;
+  onDayChange: (day: string) => void;
   onSearchChange: (field: keyof PaymentSearchDraft, value: string) => void;
   onClearSearch: () => void;
 }) {
-  const hasSearch = Object.values(search).some((value) => value.trim() !== "");
+  const hasSearch =
+    day !== "" || Object.values(search).some((value) => value.trim() !== "");
   return (
     <div className="grid min-w-0 gap-3 rounded-md border border-line bg-cream-2/30 p-4 sm:grid-cols-2 lg:grid-cols-3">
       <SearchField
@@ -310,6 +347,16 @@ export function PaymentEvidenceFilters({
           <option value="rejeitado">Rejeitado</option>
           <option value="estornado">Estornado</option>
         </select>
+      </label>
+      <label className="space-y-1 font-mono text-[11px] uppercase tracking-[0.12em] text-ink-soft">
+        Dia
+        <input
+          type="date"
+          aria-label="Filtrar pagamentos por dia"
+          value={day}
+          onChange={(event) => onDayChange(event.target.value)}
+          className="block min-h-11 w-full min-w-0 rounded border border-line bg-paper px-3 py-2 text-[13px] normal-case tracking-normal text-ink"
+        />
       </label>
       <div className="flex items-end sm:justify-end lg:justify-start">
         <button

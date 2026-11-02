@@ -1871,6 +1871,7 @@ const pagamentosRouter = t.router({
         payerQuery: PaymentEvidencePayerQuerySchema.optional(),
         campaignQuery: PaymentEvidenceCampaignQuerySchema.optional(),
         exactReference: PaymentEvidenceExactReferenceSchema.optional(),
+        day: z.string().optional(),
       }),
     )
     .output(
@@ -1894,6 +1895,7 @@ const pagamentosRouter = t.router({
           payerQuery: input.payerQuery,
           campaignQuery: input.campaignQuery,
           exactReference: input.exactReference,
+          day: input.day,
           publicOrigin: ctx.deps.publicOrigin,
           cursorSecret: ctx.deps.logPiiHashSalt,
         });
