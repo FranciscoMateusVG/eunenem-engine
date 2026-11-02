@@ -1,3 +1,4 @@
+import { loadAnalyticsCheckout, loadAnalyticsPriceBands, loadAnalyticsEmailCoverage } from '../admin-analytics-extras.js';
 import { loadAnalyticsFinanceiro } from '../admin-analytics-finance.js';
 import { loadAnalyticsListas } from '../admin-analytics-lists.js';
 import { loadAnalyticsSaude } from '../admin-analytics-health.js';
@@ -5030,11 +5031,11 @@ export const adminRouter = t.router({
     trafego: adminProcedure.input(z.object({ meses: z.union([z.literal(3), z.literal(6), z.literal(12)]).default(3) }).default({ meses: 3 }))
       .query(({ ctx, input }) => ctx.deps.adminTraffic.load(ctx.deps.clock(), input.meses)),
     saude: adminProcedure.input(z.object({ meses: z.union([z.literal(3), z.literal(6), z.literal(12)]).default(3) }).default({ meses: 3 }))
-      .query(({ ctx, input }) => loadAnalyticsSaude(ctx.deps.db, ID_PLATAFORMA_EUNENEM, ctx.deps.clock(), input.meses)),
+      .query(async ({ ctx, input }) => { const now=ctx.deps.clock(); const [base,extra]=await Promise.all([loadAnalyticsSaude(ctx.deps.db, ID_PLATAFORMA_EUNENEM, now, input.meses), loadAnalyticsEmailCoverage(ctx.deps.db, ID_PLATAFORMA_EUNENEM, now, input.meses)]); return {...base,emailCobertura:extra}; }),
     funil: adminProcedure.input(z.object({ meses: z.union([z.literal(3), z.literal(6), z.literal(12)]).default(3) }).default({ meses: 3 }))
-      .query(({ ctx, input }) => loadAnalyticsFunil(ctx.deps.db, ID_PLATAFORMA_EUNENEM, ctx.deps.clock(), input.meses)),
+      .query(async ({ ctx, input }) => { const now=ctx.deps.clock(); const [base,extra]=await Promise.all([loadAnalyticsFunil(ctx.deps.db, ID_PLATAFORMA_EUNENEM, now, input.meses), loadAnalyticsCheckout(ctx.deps.db, ID_PLATAFORMA_EUNENEM, now, input.meses)]); return {...base,checkout:extra}; }),
     vendas: adminProcedure.input(z.object({ meses: z.union([z.literal(3), z.literal(6), z.literal(12)]).default(3) }).default({ meses: 3 }))
-      .query(({ ctx, input }) => loadAnalyticsVendas(ctx.deps.db, ID_PLATAFORMA_EUNENEM, ctx.deps.clock(), input.meses)),
+      .query(async ({ ctx, input }) => { const now=ctx.deps.clock(); const [base,extra]=await Promise.all([loadAnalyticsVendas(ctx.deps.db, ID_PLATAFORMA_EUNENEM, now, input.meses), loadAnalyticsPriceBands(ctx.deps.db, ID_PLATAFORMA_EUNENEM, now, input.meses)]); return {...base,faixasPreco:extra}; }),
   }),
   estatisticas: adminProcedure.query(({ctx}) => loadEstatisticas(ctx.deps.db, ID_PLATAFORMA_EUNENEM, ctx.deps.clock())),
   receita: receitaRouter,

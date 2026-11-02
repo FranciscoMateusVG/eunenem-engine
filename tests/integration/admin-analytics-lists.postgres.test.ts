@@ -1,5 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, expect, it } from 'vitest';
+import {
+  loadAnalyticsCheckout,
+  loadAnalyticsEmailCoverage,
+  loadAnalyticsPriceBands,
+} from '../../apps/eunenem-server/server/admin-analytics-extras.js';
 import { loadAnalyticsFinanceiro } from '../../apps/eunenem-server/server/admin-analytics-finance.js';
 import { loadAnalyticsListas } from '../../apps/eunenem-server/server/admin-analytics-lists.js';
 import type { TrpcContext } from '../../apps/eunenem-server/server/trpc/context.js';
@@ -17,7 +22,7 @@ let secondPayment: string;
 const legacy = { emails: ['legacy@customer.invalid'], completo: true };
 beforeAll(async () => {
   t = await createTestDatabase({ isolated: true });
-});
+}, 60_000);
 afterAll(async () => {
   await t?.teardown();
 });
@@ -417,4 +422,175 @@ it('Financeiro separates observed margin, real payout evidence and overlapping r
     deps: { ...auth.depsOverrides, db: t.db, clock: () => now, adminAllowedEmails: new Set() },
   } as unknown as TrpcContext);
   await expect(caller.admin.analytics.financeiro()).rejects.toMatchObject({ code: 'FORBIDDEN' });
+});
+
+it('operation recovery, mutable price mix and observed email coverage have explicit denominators', async () => {
+  const operation = randomUUID();
+  await t.db
+    .insertInto('payment_provider_operations')
+    .values({
+      operation_id: operation,
+      platform_id: platform,
+      campaign_id: first,
+      payment_id: secondPayment,
+      provider: 'stripe',
+      method: 'credit_card',
+      capability_hash: 'a'.repeat(64),
+      request_hmac: 'b'.repeat(64),
+      request_snapshot: {},
+      state: 'local_committed',
+      provider_ref: 'test-ref',
+      provider_succeeded_at: new Date('2039-09-03T12:00:00Z'),
+      created_at: new Date('2039-09-01T12:00:00Z'),
+      local_committed_at: new Date('2039-09-03T12:00:00Z'),
+    })
+    .execute();
+  for (const [attempt, outcome, at] of [
+    [1, 'failed', '2039-09-01'],
+    [2, 'outcome_unknown', '2039-09-02'],
+    [3, 'provider_succeeded', '2039-09-03'],
+  ] as const) {
+    await t.db
+      .insertInto('payment_provider_operation_attempt_facts')
+      .values({
+        id: randomUUID(),
+        operation_id: operation,
+        attempt_no: attempt,
+        fact_kind: 'result',
+        fence_token: randomUUID(),
+        outcome,
+        recorded_at: new Date(`${at}T12:00:00Z`),
+      })
+      .execute();
+  }
+  const failedOperation = randomUUID();
+  await t.db
+    .insertInto('payment_provider_operations')
+    .values({
+      operation_id: failedOperation,
+      platform_id: platform,
+      campaign_id: first,
+      payment_id: firstPayment,
+      provider: 'inter',
+      method: 'pix',
+      capability_hash: 'c'.repeat(64),
+      request_hmac: 'd'.repeat(64),
+      request_snapshot: {},
+      state: 'failed',
+      created_at: new Date('2039-09-01T12:00:00Z'),
+    })
+    .execute();
+  for (const [attempt, outcome, at] of [
+    [1, 'provider_succeeded', '2039-09-01'],
+    [2, 'failed', '2039-09-02'],
+  ] as const) {
+    await t.db
+      .insertInto('payment_provider_operation_attempt_facts')
+      .values({
+        id: randomUUID(),
+        operation_id: failedOperation,
+        attempt_no: attempt,
+        fact_kind: 'result',
+        fence_token: randomUUID(),
+        outcome,
+        recorded_at: new Date(`${at}T12:00:00Z`),
+      })
+      .execute();
+  }
+  const checkout = await loadAnalyticsCheckout(t.db, platform, now, 3);
+  expect(checkout).toMatchObject({
+    operacoes: 2,
+    comErro: 2,
+    recuperadasAposErro: 1,
+    percentualRecuperadas: 50,
+    comprasLogicas: null,
+    trocasPixCartao: null,
+    estados: [
+      { estado: 'failed', quantidade: 1 },
+      { estado: 'local_committed', quantidade: 1 },
+    ],
+  });
+  expect(
+    (await loadAnalyticsCheckout(t.db, randomUUID(), now, 3)).percentualRecuperadas,
+  ).toBeNull();
+  // Current catalog price moves to another band, historical item stays R$10.
+  await t.db
+    .updateTable('contribuicoes')
+    .set({ valor: 10000, quantidade: 4 })
+    .where('campanha_id', '=', first)
+    .execute();
+  const prices = await loadAnalyticsPriceBands(t.db, platform, now, 3);
+  expect(prices.faixas[0]).toMatchObject({ comprados: 3, gmvCents: 3000 });
+  expect(prices.faixas[2]).toMatchObject({ disponiveis: 7, comprados: 0 });
+  const owner = await t.db
+    .selectFrom('usuarios')
+    .select('id')
+    .where('email', '=', 'legacy@customer.invalid')
+    .executeTakeFirstOrThrow();
+  const qa = await t.db
+    .selectFrom('usuarios')
+    .select('id')
+    .where('email', '=', 'internal@example.com')
+    .executeTakeFirstOrThrow();
+  const event = randomUUID(),
+    noRecipient = randomUUID();
+  await t.db
+    .insertInto('lifecycle_email_events')
+    .values(
+      [event, noRecipient].map((id) => ({
+        id,
+        tenant_id: platform,
+        type: 'payment_received',
+        subject_id: randomUUID(),
+        campaign_id: first,
+        occurred_at: new Date('2039-09-01T12:00:00Z'),
+      })),
+    )
+    .execute();
+  await t.db
+    .insertInto('lifecycle_email_deliveries')
+    .values([
+      {
+        id: randomUUID(),
+        event_id: event,
+        tenant_id: platform,
+        type: 'payment_received',
+        user_id: owner.id,
+        state: 'sent',
+      },
+      {
+        id: randomUUID(),
+        event_id: event,
+        tenant_id: platform,
+        type: 'payment_received',
+        user_id: qa.id,
+        state: 'failed',
+      },
+    ])
+    .execute();
+  const emails = await loadAnalyticsEmailCoverage(t.db, platform, now, 3);
+  expect(emails.tipos).toEqual([
+    {
+      tipo: 'payment_received',
+      eventosRegistrados: 2,
+      eventosComDestinatario: 1,
+      pendentes: 0,
+      enviando: 0,
+      enviados: 1,
+      falhos: 0,
+      desconhecidos: 0,
+      suprimidos: 0,
+    },
+  ]);
+  expect(emails.cobertura).toMatchObject({ denominador: 2, observados: 1, parcial: true });
+  expect((await loadAnalyticsEmailCoverage(t.db, randomUUID(), now, 3)).tipos).toEqual([]);
+  const auth = adminAuthOverrides();
+  const caller = appRouter.createCaller({
+    headers: auth.headers,
+    resHeaders: new Headers(),
+    deps: { ...auth.depsOverrides, db: t.db, clock: () => now },
+  } as unknown as TrpcContext);
+  expect((await caller.admin.analytics.funil({ meses: 3 })).checkout.operacoes).toBe(2);
+  expect((await caller.admin.analytics.vendas({ meses: 3 })).faixasPreco.faixas).toHaveLength(5);
+  expect((await caller.admin.analytics.saude({ meses: 3 })).emailCobertura.tipos).toHaveLength(1);
 });
