@@ -31,3 +31,6 @@ export function tituloBucket(b: Bucket, mensal: boolean): string {
     : `${formatLocalDate(b.de)} – ${formatLocalDate(addDays(b.ate, -1))}`;
   return `${nome}${b.parcial ? " (parcial)" : ""}`;
 }
+
+/** Dias com uma casa, ou "—". */
+export const textoDias = (d: number | null) => (d === null ? "—" : `${numero(d)} dias`);

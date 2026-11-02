@@ -11,3 +11,5 @@ export type SaudeData = RouterOutputs["admin"]["analytics"]["saude"];
 export type SaudeRecente = SaudeData["recentes"][number];
 export type SaudeCategoria = SaudeData["categorias"][number];
 export type TrafegoData = RouterOutputs["admin"]["analytics"]["trafego"];
+export type ListasData = RouterOutputs["admin"]["analytics"]["listas"];
+export type Cobertura = ListasData["primeiroPresente"]["cobertura"];

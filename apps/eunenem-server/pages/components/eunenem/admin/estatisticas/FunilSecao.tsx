@@ -18,7 +18,7 @@ export const ROTULO_ETAPA: Record<FunilEtapa, string> = {
   primeiro_presente: "1º presente recebido",
 };
 
-const ROTULO_ORIGEM: Record<FunilOrigem, string> = {
+export const ROTULO_ORIGEM: Record<FunilOrigem, string> = {
   google_ads: "Google Ads",
   organico: "Orgânico",
   direto: "Direto",

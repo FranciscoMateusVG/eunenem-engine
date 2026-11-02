@@ -56,6 +56,10 @@ export function GraficoBarras({
       : totais),
   );
   const largo = barras.length * (agrupado ? series.length : 1) > 14;
+  // Gráficos densos: um rótulo de eixo a cada `passoRotulo` barras (o detalhe
+  // de cada barra continua no tooltip). Quem já esparsou os rótulos decide sozinho.
+  const passoRotulo =
+    barras.length > 20 && barras.every((b) => b.rotulo) ? Math.ceil(barras.length / 13) : 1;
   // Em telas estreitas o gráfico rola por dentro: abre no período mais recente.
   const rolagem = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -122,13 +126,15 @@ export function GraficoBarras({
                     </div>
                   ) : (
                     <>
-                  <span
+                  {barras.length <= 20 ? (
+                    <span
                     className={`whitespace-nowrap font-mono text-[10px] ${
                       b.parcial ? "text-ink-mute" : "text-ink"
                     }`}
                   >
                     {medido ? formatar(totais[i]!) : "—"}
                   </span>
+                  ) : null}
                   <div
                     aria-hidden
                     className={`flex w-full max-w-[56px] flex-col-reverse overflow-hidden rounded-t-[3px] ${
@@ -156,14 +162,14 @@ export function GraficoBarras({
             })}
           </ol>
           <div className={`flex gap-1.5 border-t pt-2 sm:gap-3 ${EIXO}`} aria-hidden>
-            {barras.map((b) => (
+            {barras.map((b, i) => (
               <span
                 key={b.chave}
-                className={`min-w-0 flex-1 truncate text-center font-mono text-[10px] ${
+                className={`flex min-w-0 flex-1 justify-center overflow-visible whitespace-nowrap font-mono text-[10px] ${
                   b.parcial ? "text-ink" : "text-ink-mute"
                 }`}
               >
-                {b.rotulo}
+                {passoRotulo === 1 || i % passoRotulo === 0 || i === barras.length - 1 ? b.rotulo : ""}
               </span>
             ))}
           </div>

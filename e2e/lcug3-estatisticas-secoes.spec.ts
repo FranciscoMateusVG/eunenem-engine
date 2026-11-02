@@ -58,6 +58,18 @@ for (const width of [1280, 375]) {
       );
       await expect(page.getByRole('heading', { name: secao.tab, exact: true })).toBeVisible();
       await expect(page.getByRole('combobox', { name: 'Período mensal' })).toHaveValue('6');
+      if (secao.tab === 'Listas') {
+        await expect(page.getByTestId('listas-kpi').first()).toBeVisible();
+        await expect(page.getByTestId('listas-janela')).toHaveCount(3);
+        await expect(page.getByTestId('listas-risco')).toHaveCount(3);
+        await expect(page.getByTestId('listas-curva')).toHaveCount(38);
+        // Cada bloco com dado parcial mostra a nota de cobertura do servidor.
+        expect(await page.getByTestId('cobertura-nota').count()).toBeGreaterThanOrEqual(6);
+        await page.screenshot({
+          path: testInfo.outputPath(`lcug3-listas-${width}.png`),
+          fullPage: true,
+        });
+      }
       if (secao.tab === 'Saúde & erros') {
         await expect(page.getByTestId('saude-categoria')).toHaveCount(4);
         await expect(page.getByTestId('saude-mes')).toHaveCount(6);

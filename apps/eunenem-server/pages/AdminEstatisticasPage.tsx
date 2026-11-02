@@ -3,6 +3,7 @@ import { AdminShell } from '@/components/eunenem/admin/AdminShell';
 import { EstatisticasTabs, PeriodoSelect } from '@/components/eunenem/admin/estatisticas/EstatisticasNav';
 import { FunilSecao } from '@/components/eunenem/admin/estatisticas/FunilSecao';
 import { GraficoBarras } from '@/components/eunenem/admin/estatisticas/GraficoBarras';
+import { ListasSecao } from '@/components/eunenem/admin/estatisticas/ListasSecao';
 import { SaudeSecao } from '@/components/eunenem/admin/estatisticas/SaudeSecao';
 import { TrafegoSecao } from '@/components/eunenem/admin/estatisticas/TrafegoSecao';
 import { VendasSecao } from '@/components/eunenem/admin/estatisticas/VendasSecao';
@@ -103,10 +104,16 @@ function SecaoTrafego({meses}:{meses:MesesPeriodo}) {
   return <Carregando q={q}>{d=><TrafegoSecao data={d}/>}</Carregando>;
 }
 
+function SecaoListas({meses}:{meses:MesesPeriodo}) {
+  const q=trpc.admin.analytics.listas.useQuery({meses},{staleTime:30000});
+  return <Carregando q={q}>{d=><ListasSecao data={d}/>}</Carregando>;
+}
+
 function Secao({secao,meses}:{secao:SecaoEstatisticas;meses:MesesPeriodo}) {
   switch (secao) {
     case 'funil': return <SecaoFunil meses={meses}/>;
     case 'vendas': return <SecaoVendas meses={meses}/>;
+    case 'listas': return <SecaoListas meses={meses}/>;
     case 'trafego': return <SecaoTrafego meses={meses}/>;
     case 'saude': return <SecaoSaude meses={meses}/>;
     default: return <SecaoEmPreparo secao={secao}/>;
