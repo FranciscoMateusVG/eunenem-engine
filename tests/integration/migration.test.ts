@@ -484,6 +484,27 @@ describe('Migration round-trip', () => {
     //    this sequence must start at the LATEST migration and walk earlier.
     //    Adding a new migration on top REQUIRES prepending its down-step here.
 
+    // 076 list cohort range lookup.
+    expect(
+      (
+        await sql<{
+          name: string | null;
+        }>`SELECT to_regclass('campanhas_plataforma_criada_analytics_idx')::text AS name`.execute(
+          db,
+        )
+      ).rows[0]?.name,
+    ).not.toBeNull();
+    expect((await migrator.migrateDown()).error).toBeUndefined();
+    expect(
+      (
+        await sql<{
+          name: string | null;
+        }>`SELECT to_regclass('campanhas_plataforma_criada_analytics_idx')::text AS name`.execute(
+          db,
+        )
+      ).rows[0]?.name,
+    ).toBeNull();
+
     // 075 additive health failure indexes.
     expect(
       (
