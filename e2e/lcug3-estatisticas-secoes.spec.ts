@@ -58,6 +58,24 @@ for (const width of [1280, 375]) {
       );
       await expect(page.getByRole('heading', { name: secao.tab, exact: true })).toBeVisible();
       await expect(page.getByRole('combobox', { name: 'Período mensal' })).toHaveValue('6');
+      if (secao.tab === 'Saúde & erros') {
+        await expect(page.getByTestId('saude-categoria')).toHaveCount(4);
+        await expect(page.getByTestId('saude-mes')).toHaveCount(6);
+        await expect(
+          page.getByTestId('saude-recente').or(page.getByTestId('saude-sem-erros')).first(),
+        ).toBeVisible();
+        await page.screenshot({
+          path: testInfo.outputPath(`lcug3-saude-${width}.png`),
+          fullPage: true,
+        });
+      }
+      if (secao.tab === 'Tráfego') {
+        // Sem credencial de Mixpanel (CI/local) a seção explica o motivo em vez de zeros.
+        await expect(
+          page.getByTestId('trafego-indisponivel').or(page.getByTestId('trafego-mes').first()),
+        ).toBeVisible();
+        await expect(page.getByTestId('trafego-aviso')).toBeVisible();
+      }
       if (secao.tab === 'Vendas') {
         await expect(page.getByTestId('vendas-kpi')).toHaveCount(7);
         await expect(page.getByTestId('vendas-mes')).toHaveCount(6);
