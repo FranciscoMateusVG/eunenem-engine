@@ -241,3 +241,206 @@ it('sales use one approval per payment, gift quantities, gross contribution only
   expect(result.meses[0]?.gmvCents).toBe(0);
   expect(result.semanas.reduce((n, s) => n + s.gmvCents, 0)).toBe(result.totais.gmvCents);
 });
+
+it('health: bounded recent diagnostics, full counts, tenant isolation and current-vs-historical failures', async () => {
+  await expect(caller(false).admin.analytics.saude({ meses: 3 })).rejects.toMatchObject({
+    code: 'FORBIDDEN',
+  });
+  const u = await user('2038-09-01T12:00:00Z');
+  const c = await campaign(u.account);
+  const p = await payment(c, { created: '2038-09-01T12:00:00Z', generated: false });
+  const operation = randomUUID();
+  await t.db
+    .insertInto('payment_provider_operations')
+    .values({
+      operation_id: operation,
+      platform_id: ID_PLATAFORMA_EUNENEM,
+      campaign_id: c,
+      payment_id: p,
+      provider: 'stripe',
+      method: 'credit_card',
+      capability_hash: 'a'.repeat(64),
+      request_hmac: 'b'.repeat(64),
+      request_snapshot: { mustNotLeak: 'private checkout snapshot' },
+      state: 'failed',
+      updated_at: new Date('2038-09-02T12:00:00Z'),
+    })
+    .execute();
+  await t.db
+    .insertInto('payment_provider_operation_attempt_facts')
+    .values({
+      id: randomUUID(),
+      operation_id: operation,
+      attempt_no: 1,
+      fact_kind: 'result',
+      fence_token: randomUUID(),
+      outcome: 'failed',
+      diagnostic:
+        '{"detail":"Provider original failure","authorization":"Bearer private-token","client_secret":"private-secret"}',
+      recorded_at: new Date('2038-09-02T12:00:00Z'),
+    })
+    .execute();
+  const webhook = async (
+    platform: string | null,
+    processed = false,
+    paymentId: string | null = null,
+  ) => {
+    const id = randomUUID();
+    await t.db
+      .insertInto('payment_webhook_events')
+      .values({
+        id,
+        provider_event_id: id,
+        event_type: 'payment_failed',
+        provider: 'inter',
+        ingress_platform_id: platform,
+        pagamento_id: paymentId,
+        raw_payload: { private: 'never expose' },
+        signature_header: 'never expose',
+        signature_valid: true,
+        processing_error: 'Processing failed',
+        received_at: new Date('2038-09-03T12:00:00Z'),
+        processed_at: processed ? new Date('2038-09-04T12:00:00Z') : null,
+      })
+      .execute();
+  };
+  await webhook(ID_PLATAFORMA_EUNENEM);
+  await webhook(null, false, p); // historical ingress, platform proved through payment
+  await webhook(randomUUID(), false, p); // explicit different ingress wins
+  await webhook(null); // unattributed is not ours
+  await webhook(ID_PLATAFORMA_EUNENEM, true); // resolved, no current error
+  const eventId = randomUUID();
+  await t.db
+    .insertInto('lifecycle_email_events')
+    .values({
+      id: eventId,
+      tenant_id: ID_PLATAFORMA_EUNENEM,
+      type: 'welcome',
+      subject_id: u.id,
+      occurred_at: new Date('2038-09-01T12:00:00Z'),
+      snapshot: { private: 'never expose' },
+    })
+    .execute();
+  await t.db
+    .insertInto('lifecycle_email_deliveries')
+    .values({
+      id: randomUUID(),
+      event_id: eventId,
+      tenant_id: ID_PLATAFORMA_EUNENEM,
+      user_id: u.id,
+      type: 'welcome',
+      state: 'unknown',
+      reason: 'smtp_ambiguous',
+      claimed_at: new Date('2038-10-01T02:59:59Z'),
+    })
+    .execute();
+  const result = await caller().admin.analytics.saude({ meses: 3 });
+  expect(result.totais).toEqual({ provedor: 1, webhook: 2, checkout: 1, email: 1 });
+  expect(result.meses[1]?.contagens.email).toBe(1); // Sep SP, uses claim not event
+  expect(result.recentes[0]?.categoria).toBe('email');
+  const message = result.recentes.find((r) => r.categoria === 'provedor')?.mensagem;
+  expect(message).toContain('Provider original failure');
+  expect(message).not.toContain('private-token');
+  expect(message).not.toContain('private-secret');
+  expect(JSON.stringify(result)).not.toContain('never expose');
+  expect(JSON.stringify(result)).not.toContain('private checkout snapshot');
+  // Recovery removes the current checkout problem, but preserves historical provider attempt.
+  await t.db
+    .updateTable('payment_provider_operations')
+    .set({ state: 'reserved' })
+    .where('operation_id', '=', operation)
+    .execute();
+  expect((await caller().admin.analytics.saude({ meses: 3 })).totais).toEqual({
+    provedor: 1,
+    webhook: 2,
+    checkout: 0,
+    email: 1,
+  });
+  for (let i = 0; i < 51; i++) await webhook(ID_PLATAFORMA_EUNENEM);
+  const many = await caller().admin.analytics.saude({ meses: 3 });
+  expect(many.recentes).toHaveLength(50);
+  expect(many.totais.webhook).toBe(53);
+  expect(many.semanas.reduce((n, s) => n + s.contagens.webhook, 0)).toBe(53);
+});
+
+it('health includes Inter payout diagnostics and excludes foreign platform attempts', async () => {
+  const baseline = await caller().admin.analytics.saude({ meses: 3 });
+  const seed = async (platform: string) => {
+    const c = await campaign(randomUUID(), platform);
+    const id = randomUUID();
+    await t.db
+      .insertInto('repasses_recebedor')
+      .values({ id, id_campanha: c, amount_cents: 1000, status: 'falhou', solicitado_em: now })
+      .execute();
+    await t.db
+      .insertInto('repasse_transfer_attempts')
+      .values({
+        id: randomUUID(),
+        repasse_id: id,
+        attempt_no: 1,
+        referencia: id,
+        started_at: new Date('2038-10-19T12:00:00Z'),
+        finished_at: new Date('2038-10-19T12:01:00Z'),
+        operation: 'pagar_pix',
+        outcome: 'falhou',
+        provider_error_body_private: 'Inter: chave inválida [our-auth-redacted]',
+        provider_error_body_truncated: false,
+      })
+      .execute();
+  };
+  await seed(ID_PLATAFORMA_EUNENEM);
+  await seed(randomUUID());
+  const result = await caller().admin.analytics.saude({ meses: 3 });
+  expect(result.totais.provedor - baseline.totais.provedor).toBe(1);
+  expect(result.recentes[0]).toMatchObject({
+    categoria: 'provedor',
+    provedor: 'inter',
+    referencia: { tipo: 'repasse' },
+    mensagem: 'Inter: chave inválida [our-auth-redacted]',
+  });
+});
+
+it('health full detail remains admin/platform scoped while list messages are bounded', async () => {
+  const c = await campaign(randomUUID());
+  const payout = randomUUID();
+  const attempt = randomUUID();
+  const message = 'Provider detail '.repeat(250);
+  await t.db
+    .insertInto('repasses_recebedor')
+    .values({
+      id: payout,
+      id_campanha: c,
+      amount_cents: 1000,
+      status: 'falhou',
+      solicitado_em: now,
+    })
+    .execute();
+  await t.db
+    .insertInto('repasse_transfer_attempts')
+    .values({
+      id: attempt,
+      repasse_id: payout,
+      attempt_no: 1,
+      referencia: payout,
+      started_at: new Date('2038-10-19T15:00:00Z'),
+      operation: 'pagar_pix',
+      outcome: 'falhou',
+      provider_error_body_private: message,
+      provider_error_body_truncated: false,
+    })
+    .execute();
+  const id = `provider-payout:${attempt}`;
+  const recent = (await caller().admin.analytics.saude()).recentes.find((r) => r.id === id);
+  expect(recent?.mensagem).toHaveLength(2048);
+  expect(recent?.truncado).toBe(true);
+  expect((await caller().admin.analytics.saudeDetalhe({ id }))?.mensagem).toBe(message);
+  await expect(caller(false).admin.analytics.saudeDetalhe({ id })).rejects.toMatchObject({
+    code: 'FORBIDDEN',
+  });
+  await t.db
+    .updateTable('campanhas')
+    .set({ id_plataforma: randomUUID() })
+    .where('id', '=', c)
+    .execute();
+  expect(await caller().admin.analytics.saudeDetalhe({ id })).toBeNull();
+});
