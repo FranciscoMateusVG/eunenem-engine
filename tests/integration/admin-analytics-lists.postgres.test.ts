@@ -22,7 +22,7 @@ let secondPayment: string;
 const legacy = { emails: ['legacy@customer.invalid'], completo: true };
 beforeAll(async () => {
   t = await createTestDatabase({ isolated: true });
-});
+}, 60_000);
 afterAll(async () => {
   await t?.teardown();
 });
