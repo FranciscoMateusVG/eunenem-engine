@@ -1,3 +1,4 @@
+import { FaixasPrecoPainel } from "./ExtrasPaineis";
 import { GraficoBarras, type SerieGrafico } from "./GraficoBarras";
 import {
   dinheiro,
@@ -143,6 +144,7 @@ export function VendasSecao({ data }: { data: VendasData }) {
           testId="vendas-pix-mes"
         />
       </section>
+      <FaixasPrecoPainel data={data.faixasPreco} />
     </div>
   );
 }

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { trpc } from "@/lib/trpc.js";
 import { formatInstante } from "../receita/types";
+import { EmailCoberturaPainel } from "./ExtrasPaineis";
 import { GraficoBarras, type SerieGrafico } from "./GraficoBarras";
 import { numero, rotuloBucket, tituloBucket } from "./formato";
 import type { SaudeCategoria, SaudeData, SaudeRecente } from "./types";
@@ -170,6 +171,7 @@ export function SaudeSecao({ data }: { data: SaudeData }) {
           </ol>
         )}
       </section>
+      <EmailCoberturaPainel data={data.emailCobertura} />
     </div>
   );
 }

@@ -71,6 +71,10 @@ const saude = {
       referencia: { tipo: 'repasse', id: '00000000-0000-4000-8000-0000000000bb' },
     },
   ],
+  emailCobertura: {
+    tipos: [],
+    cobertura: { nota: 'NOTA', parcial: true, denominador: 1, observados: 1 },
+  },
 } as unknown as SaudeData;
 
 describe('Saúde & erros', () => {

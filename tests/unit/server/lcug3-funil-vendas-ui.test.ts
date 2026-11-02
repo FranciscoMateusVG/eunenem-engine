@@ -45,6 +45,16 @@ const funil: FunilData = {
     { origem: 'outros', contagens: c(10, 5, 10, 1) },
     { origem: 'desconhecida', contagens: c(40, 25, 45, 4) },
   ],
+  checkout: {
+    operacoes: 0,
+    estados: [],
+    comErro: 0,
+    recuperadasAposErro: 0,
+    percentualRecuperadas: null,
+    comprasLogicas: null,
+    trocasPixCartao: null,
+    cobertura: { nota: 'NOTA', parcial: true, denominador: 1, observados: 1 },
+  },
 } as FunilData;
 
 const metricas = (gmv: number, pix: number, cartao: number) => ({
@@ -64,6 +74,10 @@ const vendas: VendasData = {
   totais: { ...metricas(300_000, 225_000, 75_000), presentes: 0, ticketMedioCents: null },
   meses: meses.map((m) => ({ ...m, ...metricas(100_000, 75_000, 25_000) })),
   semanas: semanas.map((s) => ({ ...s, ...metricas(10_000, 5_000, 5_000) })),
+  faixasPreco: {
+    faixas: [],
+    cobertura: { nota: 'NOTA', parcial: true, denominador: 1, observados: 1 },
+  },
 } as VendasData;
 
 const render = (el: unknown) => renderToStaticMarkup(el) as string;
