@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import { EIXO, MONO } from "../receita/ReceitaPainel";
 
 /**
@@ -55,6 +56,11 @@ export function GraficoBarras({
       : totais),
   );
   const largo = barras.length * (agrupado ? series.length : 1) > 14;
+  // Em telas estreitas o gráfico rola por dentro: abre no período mais recente.
+  const rolagem = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (rolagem.current) rolagem.current.scrollLeft = rolagem.current.scrollWidth;
+  }, [barras.length]);
   return (
     <section
       aria-label={titulo}
@@ -74,7 +80,7 @@ export function GraficoBarras({
           ))}
         </ul>
       ) : null}
-      <div className="relative overflow-x-auto">
+      <div ref={rolagem} className="relative overflow-x-auto">
         <div className={`flex flex-col ${largo ? "min-w-[900px]" : "min-w-[320px]"}`}>
           <ol className="flex h-[200px] items-stretch gap-1.5 sm:gap-3">
             {barras.map((b, i) => {
