@@ -39,6 +39,7 @@ for (const width of [1280, 375]) {
     await expect(page.getByTestId('funil-etapa')).toHaveCount(4);
     await expect(page.getByTestId('funil-mes')).toHaveCount(3);
     await expect(page.getByTestId('funil-origem')).toHaveCount(5);
+    await expect(page.getByRole('region', { name: 'Checkout: perda e recuperação' })).toBeVisible();
     await select.selectOption('6');
     await expect(page).toHaveURL(/\/admin\/estatisticas\?meses=6$/);
     await expect(page.getByTestId('estatisticas-mes')).toHaveCount(6);
@@ -82,6 +83,7 @@ for (const width of [1280, 375]) {
       if (secao.tab === 'Saúde & erros') {
         await expect(page.getByTestId('saude-categoria')).toHaveCount(4);
         await expect(page.getByTestId('saude-mes')).toHaveCount(6);
+        await expect(page.getByRole('region', { name: 'Cobertura de e-mails' })).toBeVisible();
         await expect(
           page.getByTestId('saude-recente').or(page.getByTestId('saude-sem-erros')).first(),
         ).toBeVisible();
@@ -101,6 +103,7 @@ for (const width of [1280, 375]) {
         await expect(page.getByTestId('vendas-kpi')).toHaveCount(7);
         await expect(page.getByTestId('vendas-mes')).toHaveCount(6);
         await expect(page.getByTestId('vendas-pix-mes')).toHaveCount(6);
+        await expect(page.getByTestId('vendas-faixa')).toHaveCount(5);
         await page.screenshot({
           path: testInfo.outputPath(`lcug3-vendas-${width}.png`),
           fullPage: true,

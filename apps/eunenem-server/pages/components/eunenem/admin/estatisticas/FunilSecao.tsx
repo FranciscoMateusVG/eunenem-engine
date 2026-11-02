@@ -1,3 +1,4 @@
+import { CheckoutPainel } from "./ExtrasPaineis";
 import { GraficoBarras, type SerieGrafico } from "./GraficoBarras";
 import { numero, pct, rotuloBucket, textoPct, tituloBucket } from "./formato";
 import type { FunilData, FunilEtapa, FunilOrigem } from "./types";
@@ -123,6 +124,7 @@ export function FunilSecao({ data }: { data: FunilData }) {
           </table>
         </div>
       </section>
+      <CheckoutPainel data={data.checkout} />
     </div>
   );
 }
