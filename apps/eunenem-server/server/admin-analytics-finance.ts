@@ -4,7 +4,7 @@ import { analyticsPeriod, type AnalyticsMonths } from './admin-analytics.js';
 import { analyticsCampaigns, analyticsPayments, coverage, percentile } from './admin-analytics-shared.js';
 
 interface MarginRow { fees: number; reversals: number; cost: number; payments: number; costPayments: number }
-interface PayoutRow { estado: string; valor: number; age: number; requestedHours: number | null; approvedHours: number | null; confirmed: boolean }
+interface PayoutRow { estado: string; valor: number; age: number; acceptedHours: number | null; requestedHours: number | null; approvedHours: number | null; confirmed: boolean }
 interface Exposure {
   medBloqueadoCents: number; medLiberadoCents: number; medDevolvidoCents: number;
   estornosStripeConfirmadosCents: number; devolucoesPixConfirmadasCents: number;
@@ -22,6 +22,7 @@ export async function loadAnalyticsFinanceiro(db: Database, platformId: string, 
     ), payouts AS (
       SELECT r.status AS estado, r.amount_cents::float8 AS valor,
         extract(epoch FROM (${now}::timestamptz-r.solicitado_em))/86400 AS age,
+        extract(epoch FROM (accepted.at-r.solicitado_em))/3600 AS "acceptedHours",
         CASE WHEN paid.at>=r.solicitado_em THEN extract(epoch FROM (paid.at-r.solicitado_em))/3600 END AS "requestedHours",
         CASE WHEN paid.at>=r.aprovado_em THEN extract(epoch FROM (paid.at-r.aprovado_em))/3600 END AS "approvedHours",
         r.status='pago' AS confirmed
@@ -32,6 +33,14 @@ export async function loadAnalyticsFinanceiro(db: Database, platformId: string, 
           (SELECT max(a.finished_at) FROM repasse_transfer_attempts a WHERE a.repasse_id=r.id AND a.outcome='pago' AND a.finished_at<${now})
         ) AS at
       ) paid ON true
+      LEFT JOIN LATERAL (
+        SELECT min(marker.at) AS at FROM (
+          SELECT r.enviado_ao_banco_em AS at
+          UNION ALL
+          SELECT a.finished_at FROM repasse_transfer_attempts a
+          WHERE a.repasse_id=r.id AND a.outcome='aceito_pelo_banco'
+        ) marker WHERE marker.at>=r.solicitado_em AND marker.at<${now}
+      ) accepted ON true
       WHERE r.solicitado_em>=${start} AND r.solicitado_em<${now}
     ), contested AS (
       SELECT m.*, coalesce((SELECT sum(l.amount_cents) FROM lancamentos_financeiros l
@@ -61,6 +70,7 @@ export async function loadAnalyticsFinanceiro(db: Database, platformId: string, 
   const sum=(key:keyof MarginRow)=>result.margins.reduce((n,r)=>n+r[key],0);
   const margins=result.margins.map(r=>r.fees-r.reversals-r.cost);
   const centsPercentile=(p:number)=>{const value=percentile(margins,p);return value===null?null:Math.round(value);};
+  const accepted=result.payouts.flatMap(r=>r.acceptedHours===null?[]:[r.acceptedHours]);
   const requested=result.payouts.flatMap(r=>r.requestedHours===null?[]:[r.requestedHours]);
   const approved=result.payouts.flatMap(r=>r.approvedHours===null?[]:[r.approvedHours]);
   const aging=new Map<string,{estado:string;faixa:'0_2d'|'3_7d'|'8_30d'|'mais_30d';quantidade:number;valorCents:number}>();
@@ -76,7 +86,10 @@ export async function loadAnalyticsFinanceiro(db: Database, platformId: string, 
       p25Cents:centsPercentile(0.25),p50Cents:centsPercentile(0.5),p90Cents:centsPercentile(0.9),listas:result.margins.length,
       pagamentos:sum('payments'),pagamentosComCusto:sum('costPayments'),
       cobertura:coverage('Coorte de pagamentos aprovados no período; margem atual por lista com venda, sem custos fixos. Reversões/custos conhecidos até agora; ausência de tarifa não é custo zero. Não é lucro líquido nem Receita por data de evento.',sum('payments'),sum('costPayments'),true)},
-    repasses:{solicitadoAteTransferido:{p50Horas:percentile(requested,0.5),p95Horas:percentile(requested,0.95),observados:requested.length},
+    repasses:{
+      solicitadoAteAceito:{p50Horas:percentile(accepted,0.5),p95Horas:percentile(accepted,0.95),observados:accepted.length},
+      coberturaAceite:coverage('Coorte por solicitação: primeiro marco registrado de envio/aceite do banco, não confirmação de crédito. Usa enviado_ao_banco_em ou tentativa aceito_pelo_banco concluída; aprovação interna/falha não contam. Aging é desde a solicitação, não tempo no estado atual.',result.payouts.length,accepted.length,true),
+      solicitadoAteTransferido:{p50Horas:percentile(requested,0.5),p95Horas:percentile(requested,0.95),observados:requested.length},
       aprovadoAteTransferido:{p50Horas:percentile(approved,0.5),p95Horas:percentile(approved,0.95),observados:approved.length},
       aging:[...aging.values()].sort((a,b)=>a.estado.localeCompare(b.estado)||a.faixa.localeCompare(b.faixa)),
       confirmadosSemMarco:result.payouts.filter(r=>r.confirmed&&r.requestedHours===null).length,
