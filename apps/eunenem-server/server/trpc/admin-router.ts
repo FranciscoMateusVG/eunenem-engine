@@ -1,3 +1,4 @@
+import { loadAnalyticsFunil, loadAnalyticsVendas } from '../admin-analytics.js';
 import { FinanceiroContestacaoMedError } from "../../../../src/errors/pagamentos/financeiro/contestacao-med.error.js";
 import { ContestacaoInvalidaError, registrarContestacao, resolverContestacao, listarContestacoes } from "../admin-pix-contestacoes.js";
 import { loadEstatisticas } from '../admin-estatisticas.js';
@@ -5016,6 +5017,12 @@ export const adminRouter = t.router({
 
 
   /** Receita EuNeném — taxas da plataforma por evento (aperture-9bpre). */
+  analytics: t.router({
+    funil: adminProcedure.input(z.object({ meses: z.union([z.literal(3), z.literal(6), z.literal(12)]).default(3) }).default({ meses: 3 }))
+      .query(({ ctx, input }) => loadAnalyticsFunil(ctx.deps.db, ID_PLATAFORMA_EUNENEM, ctx.deps.clock(), input.meses)),
+    vendas: adminProcedure.input(z.object({ meses: z.union([z.literal(3), z.literal(6), z.literal(12)]).default(3) }).default({ meses: 3 }))
+      .query(({ ctx, input }) => loadAnalyticsVendas(ctx.deps.db, ID_PLATAFORMA_EUNENEM, ctx.deps.clock(), input.meses)),
+  }),
   estatisticas: adminProcedure.query(({ctx}) => loadEstatisticas(ctx.deps.db, ID_PLATAFORMA_EUNENEM, ctx.deps.clock())),
   receita: receitaRouter,
   despesas: despesasRouter,
