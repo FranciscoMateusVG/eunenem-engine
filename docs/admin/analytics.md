@@ -148,3 +148,28 @@ count. Percentages are 0–100; absent/nonpositive denominators yield null.
   margin, no names. Zero revenue means platform fees minus reversals equals
   zero. Margin share is null when aggregate margin is nonpositive; with negative
   tail margins, a positive top-ten share may exceed 100% (not capped).
+
+## Financeiro
+
+`admin.analytics.financeiro` reuses the active/non-QA current-owner campaign scope.
+
+- Contribution margin uses the **approval cohort of payments in the selected
+  window**, current known fees − reversals − linked BRL provider costs. Per-list
+  percentiles include lists with at least one such payment (zero-sale lists are
+  covered separately by Listas). Money percentiles are rounded to cents. This
+  is not the existing Receita event-date accounting series and not net profit.
+  Missing costs, unlinked provider fees and fixed costs are not invented.
+- Payout timing uses the request cohort: requested→transferred and
+  payout-approved→transferred are distinct distributions. Transfer timestamp
+  requires ledger `transferido_em`, or a finished attempt whose outcome is
+  `pago`; `aprovado_em` alone never proves bank arrival. Paid records without a
+  usable marker are counted separately. Aging includes only currently nonpaid,
+  noncancelled payouts in the request cohort. Manual confirmation can be late.
+- MED is grouped by occurrence cohort and current status. Stripe/Pix refunds
+  are grouped by record-creation cohort and confirmed current outcome. MED,
+  refunds and prior transferred payment amounts can overlap; never sum them as
+  unique loss/exposure. Transferred amount is the actual receiver ledger total
+  of the contested payment, not a capped net-loss estimate. Recovery **by the
+  platform** remains null: refund to payer, released MED reserve and collection
+  from a creator are not equivalent. There is no complete chargeback/receipt
+  event history; absence of a recorded case is not proof of no exposure.

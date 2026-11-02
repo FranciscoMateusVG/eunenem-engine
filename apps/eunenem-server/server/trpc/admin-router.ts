@@ -1,3 +1,4 @@
+import { loadAnalyticsFinanceiro } from '../admin-analytics-finance.js';
 import { loadAnalyticsListas } from '../admin-analytics-lists.js';
 import { loadAnalyticsSaude } from '../admin-analytics-health.js';
 import { loadAnalyticsFunil, loadAnalyticsVendas } from '../admin-analytics.js';
@@ -5020,6 +5021,8 @@ export const adminRouter = t.router({
 
   /** Receita EuNeném — taxas da plataforma por evento (aperture-9bpre). */
   analytics: t.router({
+    financeiro: adminProcedure.input(z.object({ meses: z.union([z.literal(3), z.literal(6), z.literal(12)]).default(3) }).default({ meses: 3 }))
+      .query(({ ctx, input }) => loadAnalyticsFinanceiro(ctx.deps.db, ID_PLATAFORMA_EUNENEM, ctx.deps.clock(), input.meses)),
     listas: adminProcedure.input(z.object({ meses: z.union([z.literal(3), z.literal(6), z.literal(12)]).default(3) }).default({ meses: 3 }))
       .query(({ ctx, input }) => loadAnalyticsListas(ctx.deps.db, ID_PLATAFORMA_EUNENEM, ctx.deps.clock(), input.meses)),
     saudeDetalhe: adminProcedure.input(z.object({ id: z.string().regex(/^(provider-checkout|provider-payout|webhook|checkout|email):[0-9a-f-]{36}$/) }))
