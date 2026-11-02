@@ -29,6 +29,14 @@ export function textoHoras(h: number | null): string {
   return h < 48 ? `${numero(h)} h` : `${numero(Math.round((h / 24) * 10) / 10)} dias`;
 }
 
+/** Prazo estrito (crédito confirmado): sem confirmações observadas, "não medido". */
+export function horasOuNaoMedido(
+  m: { p50Horas: number | null; p95Horas: number | null; observados: number },
+  campo: "p50Horas" | "p95Horas" = "p50Horas",
+): string {
+  return m.observados === 0 ? "não medido" : textoHoras(m[campo]);
+}
+
 const rotuloEstado = (estado: string) =>
   (REPASSE_STATUS_LABEL as Record<string, string>)[estado] ?? estado;
 
@@ -96,13 +104,26 @@ export function FinanceiroSecao({ data }: { data: FinanceiroData }) {
 
       <Bloco
         titulo="Prazo de repasse"
-        explicacao="Tempo entre o pedido (ou a aprovação) do repasse e a transferência, e repasses ainda abertos por idade."
+        explicacao="Quanto tempo o banco leva para aceitar um repasse depois do pedido, e repasses ainda abertos por idade."
       >
+        <div className="grid grid-cols-2 gap-3">
+          <Kpi
+            rotulo="Prazo até o banco aceitar"
+            valor={textoHoras(r.solicitadoAteAceito.p50Horas)}
+            detalhe={`mediana · ${numero(r.solicitadoAteAceito.observados)} repasses · aceite do banco, não confirmação de crédito`}
+          />
+          <Kpi
+            rotulo="Até o banco aceitar · p95"
+            valor={textoHoras(r.solicitadoAteAceito.p95Horas)}
+            detalhe="95% são aceitos até aqui"
+          />
+        </div>
+        <CoberturaNota cobertura={r.coberturaAceite} unidade="repasses" />
         <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-          <Kpi rotulo="Pedido → transferência" valor={textoHoras(r.solicitadoAteTransferido.p50Horas)} detalhe={`mediana · ${numero(r.solicitadoAteTransferido.observados)} repasses`} />
-          <Kpi rotulo="Pedido → transferência · p95" valor={textoHoras(r.solicitadoAteTransferido.p95Horas)} detalhe="95% chegam até aqui" />
-          <Kpi rotulo="Aprovação → transferência" valor={textoHoras(r.aprovadoAteTransferido.p50Horas)} detalhe={`mediana · ${numero(r.aprovadoAteTransferido.observados)} repasses`} />
-          <Kpi rotulo="Aprovação → transferência · p95" valor={textoHoras(r.aprovadoAteTransferido.p95Horas)} detalhe="95% chegam até aqui" />
+          <Kpi rotulo="Pedido → crédito confirmado" valor={horasOuNaoMedido(r.solicitadoAteTransferido)} detalhe={`mediana · ${numero(r.solicitadoAteTransferido.observados)} confirmados`} />
+          <Kpi rotulo="Pedido → crédito · p95" valor={horasOuNaoMedido(r.solicitadoAteTransferido, "p95Horas")} detalhe="95% chegam até aqui" />
+          <Kpi rotulo="Aprovação → crédito confirmado" valor={horasOuNaoMedido(r.aprovadoAteTransferido)} detalhe={`mediana · ${numero(r.aprovadoAteTransferido.observados)} confirmados`} />
+          <Kpi rotulo="Aprovação → crédito · p95" valor={horasOuNaoMedido(r.aprovadoAteTransferido, "p95Horas")} detalhe="95% chegam até aqui" />
         </div>
         {estados.length === 0 ? (
           <p data-testid="financeiro-sem-abertos" className="text-sm text-ink-soft">
