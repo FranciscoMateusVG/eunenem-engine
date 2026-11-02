@@ -109,11 +109,11 @@ export function FunilSecao({ data }: { data: FunilData }) {
                   </th>
                   {data.etapas.map((e) => (
                     <td key={e} className="py-2 pl-3 text-right tabular-nums">
-                      {numero(o.contagens[e])}
+                      <div>{numero(o.contagens[e])}</div>
                       {e !== "cadastro" ? (
-                        <span className="ml-1 font-mono text-[11px] text-ink-mute">
-                          {textoPct(pct(o.contagens[e], o.contagens.cadastro))}
-                        </span>
+                        <div className="font-mono text-[11px] text-ink-mute">
+                          {textoPct(pct(o.contagens[e], o.contagens.cadastro))} dos cadastros
+                        </div>
                       ) : null}
                     </td>
                   ))}

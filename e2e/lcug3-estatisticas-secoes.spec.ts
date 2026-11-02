@@ -70,6 +70,15 @@ for (const width of [1280, 375]) {
           fullPage: true,
         });
       }
+      if (secao.tab === 'Financeiro') {
+        await expect(page.getByTestId('financeiro-kpi').first()).toBeVisible();
+        await expect(page.getByTestId('financeiro-exposicao')).toHaveCount(7);
+        await expect(page.getByText('não medido').first()).toBeVisible();
+        await page.screenshot({
+          path: testInfo.outputPath(`lcug3-financeiro-${width}.png`),
+          fullPage: true,
+        });
+      }
       if (secao.tab === 'Saúde & erros') {
         await expect(page.getByTestId('saude-categoria')).toHaveCount(4);
         await expect(page.getByTestId('saude-mes')).toHaveCount(6);
