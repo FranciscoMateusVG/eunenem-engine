@@ -3,6 +3,7 @@ import { AdminShell } from '@/components/eunenem/admin/AdminShell';
 import { EstatisticasTabs, PeriodoSelect } from '@/components/eunenem/admin/estatisticas/EstatisticasNav';
 import { FunilSecao } from '@/components/eunenem/admin/estatisticas/FunilSecao';
 import { GraficoBarras } from '@/components/eunenem/admin/estatisticas/GraficoBarras';
+import { FinanceiroSecao } from '@/components/eunenem/admin/estatisticas/FinanceiroSecao';
 import { ListasSecao } from '@/components/eunenem/admin/estatisticas/ListasSecao';
 import { SaudeSecao } from '@/components/eunenem/admin/estatisticas/SaudeSecao';
 import { TrafegoSecao } from '@/components/eunenem/admin/estatisticas/TrafegoSecao';
@@ -65,12 +66,6 @@ export function EstatisticasLayout({secao,meses,onMeses,children}:{secao:SecaoEs
   </section>;
 }
 
-function SecaoEmPreparo({secao}:{secao:SecaoEstatisticas}) {
-  return <p role="status" data-testid="estatisticas-em-preparo" className="rounded-lg border border-dashed border-line p-6 text-sm text-ink-soft">
-    Esta seção ({DESCRICAO[secao].toLowerCase()}) ainda está sendo preparada.
-  </p>;
-}
-
 function Carregando<T>({q,children}:{q:{error:{message:string}|null;data:T|undefined};children:(data:T)=>ReactNode}) {
   if (q.error) return <p role="alert" className="rounded-md border border-red-200 bg-red-50 p-4 text-red-800">Não foi possível carregar as estatísticas. {q.error.message}</p>;
   if (q.data===undefined) return <p role="status">Carregando estatísticas…</p>;
@@ -109,14 +104,19 @@ function SecaoListas({meses}:{meses:MesesPeriodo}) {
   return <Carregando q={q}>{d=><ListasSecao data={d}/>}</Carregando>;
 }
 
+function SecaoFinanceiro({meses}:{meses:MesesPeriodo}) {
+  const q=trpc.admin.analytics.financeiro.useQuery({meses},{staleTime:30000});
+  return <Carregando q={q}>{d=><FinanceiroSecao data={d}/>}</Carregando>;
+}
+
 function Secao({secao,meses}:{secao:SecaoEstatisticas;meses:MesesPeriodo}) {
   switch (secao) {
     case 'funil': return <SecaoFunil meses={meses}/>;
     case 'vendas': return <SecaoVendas meses={meses}/>;
     case 'listas': return <SecaoListas meses={meses}/>;
+    case 'financeiro': return <SecaoFinanceiro meses={meses}/>;
     case 'trafego': return <SecaoTrafego meses={meses}/>;
     case 'saude': return <SecaoSaude meses={meses}/>;
-    default: return <SecaoEmPreparo secao={secao}/>;
   }
 }
 
