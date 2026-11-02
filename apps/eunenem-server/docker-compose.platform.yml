@@ -32,6 +32,11 @@ services:
       start_period: 30s
     environment:
       NODE_ENV: production
+      # Admin Mixpanel read API — private runtime credentials, never build args/client env.
+      MIXPANEL_PROJECT_ID: ${MIXPANEL_PROJECT_ID:-}
+      MIXPANEL_SERVICE_ACCOUNT_USERNAME: ${MIXPANEL_SERVICE_ACCOUNT_USERNAME:-}
+      MIXPANEL_SERVICE_ACCOUNT_SECRET: ${MIXPANEL_SERVICE_ACCOUNT_SECRET:-}
+      MIXPANEL_API_REGION: ${MIXPANEL_API_REGION:-US}
       PORT: "3001"
       APP_NAME: ${APP_NAME:-eunenem}
       DATABASE_URL: ${DATABASE_URL:-}

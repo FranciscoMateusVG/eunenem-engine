@@ -484,6 +484,65 @@ describe('Migration round-trip', () => {
     //    this sequence must start at the LATEST migration and walk earlier.
     //    Adding a new migration on top REQUIRES prepending its down-step here.
 
+    // 076 list cohort range lookup.
+    expect(
+      (
+        await sql<{
+          name: string | null;
+        }>`SELECT to_regclass('campanhas_plataforma_criada_analytics_idx')::text AS name`.execute(
+          db,
+        )
+      ).rows[0]?.name,
+    ).not.toBeNull();
+    expect((await migrator.migrateDown()).error).toBeUndefined();
+    expect(
+      (
+        await sql<{
+          name: string | null;
+        }>`SELECT to_regclass('campanhas_plataforma_criada_analytics_idx')::text AS name`.execute(
+          db,
+        )
+      ).rows[0]?.name,
+    ).toBeNull();
+
+    // 075 additive health failure indexes.
+    expect(
+      (
+        await sql<{
+          name: string | null;
+        }>`SELECT to_regclass('provider_attempt_failures_analytics_idx')::text AS name`.execute(db)
+      ).rows[0]?.name,
+    ).not.toBeNull();
+    expect((await migrator.migrateDown()).error).toBeUndefined();
+    expect(
+      (
+        await sql<{
+          name: string | null;
+        }>`SELECT to_regclass('provider_attempt_failures_analytics_idx')::text AS name`.execute(db)
+      ).rows[0]?.name,
+    ).toBeNull();
+
+    // 074 additive analytics lookup indexes.
+    expect(
+      (
+        await sql<{
+          name: string | null;
+        }>`SELECT to_regclass('lancamentos_pagamento_aprovacao_analytics_idx')::text AS name`.execute(
+          db,
+        )
+      ).rows[0]?.name,
+    ).not.toBeNull();
+    expect((await migrator.migrateDown()).error).toBeUndefined();
+    expect(
+      (
+        await sql<{
+          name: string | null;
+        }>`SELECT to_regclass('lancamentos_pagamento_aprovacao_analytics_idx')::text AS name`.execute(
+          db,
+        )
+      ).rows[0]?.name,
+    ).toBeNull();
+
     expect((await getColumn(db, 'contribuicoes', 'arquivada_em'))?.is_nullable).toBe('YES');
     expect((await migrator.migrateDown()).error).toBeUndefined();
     expect(await getColumn(db, 'contribuicoes', 'arquivada_em')).toBeUndefined();
