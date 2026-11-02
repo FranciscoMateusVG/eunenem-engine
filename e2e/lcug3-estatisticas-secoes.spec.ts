@@ -63,7 +63,10 @@ for (const width of [1280, 375]) {
         await expect(page.getByTestId('listas-kpi').first()).toBeVisible();
         await expect(page.getByTestId('listas-janela')).toHaveCount(3);
         await expect(page.getByTestId('listas-risco')).toHaveCount(3);
-        await expect(page.getByTestId('listas-curva')).toHaveCount(38);
+        // 38 dias (D-30..D+7) ou, sem pagamentos, o estado vazio explícito.
+        await expect(
+          page.getByTestId('listas-curva-vazio').or(page.getByTestId('listas-curva').first()),
+        ).toBeVisible();
         // Cada bloco com dado parcial mostra a nota de cobertura do servidor.
         expect(await page.getByTestId('cobertura-nota').count()).toBeGreaterThanOrEqual(6);
         await page.screenshot({

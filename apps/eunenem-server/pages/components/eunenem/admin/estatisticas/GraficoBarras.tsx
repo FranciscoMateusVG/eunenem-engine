@@ -36,6 +36,7 @@ export function GraficoBarras({
   formatar,
   testId,
   agrupado = false,
+  vazio,
 }: {
   titulo: string;
   explicacao: string;
@@ -45,6 +46,8 @@ export function GraficoBarras({
   testId?: string;
   /** Barras lado a lado por série (séries que se sobrepõem, ex.: etapas do funil). */
   agrupado?: boolean;
+  /** Texto quando nenhuma barra tem valor; sem ele, o eixo vazio é desenhado. */
+  vazio?: string;
 }) {
   const totais = barras.map((b) =>
     series.reduce((n, s) => n + Math.max(0, b.valores[s.chave] ?? 0), 0),
@@ -84,7 +87,12 @@ export function GraficoBarras({
           ))}
         </ul>
       ) : null}
-      <div ref={rolagem} className="relative overflow-x-auto">
+{vazio && totais.every((t) => t === 0) ? (
+        <p data-testid={testId ? `${testId}-vazio` : undefined} className="rounded-md border border-dashed border-line p-6 text-center text-sm text-ink-soft">
+          {vazio}
+        </p>
+      ) : (
+            <div ref={rolagem} className="relative overflow-x-auto">
         <div className={`flex flex-col ${largo ? "min-w-[900px]" : "min-w-[320px]"}`}>
           <ol className="flex h-[200px] items-stretch gap-1.5 sm:gap-3">
             {barras.map((b, i) => {
@@ -175,6 +183,7 @@ export function GraficoBarras({
           </div>
         </div>
       </div>
+      )}
     </section>
   );
 }
