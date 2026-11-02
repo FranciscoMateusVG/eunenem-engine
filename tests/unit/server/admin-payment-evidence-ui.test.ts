@@ -7,6 +7,7 @@ import {
   paymentEvidenceSearchInput,
   ReferenceResolutionNotice,
   UnmatchedPaymentEvidenceTable,
+  validPaymentDay,
 } from '../../../apps/eunenem-server/pages/AdminPagamentosPage.js';
 
 const appRequire = createRequire(`${process.cwd()}/apps/eunenem-server/package.json`);
@@ -257,6 +258,7 @@ describe('PaymentEvidenceFilters', () => {
     const tree = PaymentEvidenceFilters({
       provider: null,
       status: null,
+      day: '2026-09-08',
       search: {
         payerQuery: 'Dana',
         campaignQuery: 'lista-francisco',
@@ -264,6 +266,7 @@ describe('PaymentEvidenceFilters', () => {
       },
       onProviderChange: () => undefined,
       onStatusChange: () => undefined,
+      onDayChange: () => undefined,
       onSearchChange,
       onClearSearch,
     });
@@ -280,6 +283,8 @@ describe('PaymentEvidenceFilters', () => {
     expect(html.match(/min-h-11/g)?.length).toBeGreaterThanOrEqual(6);
     expect(html).toContain('min-w-0');
     expect(html).toContain('Limpar buscas');
+    expect(html).toContain('type="date"');
+    expect(html).toContain('value="2026-09-08"');
 
     const payer = findElement(
       tree,
@@ -296,6 +301,12 @@ describe('PaymentEvidenceFilters', () => {
     expect(clear?.disabled).toBe(false);
     (clear?.onClick as () => void)();
     expect(onClearSearch).toHaveBeenCalledOnce();
+  });
+
+  it('ignores invalid day values', () => {
+    expect(validPaymentDay('2026-09-08')).toBe('2026-09-08');
+    expect(validPaymentDay('2026-02-30')).toBe('');
+    expect(validPaymentDay('08/09/2026')).toBe('');
   });
 
   it('normalizes searches into the exact listEvidencePaginated input names', () => {
