@@ -34,6 +34,7 @@ export function GraficoBarras({
   barras,
   formatar,
   testId,
+  agrupado = false,
 }: {
   titulo: string;
   explicacao: string;
@@ -41,12 +42,19 @@ export function GraficoBarras({
   barras: readonly BarraGrafico[];
   formatar: (n: number) => string;
   testId?: string;
+  /** Barras lado a lado por série (séries que se sobrepõem, ex.: etapas do funil). */
+  agrupado?: boolean;
 }) {
   const totais = barras.map((b) =>
     series.reduce((n, s) => n + Math.max(0, b.valores[s.chave] ?? 0), 0),
   );
-  const max = Math.max(1, ...totais);
-  const largo = barras.length > 14;
+  const max = Math.max(
+    1,
+    ...(agrupado
+      ? barras.flatMap((b) => series.map((s) => b.valores[s.chave] ?? 0))
+      : totais),
+  );
+  const largo = barras.length * (agrupado ? series.length : 1) > 14;
   return (
     <section
       aria-label={titulo}
@@ -70,7 +78,7 @@ export function GraficoBarras({
         <div className={`flex flex-col ${largo ? "min-w-[900px]" : "min-w-[320px]"}`}>
           <ol className="flex h-[200px] items-stretch gap-1.5 sm:gap-3">
             {barras.map((b, i) => {
-              const medido = series.some((s) => b.valores[s.chave] !== null);
+              const medido = series.some((s) => b.valores[s.chave] != null);
               return (
                 <li
                   key={b.chave}
@@ -80,6 +88,34 @@ export function GraficoBarras({
                   aria-label={b.titulo}
                   className="flex min-w-0 flex-1 flex-col items-center justify-end gap-1"
                 >
+                  {agrupado ? (
+                    <div aria-hidden className="flex h-full w-full items-end justify-center gap-0.5">
+                      {series.map((s) => {
+                        const v = b.valores[s.chave];
+                        return (
+                          <div
+                            key={s.chave}
+                            data-serie={s.chave}
+                            className="flex h-full min-w-0 max-w-[28px] flex-1 flex-col items-center justify-end gap-0.5"
+                          >
+                            {/* Muitos grupos: os valores ficam só no detalhe da barra. */}
+                            {barras.length <= 14 ? (
+                              <span className="font-mono text-[9px] text-ink-mute">
+                                {v == null ? "—" : formatar(v)}
+                              </span>
+                            ) : null}
+                            <div
+                              className={`w-full rounded-t-[2px] ${b.parcial ? s.corParcial : s.cor} ${
+                                (v ?? 0) > 0 ? "min-h-[2px]" : ""
+                              }`}
+                              style={{ height: `${(((v ?? 0) / max) * 80).toFixed(2)}%` }}
+                            />
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <>
                   <span
                     className={`whitespace-nowrap font-mono text-[10px] ${
                       b.parcial ? "text-ink-mute" : "text-ink"
@@ -107,6 +143,8 @@ export function GraficoBarras({
                       );
                     })}
                   </div>
+                    </>
+                  )}
                 </li>
               );
             })}

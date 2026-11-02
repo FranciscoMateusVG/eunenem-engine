@@ -4,7 +4,7 @@
 // viaja como `?meses=` para sobreviver à troca de aba; 3 é o default e não
 // aparece na URL.
 
-export type SecaoEstatisticas = "funil" | "vendas" | "trafego" | "saude";
+export type SecaoEstatisticas = "funil" | "vendas" | "listas" | "financeiro" | "trafego" | "saude";
 export type MesesPeriodo = 3 | 6 | 12;
 
 export const MESES_OPCOES: readonly MesesPeriodo[] = [3, 6, 12];
@@ -13,6 +13,8 @@ export const MESES_PADRAO: MesesPeriodo = 3;
 export const SECOES: ReadonlyArray<{ key: SecaoEstatisticas; label: string; path: string }> = [
   { key: "funil", label: "Funil", path: "/admin/estatisticas" },
   { key: "vendas", label: "Vendas", path: "/admin/estatisticas/vendas" },
+  { key: "listas", label: "Listas", path: "/admin/estatisticas/listas" },
+  { key: "financeiro", label: "Financeiro", path: "/admin/estatisticas/financeiro" },
   { key: "trafego", label: "Tráfego", path: "/admin/estatisticas/trafego" },
   { key: "saude", label: "Saúde & erros", path: "/admin/estatisticas/saude" },
 ];
