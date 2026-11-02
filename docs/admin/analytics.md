@@ -111,3 +111,40 @@ all 3/6/12 selectors: 20-minute success TTL, 5-minute failure TTL. No upstream
 errors/auth/URLs/raw source strings are surfaced. Failure returns `disponivel:
 false` with a safe Portuguese reason (zero placeholders are not observed data).
 Cache is process-local; multiple server instances have independent limits.
+
+## Listas
+
+`admin.analytics.listas` uses lists **created in the selected window**, with at
+least one currently active, non-QA administrator under the same explicit
+exclusions as Estatísticas. An ownerless/QA-only list is not silently classified
+as a new customer. First-touch origin uses the earliest eligible administrator
+(by registration/id); legacy is `sim` if any eligible administrator matches the
+existing private legacy snapshot, `nao` only with a configured complete snapshot,
+otherwise `desconhecido`. Cohort origin×legacy partitions are disjoint; no
+identity/name/email is returned. This is current ownership, not creator history.
+
+Each metric supplies a Portuguese `cobertura` label, denominator and observed
+count. Percentages are 0–100; absent/nonpositive denominators yield null.
+
+- First gift: earliest platform-fee ledger approval, never payment updated_at.
+  Median/p90 are conditional on having a first payment. Unpaid lists remain in
+  totals. D7/14/30 rates include only lists at least that old; horizons are
+  elapsed 24-hour days with half-open `[creation, creation + D)` windows.
+- Monthly cohorts: D7/30/60 exclude immature lists, report their count, and use
+  gross approved gift GMV. Observed margin = platform fees minus cancellations
+  and matched BRL cost events inside the horizon. Costs observed later remain
+  eligible when their occurrence is inside the horizon; all facts must be known
+  by the snapshot. Missing cost observations are unknown, never proof of zero
+  fees. No fixed-cost allocation, no net-profit claim.
+- Payers: normalized nonempty contributor email from approved payments. Global
+  unique/repeat counts across selected lists; per-list p50/p90 include zero
+  lists. A repeat means >1 approved payment, not a proven unique human.
+- Risk: disjoint event-distance bins 0–3/4–7/8–14 days; no first payment and no
+  payment in the last seven elapsed days are independent, overlapping labels.
+  Uses current `eventos.data_hora`; missing event dates excluded and counted.
+- Curve: zero-filled D−30…D+7 on São Paulo calendar dates relative to the current
+  event date. Date edits have no history and future windows are incomplete.
+- Concentration: top-ten list shares of gross GMV and observed contribution
+  margin, no names. Zero revenue means platform fees minus reversals equals
+  zero. Margin share is null when aggregate margin is nonpositive; with negative
+  tail margins, a positive top-ten share may exceed 100% (not capped).
