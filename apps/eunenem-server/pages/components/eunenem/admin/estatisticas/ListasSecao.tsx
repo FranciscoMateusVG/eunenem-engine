@@ -98,6 +98,13 @@ function TabelaCoortes({ titulo, linhas }: { titulo: string; linhas: ReadonlyArr
           </tr>
         </thead>
         <tbody>
+          {linhas.length === 0 ? (
+            <tr>
+              <td colSpan={HORIZONTES.length + 1} className="py-3 text-ink-mute">
+                Sem listas no período.
+              </td>
+            </tr>
+          ) : null}
           {linhas.map((l) => (
             <tr key={l.chave} data-testid="listas-coorte" className="border-b border-line/60 align-top">
               <th scope="row" className="py-2 pr-3 text-left font-medium">
@@ -242,7 +249,8 @@ export function ListasSecao({ data }: { data: ListasData }) {
             const rotulo = d.diaRelativo === 0 ? "D0" : d.diaRelativo > 0 ? `D+${d.diaRelativo}` : `D${d.diaRelativo}`;
             return {
               chave: String(d.diaRelativo),
-              rotulo,
+              // Com 38 dias, só D0, D+7 e múltiplos de 5 ganham rótulo no eixo.
+              rotulo: d.diaRelativo % 5 === 0 || d.diaRelativo === 7 ? rotulo : "",
               titulo: `${rotulo}: ${numero(d.pagamentos)} pagamentos · ${dinheiro(d.gmvCents)}`,
               parcial: false,
               valores: { pagamentos: d.pagamentos },
