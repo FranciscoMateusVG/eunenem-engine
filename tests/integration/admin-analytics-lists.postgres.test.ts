@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, expect, it } from 'vitest';
+import { loadAnalyticsFinanceiro } from '../../apps/eunenem-server/server/admin-analytics-finance.js';
 import { loadAnalyticsListas } from '../../apps/eunenem-server/server/admin-analytics-lists.js';
 import type { TrpcContext } from '../../apps/eunenem-server/server/trpc/context.js';
 import { appRouter } from '../../apps/eunenem-server/server/trpc/router.js';
@@ -11,6 +12,8 @@ let t: TestDatabase;
 const now = new Date('2039-10-20T12:00:00Z');
 const platform = ID_PLATAFORMA_EUNENEM;
 let first: string;
+let firstPayment: string;
+let secondPayment: string;
 const legacy = { emails: ['legacy@customer.invalid'], completo: true };
 beforeAll(async () => {
   t = await createTestDatabase({ isolated: true });
@@ -143,17 +146,18 @@ async function paid(
         source: 'fixture',
       })
       .execute();
+  return id;
 }
 it('Listas uses mature cohorts, ledger time, zero lists, email coverage and disjoint origin/legacy groups', async () => {
   first = await list('2039-08-01T12:00:00Z', 'legacy@customer.invalid', '2039-10-22T12:00:00Z');
-  await paid(
+  firstPayment = await paid(
     first,
     '2039-08-08T12:00:00Z',
     ' PAYER@customer.invalid ',
     true,
     '2039-09-15T12:00:00Z',
   );
-  await paid(first, '2039-08-31T12:00:00Z', 'payer@customer.invalid');
+  secondPayment = await paid(first, '2039-08-31T12:00:00Z', 'payer@customer.invalid');
   await list('2039-09-01T12:00:00Z', 'new@customer.invalid', '2039-10-25T12:00:00Z');
   const immature = await list('2039-10-19T12:00:00Z', 'recent@customer.invalid');
   await paid(immature, '2039-10-19T12:00:00Z', null);
@@ -269,4 +273,148 @@ it('event curve uses current SP calendar date and labels edits/unknown legacy/em
   await expect(caller.admin.analytics.listas({ meses: 3 })).rejects.toMatchObject({
     code: 'FORBIDDEN',
   });
+});
+
+it('Financeiro separates observed margin, real payout evidence and overlapping refund/MED amounts', async () => {
+  const payout = randomUUID();
+  await t.db
+    .insertInto('repasses_recebedor')
+    .values({
+      id: payout,
+      id_campanha: first,
+      amount_cents: 1000,
+      status: 'pago',
+      solicitado_em: new Date('2039-10-10T12:00:00Z'),
+      aprovado_em: new Date('2039-10-11T12:00:00Z'),
+    })
+    .execute();
+  const item = await t.db
+    .selectFrom('intencao_items')
+    .select(['id', 'id_contribuicao'])
+    .where('id_pagamento', '=', firstPayment)
+    .executeTakeFirstOrThrow();
+  if (!item.id_contribuicao) throw new Error('fixture requires gift');
+  await t.db
+    .insertInto('lancamentos_financeiros')
+    .values({
+      id: randomUUID(),
+      id_pagamento: firstPayment,
+      id_item_pagamento: item.id,
+      id_contribuicao: item.id_contribuicao,
+      id_campanha: first,
+      id_repasse: payout,
+      tipo: 'credito_saldo_recebedor',
+      amount_cents: 1000,
+      criado_em: new Date('2039-08-08T12:00:00Z'),
+      transferido_em: new Date('2039-10-12T12:00:00Z'),
+    })
+    .execute();
+  await t.db
+    .insertInto('repasses_recebedor')
+    .values({
+      id: randomUUID(),
+      id_campanha: first,
+      amount_cents: 400,
+      status: 'aprovado',
+      solicitado_em: new Date('2039-10-05T12:00:00Z'),
+      aprovado_em: new Date('2039-10-06T12:00:00Z'),
+    })
+    .execute();
+  await t.db
+    .insertInto('repasses_recebedor')
+    .values({
+      id: randomUUID(),
+      id_campanha: first,
+      amount_cents: 200,
+      status: 'pago',
+      solicitado_em: new Date('2039-10-10T12:00:00Z'),
+      aprovado_em: new Date('2039-10-11T12:00:00Z'),
+    })
+    .execute();
+  await t.db
+    .insertInto('pix_contestacoes')
+    .values({
+      id: randomUUID(),
+      id_pagamento: firstPayment,
+      valor_cents: 500,
+      estado: 'bloqueada',
+      ocorrida_em: new Date('2039-10-15T12:00:00Z'),
+      criado_por: 'fixture',
+    })
+    .execute();
+  await t.db
+    .insertInto('pix_cobranca_devolucoes')
+    .values({
+      id: randomUUID(),
+      id_pagamento: firstPayment,
+      e2e_id: 'A'.repeat(32),
+      id_devolucao: 'B'.repeat(26),
+      amount_cents: 100,
+      status: 'devolvida',
+      criado_em: new Date('2039-10-16T12:00:00Z'),
+    })
+    .execute();
+  await t.db
+    .insertInto('stripe_refund_operations')
+    .values({
+      operation_id: randomUUID(),
+      payment_id: secondPayment,
+      origin: 'webhook',
+      amount_cents: 200,
+      currency: 'brl',
+      charge_ref: 'ch_fixture',
+      reason: 'requested_by_customer',
+      state: 'provider_succeeded',
+      provider_status: 'succeeded',
+      provider_result_at: new Date('2039-10-16T12:00:00Z'),
+      created_at: new Date('2039-10-15T12:00:00Z'),
+    })
+    .execute();
+  const result = await loadAnalyticsFinanceiro(t.db, platform, now, 3);
+  expect(result.margem).toMatchObject({
+    taxasCents: 300,
+    reversoesCents: 100,
+    custosCents: 30,
+    margemContribuicaoCents: 170,
+    listas: 2,
+    pagamentos: 3,
+    pagamentosComCusto: 1,
+    p25Cents: 78,
+    p50Cents: 85,
+    p90Cents: 97,
+  });
+  expect(result.repasses.solicitadoAteTransferido).toEqual({
+    p50Horas: 48,
+    p95Horas: 48,
+    observados: 1,
+  });
+  expect(result.repasses.aprovadoAteTransferido).toEqual({
+    p50Horas: 24,
+    p95Horas: 24,
+    observados: 1,
+  });
+  expect(result.repasses.confirmadosSemMarco).toBe(1);
+  expect(result.repasses.aging).toEqual([
+    { estado: 'aprovado', faixa: '8_30d', quantidade: 1, valorCents: 400 },
+  ]);
+  expect(result.exposicao).toMatchObject({
+    medBloqueadoCents: 500,
+    medLiberadoCents: 0,
+    medDevolvidoCents: 0,
+    estornosStripeConfirmadosCents: 200,
+    devolucoesPixConfirmadasCents: 100,
+    jaRepassadoEmPagamentosContestadosCents: 1000,
+    recuperadoPelaPlataformaCents: null,
+    cobertura: { parcial: true },
+  });
+  const empty = await loadAnalyticsFinanceiro(t.db, randomUUID(), now, 3);
+  expect(empty.margem.p50Cents).toBeNull();
+  expect(empty.exposicao.medBloqueadoCents).toBe(0);
+  const auth = adminAuthOverrides();
+  const caller = appRouter.createCaller({
+    headers: auth.headers,
+    resHeaders: new Headers(),
+    deps: { ...auth.depsOverrides, db: t.db, clock: () => now, adminAllowedEmails: new Set() },
+  } as unknown as TrpcContext);
+  await expect(caller.admin.analytics.financeiro()).rejects.toMatchObject({ code: 'FORBIDDEN' });
 });
