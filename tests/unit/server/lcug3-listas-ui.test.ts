@@ -115,6 +115,45 @@ describe('Listas', () => {
     expect(html).toContain('6 de 10 listas com o dado');
   });
 
+  it('turmas e concentração (margem, sem custos fixos) sempre como dado parcial', () => {
+    const completo = {
+      nota: 'NOTA-MARGEM-COMPLETA',
+      parcial: false,
+      denominador: 5,
+      observados: 5,
+    };
+    const h = renderToStaticMarkup(
+      React.createElement(ListasSecao, {
+        data: {
+          ...data,
+          coberturaCoortes: completo,
+          concentracao: { ...data.concentracao, cobertura: completo },
+        },
+      }),
+    ) as string;
+    const notas = h.match(
+      /data-parcial="true"[^>]*>(?:<strong[^>]*>Dado parcial\. <\/strong>)?NOTA-MARGEM-COMPLETA/g,
+    );
+    expect(notas).toHaveLength(2);
+  });
+
+  it('curva sem pagamentos mostra estado vazio, não um eixo vazio', () => {
+    const h = renderToStaticMarkup(
+      React.createElement(ListasSecao, {
+        data: {
+          ...data,
+          curvaEvento: {
+            ...data.curvaEvento,
+            dias: data.curvaEvento.dias.map((d) => ({ ...d, pagamentos: 0, gmvCents: 0 })),
+          },
+        },
+      }),
+    ) as string;
+    expect(h).toContain('Sem pagamentos com data de evento no período.');
+    expect(h).toContain('data-testid="listas-curva-vazio"');
+    expect(h).not.toContain('data-testid="listas-curva"');
+  });
+
   it('janela sem listas maduras mostra —, não 0%', () => {
     expect(html.match(/data-testid="listas-janela"/g)).toHaveLength(3);
     expect(html).toContain('40%');

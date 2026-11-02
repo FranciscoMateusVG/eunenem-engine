@@ -111,7 +111,11 @@ describe('Vendas', () => {
 
   it('KPIs de volume, ticket e PIX × cartão', () => {
     expect(html).toMatch(/R\$\s3\.000,00/);
-    expect(html).toContain('75% PIX');
+    // % e rótulo na mesma unidade (valor); contagem de pagamentos à parte.
+    expect(html).toContain('75% em PIX');
+    expect(html).toContain('PIX × cartão, em valor');
+    expect(html).toMatch(/R\$\s2\.250 PIX · R\$\s750 cartão/);
+    expect(html).toContain('6 pagamentos aprovados (4 PIX, 2 cartão)');
     // Sem presentes, ticket médio é "—", não R$ 0.
     expect(html).toMatch(/Ticket médio<\/div><div[^>]*>—</);
   });

@@ -74,14 +74,16 @@ export function VendasSecao({ data }: { data: VendasData }) {
           detalhe="volume ÷ presentes"
         />
         <Kpi
-          rotulo="PIX × cartão"
-          valor={`${textoPct(pct(t.pixCents, meioCents))} PIX`}
-          detalhe={`${numero(t.pixQtd)} PIX · ${numero(t.cartaoQtd)} cartão (pagamentos)`}
+          rotulo="PIX × cartão, em valor"
+          valor={`${textoPct(pct(t.pixCents, meioCents))} em PIX`}
+          detalhe={`${dinheiroCurto(t.pixCents)} PIX · ${dinheiroCurto(t.cartaoCents)} cartão`}
         />
       </div>
       <p className="text-sm text-ink-soft">
         Presentes pela data em que o pagamento foi aprovado. Estornos posteriores continuam no
-        volume bruto. Um pagamento pode levar vários presentes.
+        volume bruto. Um pagamento pode levar vários presentes: foram{" "}
+        {numero(t.pixQtd + t.cartaoQtd)} pagamentos aprovados ({numero(t.pixQtd)} PIX, {numero(t.cartaoQtd)}{" "}
+        cartão).
       </p>
       <GraficoBarras
         titulo="Volume por mês, PIX e cartão"

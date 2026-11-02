@@ -121,6 +121,8 @@ function TabelaCoortes({ titulo, linhas }: { titulo: string; linhas: ReadonlyArr
   );
 }
 
+// Turmas e concentração usam margem, que nunca inclui custos fixos: a nota
+// sai sempre como "Dado parcial", mesmo com todos os custos de provedor vistos.
 const SERIE_CURVA: readonly SerieGrafico[] = [
   { chave: "pagamentos", nome: "Pagamentos", cor: "bg-plum", corParcial: "bg-plum/40" },
 ];
@@ -196,7 +198,7 @@ export function ListasSecao({ data }: { data: ListasData }) {
         <TabelaCoortes titulo="Mês de criação" linhas={porMes} />
         <TabelaCoortes titulo="Origem" linhas={porOrigem} />
         <TabelaCoortes titulo="Legado" linhas={porLegado} />
-        <CoberturaNota cobertura={data.coberturaCoortes} unidade="pagamentos" />
+        <CoberturaNota cobertura={{ ...data.coberturaCoortes, parcial: true }} unidade="pagamentos" />
       </Bloco>
 
       <Bloco titulo="Pagantes" explicacao="Pessoas que pagaram presentes nas listas do período, identificadas pelo e-mail informado no pagamento.">
@@ -258,6 +260,7 @@ export function ListasSecao({ data }: { data: ListasData }) {
           })}
           formatar={numero}
           testId="listas-curva"
+          vazio="Sem pagamentos com data de evento no período."
         />
         <CoberturaNota cobertura={data.curvaEvento.cobertura} unidade="listas" />
       </div>
@@ -269,7 +272,7 @@ export function ListasSecao({ data }: { data: ListasData }) {
           <Kpi rotulo="Listas" valor={numero(c.listas)} detalhe="no período" />
           <Kpi rotulo="Sem receita" valor={numero(c.listasSemReceita)} detalhe="listas sem tarifa EuNeném" />
         </div>
-        <CoberturaNota cobertura={c.cobertura} unidade="pagamentos" />
+        <CoberturaNota cobertura={{ ...c.cobertura, parcial: true }} unidade="pagamentos" />
       </Bloco>
     </div>
   );
