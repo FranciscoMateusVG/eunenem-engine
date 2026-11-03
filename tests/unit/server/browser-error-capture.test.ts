@@ -14,6 +14,7 @@ import {
   type BrowserErrorRuntimeConfig,
   browserErrorRuntimeConfigFromEnv,
   validateBrowserErrorConfig,
+  validateCheckoutFailure,
 } from '../../../apps/eunenem-server/pages/lib/browser-error-contract.js';
 import {
   initializeBrowserErrorCapture,
@@ -304,6 +305,43 @@ describe('browser error stack boundary', () => {
   });
 });
 
+describe('checkout failure contract (aperture-zlkbo)', () => {
+  it('accepts only the finite category/step/method vocabulary and strips everything else', () => {
+    expect(
+      validateCheckoutFailure({
+        category: 'trpc_too_many_requests',
+        step: 'confirm',
+        method: 'card',
+        operationKey: 'k',
+      }),
+    ).toEqual({ category: 'trpc_too_many_requests', step: 'confirm', method: 'card' });
+    for (const category of [
+      'storage_unavailable',
+      'crypto_unavailable',
+      'cooldown',
+      'network',
+      'unknown',
+    ]) {
+      expect(validateCheckoutFailure({ category, step: 'local', method: 'pix' })?.category).toBe(
+        category,
+      );
+    }
+    expect(
+      validateCheckoutFailure({
+        category: 'trpc_customer@example.com',
+        step: 'result',
+        method: 'pix',
+        email: 'customer@example.com',
+      }),
+    ).toEqual({ category: 'unknown', step: 'result', method: 'pix' });
+    const valid = { category: 'network', step: 'local', method: 'pix' };
+    expect(validateCheckoutFailure({ ...valid, step: 'checkout/slug' })).toBeNull();
+    expect(validateCheckoutFailure({ ...valid, method: 'credit_card' })).toBeNull();
+    expect(validateCheckoutFailure({ ...valid, method: 'customer@example.com' })).toBeNull();
+    expect(validateCheckoutFailure(undefined)).toBeNull();
+  });
+});
+
 describe('browser artifact release and Hono runtime envelope', () => {
   it('hashes both fixed assets deterministically and changes on either input', () => {
     const first = computeBrowserArtifactRelease({
@@ -409,6 +447,142 @@ describe('browser artifact release and Hono runtime envelope', () => {
 describe('browser error SDK boundary', () => {
   afterAll(async () => {
     await Sentry.close(0);
+  });
+
+  it('captures each checkout failure once through the closed privacy envelope (aperture-zlkbo)', async () => {
+    await Sentry.close(0);
+    const target = new FakeBrowserTarget();
+    const envelopes: unknown[] = [];
+    let eventSequence = 0;
+    const capture = initializeBrowserErrorCapture(config(), {
+      target: target as unknown as Window,
+      origin: 'https://eunenem.com',
+      generateEventId: () => (++eventSequence).toString(16).padStart(32, '0'),
+      transport: () => ({
+        send: async (envelope) => {
+          envelopes.push(envelope);
+          return { statusCode: 200 };
+        },
+        flush: async () => true,
+      }),
+    });
+    capture.setRouteKind('pagina');
+    const privateKey = 'private-slug/customer@example.com';
+    capture.captureCheckoutFailure({
+      category: 'storage_unavailable',
+      step: 'local',
+      method: 'pix',
+      operationKey: privateKey,
+    });
+    // Same operation + same failure: deduped, never a second event.
+    capture.captureCheckoutFailure({
+      category: 'storage_unavailable',
+      step: 'local',
+      method: 'pix',
+      operationKey: privateKey,
+    });
+    capture.captureCheckoutFailure({
+      category: 'trpc_conflict',
+      step: 'prepare',
+      method: 'card',
+      operationKey: 'another-operation',
+    });
+    // Smuggled PII fields are never read; an unknown category collapses to
+    // `unknown`, and an invalid step/method drops the event entirely.
+    capture.captureCheckoutFailure({
+      category: 'trpc_customer@example.com',
+      step: 'prepare',
+      method: 'pix',
+      operationKey: 'third-operation',
+      email: 'customer@example.com',
+      nome: 'Maria Cliente',
+      slug: 'private-slug',
+      url: 'https://eunenem.com/private-slug',
+      message: 'raw customer@example.com',
+    } as unknown as Parameters<typeof capture.captureCheckoutFailure>[0]);
+    capture.captureCheckoutFailure({
+      category: 'network',
+      step: 'customer@example.com',
+      method: 'pix',
+      operationKey: 'fourth-operation',
+    } as unknown as Parameters<typeof capture.captureCheckoutFailure>[0]);
+    await Sentry.flush(2_000);
+
+    expect(envelopes).toHaveLength(3);
+    const serialized = JSON.stringify(envelopes);
+    for (const secret of ['private-slug', 'customer@example.com', 'Maria', 'operation']) {
+      expect(serialized).not.toContain(secret);
+    }
+    const events = envelopes.map(eventFromEnvelope);
+    expect(events.map((event) => event?.tags)).toEqual([
+      {
+        error_source: 'checkout_failed',
+        route_kind: 'pagina',
+        checkout_category: 'storage_unavailable',
+        checkout_step: 'local',
+        checkout_method: 'pix',
+      },
+      {
+        error_source: 'checkout_failed',
+        route_kind: 'pagina',
+        checkout_category: 'trpc_conflict',
+        checkout_step: 'prepare',
+        checkout_method: 'card',
+      },
+      {
+        error_source: 'checkout_failed',
+        route_kind: 'pagina',
+        checkout_category: 'unknown',
+        checkout_step: 'prepare',
+        checkout_method: 'pix',
+      },
+    ]);
+    const allowedKeys = new Set([
+      'environment',
+      'event_id',
+      'exception',
+      'fingerprint',
+      'level',
+      'platform',
+      'release',
+      'sdk',
+      'tags',
+      'timestamp',
+      'type',
+    ]);
+    for (const event of events) {
+      expect(event?.release).toBe(RELEASE);
+      expect(Object.keys(event ?? {}).filter((key) => !allowedKeys.has(key))).toEqual([]);
+      expect(
+        ((event?.exception as { values?: Array<{ type?: string; value?: string }> })?.values ??
+          [])[0],
+      ).toEqual({ type: 'CheckoutFailed', value: 'Browser client failure' });
+    }
+    expect(events.map((event) => event?.level)).toEqual(['error', 'error', 'error']);
+    expect(events[1]?.fingerprint).toEqual(['checkout_failed', 'trpc_conflict', 'prepare', 'card']);
+    capture.dispose();
+  });
+
+  it('drops an ad-hoc SDK capture that has no closure-owned pending event', async () => {
+    await Sentry.close(0);
+    const envelopes: unknown[] = [];
+    const capture = initializeBrowserErrorCapture(config(), {
+      target: new FakeBrowserTarget() as unknown as Window,
+      origin: 'https://eunenem.com',
+      transport: () => ({
+        send: async (envelope) => {
+          envelopes.push(envelope);
+          return { statusCode: 200 };
+        },
+        flush: async () => true,
+      }),
+    });
+    Sentry.captureException(new Error('customer@example.com'), {
+      tags: { error_source: 'checkout_failed' },
+    });
+    await Sentry.flush(2_000);
+    expect(envelopes).toEqual([]);
+    capture.dispose();
   });
 
   it('captures global and React failures once through an exact closed envelope', async () => {

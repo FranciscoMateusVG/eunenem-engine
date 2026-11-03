@@ -5,6 +5,7 @@ import {
   clearPendingCheckoutOperation,
   executeRecoverableCheckout,
   getOrCreatePendingCheckoutOperation,
+  setCheckoutFailureReporter,
 } from '../../../apps/eunenem-server/pages/lib/checkoutOperationClient.js';
 
 class StorageMemory {
@@ -181,4 +182,225 @@ it('hdg7h: exposes exact cooldown and code without a server call, then permits r
   } finally {
     vi.restoreAllMocks();
   }
+});
+
+describe('checkout failure reporting (aperture-zlkbo)', () => {
+  const PII = 'customer@example.com';
+  const STORAGE_MESSAGE =
+    'Não foi possível acessar o armazenamento desta aba. Habilite o armazenamento do navegador e tente novamente.';
+  const throwingStorage = () => ({
+    getItem: (): string | null => {
+      throw new Error(PII);
+    },
+    setItem: (): void => {
+      throw new Error(PII);
+    },
+    removeItem: (): void => {
+      throw new Error(PII);
+    },
+  });
+
+  async function run(input: {
+    storage?: object;
+    request?: (value: { operationId: string }) => Promise<{ tipo: string }>;
+    createId?: () => string;
+    requestInput?: Record<string, unknown>;
+  }) {
+    const report = vi.fn();
+    const request = vi.fn(input.request ?? (async () => ({ tipo: 'pix_qr' })));
+    setCheckoutFailureReporter(report);
+    try {
+      const error = await executeRecoverableCheckout({
+        storageKey: `secret-slug-${PII}`,
+        requestInput: input.requestInput ?? { metodo: 'pix', slug: 'secret-slug' },
+        request,
+        storage: (input.storage ?? new StorageMemory()) as StorageMemory,
+        createId: input.createId ?? (() => '00000000-0000-4000-8000-000000000099'),
+      }).then(
+        () => undefined,
+        (failure: unknown) => failure,
+      );
+      return { report, request, error };
+    } finally {
+      setCheckoutFailureReporter(undefined);
+    }
+  }
+
+  it('reports a sessionStorage failure once as storage_unavailable, banner error unchanged', async () => {
+    const { error, report, request } = await run({ storage: throwingStorage() });
+    expect(error).toBeInstanceOf(CheckoutOperationStorageUnavailableError);
+    expect((error as Error).message).toBe(STORAGE_MESSAGE);
+    expect(request).not.toHaveBeenCalled();
+    expect(report).toHaveBeenCalledTimes(1);
+    expect(report.mock.calls[0]?.[0]).toEqual({
+      category: 'storage_unavailable',
+      step: 'local',
+      method: 'pix',
+      operationKey: expect.stringMatching(/^op:[0-9a-f]{32}$/),
+    });
+    const serialized = JSON.stringify(report.mock.calls);
+    expect(serialized).not.toContain(PII);
+    expect(serialized).not.toContain('secret-slug');
+  });
+
+  it('classifies a raw storage throw at the central catch, rethrowing the same error', async () => {
+    const storage = new StorageMemory();
+    const flaky = {
+      getItem: (key: string) => {
+        if (key.endsWith(':retryAt')) throw new Error(PII);
+        return storage.getItem(key);
+      },
+      setItem: (key: string, value: string) => storage.setItem(key, value),
+      removeItem: (key: string) => storage.removeItem(key),
+    };
+    const { error, report } = await run({ storage: flaky });
+    expect((error as Error).message).toBe(PII);
+    expect(report).toHaveBeenCalledTimes(1);
+    expect(report).toHaveBeenCalledWith(
+      expect.objectContaining({ category: 'storage_unavailable', step: 'local' }),
+    );
+    expect(JSON.stringify(report.mock.calls)).not.toContain(PII);
+  });
+
+  it('reports crypto.subtle and randomUUID failures as crypto_unavailable, banner error unchanged', async () => {
+    const digest = vi.spyOn(crypto.subtle, 'digest').mockRejectedValue(new Error(PII));
+    try {
+      const { error, report } = await run({});
+      expect(error).toBeInstanceOf(CheckoutOperationStorageUnavailableError);
+      expect((error as { code?: string }).code).toBe('CHECKOUT_STORAGE_UNAVAILABLE');
+      expect((error as Error).message).toBe(STORAGE_MESSAGE);
+      expect(report).toHaveBeenCalledTimes(1);
+      expect(report).toHaveBeenCalledWith(
+        expect.objectContaining({ category: 'crypto_unavailable', step: 'local' }),
+      );
+    } finally {
+      digest.mockRestore();
+    }
+
+    const noUuid = await run({
+      createId: () => {
+        throw new TypeError(PII);
+      },
+    });
+    expect(noUuid.error).toBeInstanceOf(CheckoutOperationStorageUnavailableError);
+    expect((noUuid.error as Error).message).toBe(STORAGE_MESSAGE);
+    expect(noUuid.request).not.toHaveBeenCalled();
+    expect(noUuid.report).toHaveBeenCalledWith(
+      expect.objectContaining({ category: 'crypto_unavailable', step: 'local' }),
+    );
+  });
+
+  it('reports a tRPC rejection once as trpc_<code> on the prepare step', async () => {
+    const trpcError = Object.assign(new Error(PII), {
+      name: 'TRPCClientError',
+      data: { code: 'CONFLICT' },
+    });
+    const { error, report } = await run({
+      request: async () => {
+        throw trpcError;
+      },
+      requestInput: { metodo: 'credit_card' },
+    });
+    expect(error).toBe(trpcError);
+    expect(report).toHaveBeenCalledTimes(1);
+    expect(report).toHaveBeenCalledWith(
+      expect.objectContaining({ category: 'trpc_conflict', step: 'prepare', method: 'card' }),
+    );
+    expect(JSON.stringify(report.mock.calls)).not.toContain(PII);
+  });
+
+  it('dedupes concurrent submits of the same operation into one report', async () => {
+    const report = vi.fn();
+    setCheckoutFailureReporter(report);
+    let reject!: (error: unknown) => void;
+    const request = vi.fn(
+      () =>
+        new Promise<{ tipo: string }>((_resolve, fail) => {
+          reject = fail;
+        }),
+    );
+    const args = {
+      storageKey: 'dedupe',
+      requestInput: { metodo: 'pix' },
+      storage: new StorageMemory(),
+      request,
+      createId: () => '00000000-0000-4000-8000-000000000098',
+    };
+    try {
+      const first = executeRecoverableCheckout(args);
+      const second = executeRecoverableCheckout(args);
+      await vi.waitFor(() => expect(request).toHaveBeenCalledTimes(1));
+      reject({ data: { code: 'INTERNAL_SERVER_ERROR' } });
+      await Promise.allSettled([first, second]);
+      expect(report).toHaveBeenCalledTimes(1);
+      expect(report).toHaveBeenCalledWith(
+        expect.objectContaining({ category: 'trpc_internal_server_error' }),
+      );
+    } finally {
+      setCheckoutFailureReporter(undefined);
+    }
+  });
+
+  it('classifies network, confirm-step, cooldown and unknown failures', async () => {
+    const network = await run({
+      request: async () => {
+        throw Object.assign(new Error('Failed to fetch'), {
+          name: 'TRPCClientError',
+          cause: new TypeError('Failed to fetch'),
+        });
+      },
+    });
+    expect(network.report).toHaveBeenCalledWith(
+      expect.objectContaining({ category: 'network', step: 'prepare' }),
+    );
+
+    let calls = 0;
+    const confirm = await run({
+      request: async () => {
+        calls += 1;
+        if (calls === 1) return { tipo: 'prepared' };
+        throw { data: { code: 'NOT_A_REAL_CODE' } };
+      },
+    });
+    expect(confirm.report).toHaveBeenCalledWith(
+      expect.objectContaining({ category: 'unknown', step: 'confirm' }),
+    );
+
+    const cooldown = await run({ request: async () => ({ tipo: 'retry_new_operation' }) });
+    expect(cooldown.report).toHaveBeenCalledWith(
+      expect.objectContaining({ category: 'cooldown', step: 'result' }),
+    );
+
+    const unconfirmed = await run({ request: async () => ({ tipo: 'prepared' }) });
+    expect(unconfirmed.report).toHaveBeenCalledWith(
+      expect.objectContaining({ category: 'unknown', step: 'result' }),
+    );
+  });
+
+  it('does not report a successful checkout', async () => {
+    const { error, report } = await run({});
+    expect(error).toBeUndefined();
+    expect(report).not.toHaveBeenCalled();
+  });
+
+  it('never lets a throwing reporter change the checkout failure', async () => {
+    setCheckoutFailureReporter(() => {
+      throw new Error('reporter down');
+    });
+    try {
+      await expect(
+        executeRecoverableCheckout({
+          storageKey: 'reporter',
+          requestInput: { metodo: 'pix' },
+          storage: new StorageMemory(),
+          request: async () => {
+            throw { data: { code: 'BAD_REQUEST' } };
+          },
+          createId: () => '00000000-0000-4000-8000-000000000097',
+        }),
+      ).rejects.toMatchObject({ data: { code: 'BAD_REQUEST' } });
+    } finally {
+      setCheckoutFailureReporter(undefined);
+    }
+  });
 });
