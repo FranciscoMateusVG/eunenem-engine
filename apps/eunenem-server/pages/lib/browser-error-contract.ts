@@ -71,3 +71,114 @@ export function validateBrowserErrorConfig(
 
   return { dsn: browserErrorDsn, release };
 }
+
+// ── Handled checkout failures (aperture-zlkbo) ────────────────────────────
+//
+// The checkout catch paths render a banner and never throw to the window, so
+// they need an explicit, closed report. Only these finite labels cross into
+// the browser error envelope: never the error message, slug, campaign id,
+// contributor identity, URL or storage key.
+
+/** tRPC error codes (TRPC_ERROR_CODES_BY_KEY). Anything else is `unknown`. */
+const TRPC_CODES = [
+  'PARSE_ERROR',
+  'BAD_REQUEST',
+  'INTERNAL_SERVER_ERROR',
+  'NOT_IMPLEMENTED',
+  'BAD_GATEWAY',
+  'SERVICE_UNAVAILABLE',
+  'GATEWAY_TIMEOUT',
+  'UNAUTHORIZED',
+  'PAYMENT_REQUIRED',
+  'FORBIDDEN',
+  'NOT_FOUND',
+  'METHOD_NOT_SUPPORTED',
+  'TIMEOUT',
+  'CONFLICT',
+  'PRECONDITION_FAILED',
+  'PAYLOAD_TOO_LARGE',
+  'UNSUPPORTED_MEDIA_TYPE',
+  'UNPROCESSABLE_CONTENT',
+  'TOO_MANY_REQUESTS',
+  'CLIENT_CLOSED_REQUEST',
+] as const;
+
+type TrpcCode = (typeof TRPC_CODES)[number];
+
+export type CheckoutFailureCategory =
+  | 'storage_unavailable'
+  | 'crypto_unavailable'
+  | 'cooldown'
+  | 'network'
+  | `trpc_${Lowercase<TrpcCode>}`
+  | 'unknown';
+
+/**
+ * Where the central orchestration failed:
+ * - `local`: storage key digest, sessionStorage, operation id, local cooldown
+ *   (before any request);
+ * - `prepare` / `confirm`: first / second tRPC request;
+ * - `result`: handling a received response (server-ordered cooldown, an
+ *   operation still unconfirmed after the second request).
+ */
+export type CheckoutFailureStep = 'local' | 'prepare' | 'confirm' | 'result';
+export type CheckoutFailureMethod = 'pix' | 'card';
+
+export interface CheckoutFailureReport {
+  readonly category: CheckoutFailureCategory;
+  readonly step: CheckoutFailureStep;
+  readonly method: CheckoutFailureMethod;
+  /**
+   * In-memory dedupe identity for one checkout operation. Used only to
+   * suppress repeats; it is never copied into the event.
+   */
+  readonly operationKey: string;
+}
+
+export type ValidCheckoutFailure = Omit<CheckoutFailureReport, 'operationKey'>;
+
+const CHECKOUT_FAILURE_CATEGORIES: ReadonlySet<string> = new Set<CheckoutFailureCategory>([
+  'storage_unavailable',
+  'crypto_unavailable',
+  'cooldown',
+  'network',
+  'unknown',
+  ...TRPC_CODES.map((code) => `trpc_${code.toLowerCase()}` as CheckoutFailureCategory),
+]);
+const CHECKOUT_FAILURE_STEPS: ReadonlySet<string> = new Set<CheckoutFailureStep>([
+  'local',
+  'prepare',
+  'confirm',
+  'result',
+]);
+const CHECKOUT_FAILURE_METHODS: ReadonlySet<string> = new Set<CheckoutFailureMethod>([
+  'pix',
+  'card',
+]);
+
+/** Finite `trpc_<code>` category, or null for a missing/unknown code. */
+export function checkoutFailureTrpcCategory(code: unknown): CheckoutFailureCategory | null {
+  return typeof code === 'string' && (TRPC_CODES as readonly string[]).includes(code)
+    ? (`trpc_${code.toLowerCase()}` as CheckoutFailureCategory)
+    : null;
+}
+
+/**
+ * Closed projection of a checkout failure report. Reads exactly three
+ * fields; an unknown category collapses to `unknown` (the failure is still
+ * real), while an unknown step/method rejects the report.
+ */
+export function validateCheckoutFailure(input: unknown): ValidCheckoutFailure | null {
+  if (typeof input !== 'object' || input === null) return null;
+  const { category, step, method } = input as Record<string, unknown>;
+  if (typeof step !== 'string' || !CHECKOUT_FAILURE_STEPS.has(step)) return null;
+  if (typeof method !== 'string' || !CHECKOUT_FAILURE_METHODS.has(method)) return null;
+  return {
+    category:
+      typeof category === 'string' && CHECKOUT_FAILURE_CATEGORIES.has(category)
+        ? (category as CheckoutFailureCategory)
+        : 'unknown',
+    step: step as CheckoutFailureStep,
+    method: method as CheckoutFailureMethod,
+  };
+}
