@@ -7,7 +7,10 @@ import {
 import type { ErrorInfo } from 'react';
 import {
   type BrowserErrorRuntimeConfig,
+  type CheckoutFailureReport,
+  type ValidCheckoutFailure,
   validateBrowserErrorConfig,
+  validateCheckoutFailure,
 } from './browser-error-contract.js';
 
 export type BrowserErrorSource =
@@ -16,7 +19,8 @@ export type BrowserErrorSource =
   | 'unhandled_rejection'
   | 'react_caught'
   | 'react_recoverable'
-  | 'react_uncaught';
+  | 'react_uncaught'
+  | 'checkout_failed';
 
 const SOURCE_TYPE: Readonly<Record<BrowserErrorSource, string>> = {
   bootstrap: 'BrowserBootstrapError',
@@ -25,6 +29,7 @@ const SOURCE_TYPE: Readonly<Record<BrowserErrorSource, string>> = {
   react_caught: 'ReactCaughtError',
   react_recoverable: 'ReactRecoverableError',
   react_uncaught: 'ReactUncaughtError',
+  checkout_failed: 'CheckoutFailed',
 };
 
 const ROUTE_KINDS = new Set([
@@ -54,6 +59,7 @@ const ROUTE_KINDS = new Set([
 ]);
 
 const MAX_DEDUPE_KEYS = 128;
+const MAX_CHECKOUT_DEDUPE_KEYS = 64;
 const DEDUPE_TTL_MS = 5_000;
 const MAX_PENDING_EVENTS = 32;
 const PENDING_EVENT_TTL_MS = 30_000;
@@ -86,6 +92,7 @@ interface ClosedBrowserEvent {
   readonly source: BrowserErrorSource;
   readonly routeKind: string;
   readonly frames: readonly SafeFrame[];
+  readonly checkout?: ValidCheckoutFailure;
 }
 
 export interface BrowserErrorCapture {
@@ -94,6 +101,8 @@ export interface BrowserErrorCapture {
   readonly onRecoverableError: (error: unknown, info: ErrorInfo) => void;
   readonly onUncaughtError: (error: unknown, info: ErrorInfo) => void;
   capture(source: BrowserErrorSource, error: unknown): void;
+  /** One closed event per checkout operation and failure (aperture-zlkbo). */
+  captureCheckoutFailure(report: CheckoutFailureReport): void;
   setRouteKind(routeKind: string): void;
   dispose(): void;
 }
@@ -106,6 +115,7 @@ function noOpCapture(): BrowserErrorCapture {
     onRecoverableError: noOp,
     onUncaughtError: noOp,
     capture: noOp,
+    captureCheckoutFailure: noOp,
     setRouteKind: noOp,
     dispose: noOp,
   };
@@ -151,6 +161,7 @@ function safeEventId(generateEventId: () => string): string | null {
 
 function buildClosedEvent(input: ClosedBrowserEvent): SentryErrorEvent {
   const frames = input.frames.map((frame) => ({ ...frame }));
+  const checkout = input.checkout;
   return {
     type: undefined,
     event_id: input.eventId,
@@ -162,7 +173,19 @@ function buildClosedEvent(input: ClosedBrowserEvent): SentryErrorEvent {
     tags: {
       error_source: input.source,
       route_kind: input.routeKind,
+      ...(checkout
+        ? {
+            checkout_category: checkout.category,
+            checkout_step: checkout.step,
+            checkout_method: checkout.method,
+          }
+        : {}),
     },
+    ...(checkout
+      ? {
+          fingerprint: [input.source, checkout.category, checkout.step, checkout.method],
+        }
+      : {}),
     exception: {
       values: [
         {
@@ -219,7 +242,37 @@ export function initializeBrowserErrorCapture(
   const generateEventId = options.generateEventId ?? (() => globalThis.crypto.randomUUID());
   const seenObjects = new WeakSet<object>();
   const recentKeys = new Map<string, number>();
+  const reportedCheckoutKeys = new Set<string>();
   let routeKind = 'not-found';
+
+  const enqueue = (
+    source: BrowserErrorSource,
+    frames: readonly SafeFrame[],
+    currentTime: number,
+    checkout?: ValidCheckoutFailure,
+  ): void => {
+    for (const [eventId, pending] of pendingEvents) {
+      if (pending.expiresAt <= currentTime) pendingEvents.delete(eventId);
+    }
+    if (pendingEvents.size >= MAX_PENDING_EVENTS) return;
+    const eventId = safeEventId(generateEventId);
+    if (!eventId) return;
+    const event: ClosedBrowserEvent = {
+      eventId,
+      timestamp: currentTime / 1_000,
+      release: config.release,
+      source,
+      routeKind,
+      frames,
+      ...(checkout ? { checkout } : {}),
+    };
+    pendingEvents.set(eventId, { event, expiresAt: currentTime + PENDING_EVENT_TTL_MS });
+
+    // beforeSend is the final SDK boundary. It replaces anything merged or
+    // injected by ambient scopes/processors with the closure-owned event and
+    // clears attachments, while leaving those ambient scopes untouched.
+    captureEvent(buildClosedEvent(event));
+  };
 
   const capture = (source: BrowserErrorSource, error: unknown): void => {
     try {
@@ -242,29 +295,30 @@ export function initializeBrowserErrorCapture(
         if (oldest !== undefined) recentKeys.delete(oldest);
       }
       recentKeys.set(dedupeKey, currentTime + DEDUPE_TTL_MS);
-
-      for (const [eventId, pending] of pendingEvents) {
-        if (pending.expiresAt <= currentTime) pendingEvents.delete(eventId);
-      }
-      if (pendingEvents.size >= MAX_PENDING_EVENTS) return;
-      const eventId = safeEventId(generateEventId);
-      if (!eventId) return;
-      const event: ClosedBrowserEvent = {
-        eventId,
-        timestamp: currentTime / 1_000,
-        release: config.release,
-        source,
-        routeKind,
-        frames,
-      };
-      pendingEvents.set(eventId, { event, expiresAt: currentTime + PENDING_EVENT_TTL_MS });
-
-      // beforeSend is the final SDK boundary. It replaces anything merged or
-      // injected by ambient scopes/processors with the closure-owned event and
-      // clears attachments, while leaving those ambient scopes untouched.
-      captureEvent(buildClosedEvent(event));
+      enqueue(source, frames, currentTime);
     } catch {
       // Browser monitoring is fail-open for rendering and fail-closed for data.
+    }
+  };
+
+  const captureCheckoutFailure = (report: CheckoutFailureReport): void => {
+    try {
+      const checkout = validateCheckoutFailure(report);
+      if (!checkout) return;
+      // The (opaque, hashed) operation key is an in-memory dedupe identity
+      // only: a repeat of the same failure for the same checkout operation is
+      // suppressed, and the key itself never reaches the event.
+      const operationKey = typeof report.operationKey === 'string' ? report.operationKey : '';
+      const dedupeKey = `${operationKey}|${checkout.category}|${checkout.step}`;
+      if (reportedCheckoutKeys.has(dedupeKey)) return;
+      if (reportedCheckoutKeys.size >= MAX_CHECKOUT_DEDUPE_KEYS) {
+        const oldest = reportedCheckoutKeys.values().next().value;
+        if (oldest !== undefined) reportedCheckoutKeys.delete(oldest);
+      }
+      reportedCheckoutKeys.add(dedupeKey);
+      enqueue('checkout_failed', [], now(), checkout);
+    } catch {
+      // Checkout reporting must never change the checkout outcome.
     }
   };
 
@@ -306,6 +360,7 @@ export function initializeBrowserErrorCapture(
     onRecoverableError: (error) => capture('react_recoverable', error),
     onUncaughtError: (error) => capture('react_uncaught', error),
     capture,
+    captureCheckoutFailure,
     setRouteKind(candidate) {
       routeKind = ROUTE_KINDS.has(candidate) ? candidate : 'not-found';
     },

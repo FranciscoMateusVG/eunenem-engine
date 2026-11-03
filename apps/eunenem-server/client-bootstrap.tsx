@@ -4,6 +4,7 @@ import {
   type BrowserErrorCapture,
   initializeBrowserErrorCapture,
 } from './pages/lib/browser-errors.js';
+import { setCheckoutFailureReporter } from './pages/lib/checkoutOperationClient.js';
 
 interface ClientAppModule {
   readonly App: ComponentType<{ pathname: string }>;
@@ -28,6 +29,7 @@ export async function bootstrapClient(options: ClientBootstrapOptions = {}): Pro
     targetWindow.__EUNENEM_ENV__,
     { target: targetWindow },
   );
+  setCheckoutFailureReporter(capture.captureCheckoutFailure);
   const root = targetDocument.getElementById('root');
   if (!root) {
     const error = new Error('client root unavailable');
