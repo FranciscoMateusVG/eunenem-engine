@@ -1028,11 +1028,9 @@ describe('LivroFinanceiroRepositoryPostgres — manual resolution (aperture-477n
       expect(enqueued).toBe(1);
       expect((await repo.findRepasseById(idRepasse))?.status).toBe('aprovado');
       // A second click (or a concurrent one) never queues another attempt.
-      await recuperarRepasse(
-        deps,
-        { idRepasse, expectedTransferAttempts: 1 },
-        'admin@example.test',
-      );
+      await expect(
+        recuperarRepasse(deps, { idRepasse, expectedTransferAttempts: 1 }, 'admin@example.test'),
+      ).rejects.toThrow('O repasse mudou');
       expect(enqueued).toBe(1);
       const history = await repo.findTransferAttemptsByRepasseId(idRepasse);
       const audit = history.find((a) => a.operation === 'resolver_manual');
