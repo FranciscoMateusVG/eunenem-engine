@@ -126,7 +126,14 @@ export async function aprovarRepasseRecebedor(
       }
 
       // Manual path (no active recebedor on record, or a conta paid by hand with a
-      // recorded bank reference): stamps transferido_em at approval.
+      // recorded bank reference): stamps transferido_em at approval. 'aprovado'
+      // and 'transferido' are distinct: without an automatic send, only a
+      // recorded bank reference proves the money left.
+      if (bankTransferRef === null) {
+        throw new FinanceiroInputInvalidoError(
+          'Sem envio automático possível, informe a referência bancária da transferência feita manualmente.',
+        );
+      }
       span.setAttribute('financeiro.repasse.metodo', recebedor?.metodo ?? 'desconhecido');
       const result = await livroFinanceiroRepository.aprovarRepasseTransaction({
         idRepasse,
