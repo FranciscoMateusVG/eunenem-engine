@@ -495,3 +495,116 @@ export function RecoveryResolvedElsewhere({
     </div>
   );
 }
+
+/** "45,00" / "45.00" → cents, or null when it is not a valid amount. */
+function parseReaisToCents(value: string): number | null {
+  const normalized = value.trim().replace(/\./g, '').replace(',', '.');
+  if (!/^\d+(\.\d{1,2})?$/.test(normalized)) return null;
+  return Math.round(Number(normalized) * 100);
+}
+
+/** First reason the "Enviar pelo Inter agora" button is disabled, or null when enabled. */
+export function motivoBloqueioReenvio(args: {
+  busy: boolean;
+  reason: string;
+  typedAmount: string;
+  amountCents: number;
+  attested: boolean;
+}): string | null {
+  if (args.busy) return 'Aguarde a operação em andamento.';
+  if (args.reason.trim().length < 10) return 'Descreva o motivo (mínimo de 10 caracteres).';
+  if (parseReaisToCents(args.typedAmount) !== args.amountCents)
+    return 'Digite o valor exato do repasse em reais para confirmar.';
+  if (!args.attested) return 'Marque que conferiu o extrato e que o repasse não foi pago por fora.';
+  return null;
+}
+
+/**
+ * aperture-mno2s — "Enviar pelo Inter agora": only for a conta repasse that
+ * the old manual approval marked transferido although nothing was sent. The
+ * server re-checks eligibility and the Inter extrato; this is the operator side.
+ */
+export function ReenvioPeloInterActions({
+  repasse,
+}: {
+  repasse: Pick<RepasseDetail, 'idRepasse' | 'amountCents'>;
+}) {
+  const [reason, setReason] = useState('');
+  const [typedAmount, setTypedAmount] = useState('');
+  const [attested, setAttested] = useState(false);
+  const utils = trpc.useUtils();
+  const send = trpc.admin.repasses.reenviarPeloInter.useMutation({
+    onSuccess: async () => {
+      await Promise.all([
+        utils.admin.repasses.show.invalidate(),
+        utils.admin.repasses.list.invalidate(),
+      ]);
+    },
+  });
+  const bloqueio = motivoBloqueioReenvio({
+    busy: send.isPending,
+    reason,
+    typedAmount,
+    amountCents: repasse.amountCents,
+    attested,
+  });
+  const inputClass = 'block w-full rounded border border-line bg-paper p-2';
+  return (
+    <section
+      className="space-y-3 rounded border border-rose-300 bg-rose-50 p-5"
+      aria-label="Enviar pelo Inter agora"
+    >
+      <h2>Enviar pelo Inter agora</h2>
+      <p role="alert" className="font-semibold text-rose-800">
+        Atenção: este repasse foi aprovado e marcado como transferido, mas nenhum envio automático
+        foi feito. Se ele já foi pago por fora, enviar de novo vai pagar duas vezes — confirme no
+        extrato do Inter que nenhum PIX para este recebedor foi feito antes de continuar. O sistema
+        também consulta o extrato e bloqueia o envio se achar um débito compatível.
+      </p>
+      <label className="block">
+        Motivo obrigatório
+        <textarea
+          className={inputClass}
+          value={reason}
+          onChange={(e) => setReason(e.target.value)}
+          maxLength={1000}
+        />
+      </label>
+      <label className="block">
+        Digite o valor do repasse em reais ({(repasse.amountCents / 100).toFixed(2).replace('.', ',')})
+        <input
+          className={inputClass}
+          inputMode="decimal"
+          value={typedAmount}
+          onChange={(e) => setTypedAmount(e.target.value)}
+        />
+      </label>
+      <label className="block">
+        <input type="checkbox" checked={attested} onChange={(e) => setAttested(e.target.checked)} />{' '}
+        Conferi o extrato e este repasse não foi pago por fora.
+      </label>
+      <RecoveryActionButton
+        variant="warning"
+        disabled={bloqueio !== null}
+        hint={bloqueio}
+        onClick={() => {
+          const valorDigitadoCents = parseReaisToCents(typedAmount);
+          if (valorDigitadoCents === null) return;
+          send.mutate({
+            idRepasse: repasse.idRepasse,
+            motivo: reason,
+            valorDigitadoCents,
+            atestado: true,
+          });
+        }}
+      >
+        {send.isPending ? 'Enviando…' : 'Enviar pelo Inter agora'}
+      </RecoveryActionButton>
+      {send.error && (
+        <p role="alert" className="text-red-700">
+          {send.error.message}
+        </p>
+      )}
+    </section>
+  );
+}

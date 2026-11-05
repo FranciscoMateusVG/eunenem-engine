@@ -3,10 +3,12 @@ import { expect, it } from 'vitest';
 import {
   ManualResolutionActions,
   motivoBloqueioConfirmacao,
+  motivoBloqueioReenvio,
   RecoveryActionButton,
   RecoveryCandidatesTable,
   RecoveryConfirmation,
   RecoveryResolvedElsewhere,
+  ReenvioPeloInterActions,
 } from '../../../apps/eunenem-server/pages/components/eunenem/admin/RepasseRecoveryActions.js';
 import { trpc } from '../../../apps/eunenem-server/pages/lib/trpc.js';
 
@@ -144,4 +146,44 @@ it('aperture-mno2s names the first missing requirement of the confirm button', (
     /bloquead/i,
   );
   expect(motivoBloqueioConfirmacao({ ...base, busy: true })).toMatch(/aguarde/i);
+});
+
+it('aperture-mno2s "Enviar pelo Inter agora" shows a double-payment warning and a disabled, explained button', () => {
+  const queryClient = new QueryClient();
+  const client = trpc.createClient({ links: [] });
+  const html: string = renderToStaticMarkup(
+    createElement(
+      trpc.Provider,
+      { client, queryClient },
+      createElement(
+        QueryClientProvider,
+        { client: queryClient },
+        createElement(ReenvioPeloInterActions, {
+          repasse: { idRepasse: 'synthetic', amountCents: 4500 },
+        }),
+      ),
+    ),
+  );
+  expect(html).toContain('Enviar pelo Inter agora');
+  expect(html).toContain('pagar duas vezes');
+  expect(html).toContain('confirme no extrato do Inter que nenhum PIX');
+  expect(html).toContain('disabled=""');
+  expect(html).toContain('aria-describedby=');
+  expect(html).toContain('cursor-not-allowed');
+});
+
+it('aperture-mno2s reenvio button names the first missing requirement', () => {
+  const ok = {
+    busy: false,
+    reason: 'motivo suficiente',
+    typedAmount: '45,00',
+    amountCents: 4500,
+    attested: true,
+  };
+  expect(motivoBloqueioReenvio(ok)).toBeNull();
+  expect(motivoBloqueioReenvio({ ...ok, reason: 'curto' })).toMatch(/motivo/i);
+  expect(motivoBloqueioReenvio({ ...ok, typedAmount: '44,00' })).toMatch(/valor/i);
+  expect(motivoBloqueioReenvio({ ...ok, typedAmount: '' })).toMatch(/valor/i);
+  expect(motivoBloqueioReenvio({ ...ok, attested: false })).toMatch(/conferi/i);
+  expect(motivoBloqueioReenvio({ ...ok, busy: true })).toMatch(/aguarde/i);
 });

@@ -363,16 +363,22 @@ describe('admin.repasses.aprovar (aperture-riywh)', () => {
     expect(rig.enqueued.executar).toEqual([idRepasse]);
   });
 
-  it('pix re-approval ignores bankTransferRef and stays idempotent (referencia is the key)', async () => {
+  it('pix re-approval without a reference stays idempotent (referencia is the key)', async () => {
     const { idRepasse } = await seedPendingRepasse(rig);
-    await rig.caller.admin.repasses.aprovar({ idRepasse, bankTransferRef: 'IGNORED-1' });
-    // A different bankTransferRef does NOT conflict on the pix path.
-    const second = await rig.caller.admin.repasses.aprovar({
-      idRepasse,
-      bankTransferRef: 'IGNORED-2',
-    });
+    await rig.caller.admin.repasses.aprovar({ idRepasse, bankTransferRef: null });
+    const second = await rig.caller.admin.repasses.aprovar({ idRepasse, bankTransferRef: null });
     expect(second.numLancamentosTransferidos).toBe(0);
     expect(rig.enqueued.executar).toEqual([idRepasse]);
+  });
+
+  it('a recorded bank reference means the operator paid by hand: no automatic PIX on top (aperture-mno2s)', async () => {
+    const { idRepasse } = await seedPendingRepasse(rig);
+    const result = await rig.caller.admin.repasses.aprovar({
+      idRepasse,
+      bankTransferRef: 'E2E-PAGO-A-MAO',
+    });
+    expect(rig.enqueued.executar).toEqual([]);
+    expect(result.numLancamentosTransferidos).toBeGreaterThan(0);
   });
 
   it('throws NOT_FOUND when the repasse does not exist', async () => {

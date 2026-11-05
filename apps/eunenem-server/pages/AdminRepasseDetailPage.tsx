@@ -1,4 +1,4 @@
-import { ManualResolutionActions } from "./components/eunenem/admin/RepasseRecoveryActions.js";
+import { ManualResolutionActions, ReenvioPeloInterActions } from "./components/eunenem/admin/RepasseRecoveryActions.js";
 import { useEffect, useState } from "react";
 import { AdminShell } from "@/components/eunenem/admin/AdminShell";
 import { DddBadge } from "@/components/eunenem/admin/DddBadge";
@@ -132,6 +132,13 @@ function Body({ repasse }: { repasse: RepasseDetail }) {
       {repasse.status === "verificando" && (
         <ManualResolutionActions repasse={repasse} />
       )}
+      {repasse.status === "aprovado" &&
+        repasse.destination?.method === "conta" &&
+        repasse.transferAttempts === 0 &&
+        repasse.bankTransferRef === null &&
+        repasse.attempts.length === 0 && (
+          <ReenvioPeloInterActions repasse={repasse} />
+        )}
       {(repasse.status === "aprovado" ||
         repasse.status === "transferindo") && (
         <InFlightNote status={repasse.status} />

@@ -809,53 +809,61 @@ export class LivroFinanceiroRepositoryMemory implements LivroFinanceiroRepositor
       async (span) => {
         span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'UPDATE' });
         try {
-          const existing = this.repasses.get(input.idRepasse);
-          if (!existing) {
-            throw new FinanceiroRepasseNaoEncontradoError(input.idRepasse);
-          }
-          const tentativas = this.repasseTransferAttempts.filter(
-            (a) => a.repasseId === input.idRepasse && a.operation === 'pagar_pix',
-          ).length;
-          const motivoInelegivel = motivoReenvioInelegivel(existing, tentativas);
-          if (motivoInelegivel) {
-            throw new FinanceiroRepasseReenvioInelegivelError(input.idRepasse, motivoInelegivel);
-          }
+          const result = await this.moneyMovement.withTransferLocks(
+            this.paymentIdsForRepasse(input.idRepasse),
+            async () => {
+              const existing = this.repasses.get(input.idRepasse);
+              if (!existing) {
+                throw new FinanceiroRepasseNaoEncontradoError(input.idRepasse);
+              }
+              const tentativas = this.repasseTransferAttempts.filter(
+                (a) => a.repasseId === input.idRepasse && a.operation === 'pagar_pix',
+              ).length;
+              const motivoInelegivel = motivoReenvioInelegivel(existing, tentativas);
+              if (motivoInelegivel) {
+                throw new FinanceiroRepasseReenvioInelegivelError(
+                  input.idRepasse,
+                  motivoInelegivel,
+                );
+              }
 
-          const updated = { ...existing, transferReferencia: input.transferReferencia };
-          this.repasses.set(updated.id, updated);
-          let lancamentosDesmarcados = 0;
-          for (const [id, l] of this.lancamentos) {
-            if (
-              l.idRepasse === input.idRepasse &&
-              l.transferidoEm !== null &&
-              l.canceladoEm === null
-            ) {
-              this.lancamentos.set(id, { ...l, transferidoEm: null });
-              lancamentosDesmarcados += 1;
-            }
-          }
-          const maxAttemptNo = this.repasseTransferAttempts
-            .filter((a) => a.repasseId === input.idRepasse)
-            .reduce((max, a) => Math.max(max, a.attemptNo), 0);
-          this.pushTransferAttempt({
-            id: randomUUID(),
-            repasseId: input.idRepasse,
-            attemptNo: maxAttemptNo + 1,
-            referencia: input.transferReferencia,
-            startedAt: input.agora,
-            requestSummary: `reenvio_inter_por:${input.solicitadoPor};motivo:${input.motivo}`,
-            outcome: 'reenvio_autorizado',
-            codigoSolicitacao: null,
-            error: null,
-            finishedAt: input.agora,
-            operation: 'reenvio_inter',
-            stateBefore: existing.status,
-            stateAfter: existing.status,
-          });
-          await enqueueDentroDaTransacao({ executeSql: async () => ({ rows: [] }) });
-
+              const updated = { ...existing, transferReferencia: input.transferReferencia };
+              this.repasses.set(updated.id, updated);
+              let lancamentosDesmarcados = 0;
+              for (const [id, l] of this.lancamentos) {
+                if (
+                  l.idRepasse === input.idRepasse &&
+                  l.transferidoEm !== null &&
+                  l.canceladoEm === null
+                ) {
+                  this.lancamentos.set(id, { ...l, transferidoEm: null });
+                  lancamentosDesmarcados += 1;
+                }
+              }
+              const maxAttemptNo = this.repasseTransferAttempts
+                .filter((a) => a.repasseId === input.idRepasse)
+                .reduce((max, a) => Math.max(max, a.attemptNo), 0);
+              this.pushTransferAttempt({
+                id: randomUUID(),
+                repasseId: input.idRepasse,
+                attemptNo: maxAttemptNo + 1,
+                referencia: input.transferReferencia,
+                startedAt: input.agora,
+                requestSummary: `reenvio_inter_por:${input.solicitadoPor};motivo:${input.motivo}`,
+                outcome: 'reenvio_autorizado',
+                codigoSolicitacao: null,
+                error: null,
+                finishedAt: input.agora,
+                operation: 'reenvio_inter',
+                stateBefore: existing.status,
+                stateAfter: existing.status,
+              });
+              await enqueueDentroDaTransacao({ executeSql: async () => ({ rows: [] }) });
+              return { repasse: updated, lancamentosDesmarcados };
+            },
+          );
           span.setStatus({ code: SpanStatusCode.OK });
-          return { repasse: updated, lancamentosDesmarcados };
+          return result;
         } catch (error: unknown) {
           span.recordException(error as Error);
           span.setStatus({ code: SpanStatusCode.ERROR });

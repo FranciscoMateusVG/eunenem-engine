@@ -13,6 +13,7 @@ import type { RecebedorRepository } from '../../src/adapters/arrecadacao/recebed
 import { LivroFinanceiroRepositoryPostgres } from '../../src/adapters/pagamentos/financeiro/livro-repository.postgres.js';
 import type { RepasseJobEnqueuer } from '../../src/adapters/pagamentos/transferencia-enqueuer.js';
 import { TransferenciaProviderFake } from '../../src/adapters/pagamentos/transferencia-provider.fake.js';
+import type { TransferenciaProvider } from '../../src/adapters/pagamentos/transferencia-provider.js';
 import type { IdCampanha } from '../../src/domain/arrecadacao/value-objects/ids.js';
 import type { LancamentoFinanceiro } from '../../src/domain/pagamentos/financeiro/entities/lancamento-financeiro.js';
 import type { RepasseRecebedor } from '../../src/domain/pagamentos/financeiro/entities/repasse-recebedor.js';
@@ -298,8 +299,14 @@ describe('aprovado ≠ transferido (aperture-mno2s)', () => {
 describe('conta já aprovada e marcada transferida sem envio — "Enviar pelo Inter agora"', () => {
   const APROVADA_SEM_ENVIO = { status: 'aprovado', aprovadoEm: T0 } as const;
 
-  function reenviarDeps(enqueuer: RepasseJobEnqueuer) {
+  const CONFIRMA = { valorDigitadoCents: 4500, atestado: true } as const;
+
+  function reenviarDeps(
+    enqueuer: RepasseJobEnqueuer,
+    transferenciaProvider: TransferenciaProvider = new TransferenciaProviderFake(),
+  ) {
     return {
+      transferenciaProvider,
       livroFinanceiroRepository: repo,
       repasseJobEnqueuer: enqueuer,
       clock: () => new Date(),
@@ -316,6 +323,7 @@ describe('conta já aprovada e marcada transferida sem envio — "Enviar pelo In
       idRepasse,
       motivo: 'Aprovado antes da correção; nenhum envio ocorreu',
       solicitadoPor: 'admin@eunenem.com',
+      ...CONFIRMA,
     });
 
     expect(repasse.transferReferencia).not.toBeNull();
@@ -348,7 +356,12 @@ describe('conta já aprovada e marcada transferida sem envio — "Enviar pelo In
   it('segunda chamada não reenvia (um único job, ledger já desmarcado)', async () => {
     const { idRepasse } = await seedRepasseComLancamento(APROVADA_SEM_ENVIO, T0);
     const spy = spyEnqueuer();
-    const input = { idRepasse, motivo: 'Aprovado antes da correção', solicitadoPor: 'a@b.com' };
+    const input = {
+      idRepasse,
+      motivo: 'Aprovado antes da correção',
+      solicitadoPor: 'a@b.com',
+      ...CONFIRMA,
+    };
     await reenviarRepasseContaPeloInter(reenviarDeps(spy.enqueuer), input);
     await expect(
       reenviarRepasseContaPeloInter(reenviarDeps(spy.enqueuer), input),
@@ -371,6 +384,7 @@ describe('conta já aprovada e marcada transferida sem envio — "Enviar pelo In
         idRepasse,
         motivo: 'Aprovado antes da correção',
         solicitadoPor: 'a@b.com',
+        ...CONFIRMA,
       }),
     ).rejects.toThrow();
     expect(spy.executar).toHaveLength(0);
@@ -392,8 +406,125 @@ describe('conta já aprovada e marcada transferida sem envio — "Enviar pelo In
         idRepasse,
         motivo: 'Aprovado antes da correção',
         solicitadoPor: 'a@b.com',
+        ...CONFIRMA,
       }),
     ).rejects.toThrow();
     expect(spy.executar).toHaveLength(0);
+  });
+});
+
+describe('"Enviar pelo Inter agora" — guarda contra pagamento manual já feito (extrato)', () => {
+  const APROVADA = { status: 'aprovado', aprovadoEm: T0 } as const;
+  const CONFIRMA = { valorDigitadoCents: 4500, atestado: true } as const;
+  const base = { motivo: 'Aprovado antes da correção', solicitadoPor: 'a@b.com' };
+
+  function deps(provider: TransferenciaProvider, enqueuer: RepasseJobEnqueuer) {
+    return {
+      livroFinanceiroRepository: repo,
+      transferenciaProvider: provider,
+      repasseJobEnqueuer: enqueuer,
+      clock: () => new Date('2026-07-20T12:00:00Z'),
+      observability,
+    };
+  }
+
+  const debito = (extra: Record<string, unknown>) => ({
+    codigoSolicitacao: 'x',
+    valorCents: 4500 as never,
+    referencia: '',
+    status: 'pago',
+    e2eId: 'E123',
+    dataMovimento: '2026-07-17',
+    ...extra,
+  });
+
+  async function expectRefusedAndUntouched(
+    provider: TransferenciaProvider,
+    input: Record<string, unknown> = {},
+  ) {
+    const { idRepasse } = await seedRepasseComLancamento(APROVADA, T0);
+    const spy = spyEnqueuer();
+    await expect(
+      reenviarRepasseContaPeloInter(deps(provider, spy.enqueuer), {
+        idRepasse,
+        ...base,
+        ...CONFIRMA,
+        ...input,
+      } as never),
+    ).rejects.toThrow();
+    expect(spy.executar).toHaveLength(0);
+    expect(await stamped(idRepasse)).toBe(1);
+    expect((await repo.findRepasseById(idRepasse))?.transferReferencia).toBeNull();
+  }
+
+  it('débito de mesmo valor no extrato desde a aprovação ⇒ recusa, nada muda', async () => {
+    await expectRefusedAndUntouched(
+      new TransferenciaProviderFake({ buscarResultados: [debito({})] }),
+    );
+  });
+
+  it('débito para o mesmo destinatário (CPF) ⇒ recusa mesmo com valor diferente', async () => {
+    await expectRefusedAndUntouched(
+      new TransferenciaProviderFake({
+        buscarResultados: [
+          debito({ valorCents: 9999 as never, recipientDocument: '529.982.247-25' }),
+        ],
+      }),
+    );
+  });
+
+  it('a consulta do extrato usa a janela da aprovação até hoje', async () => {
+    const fake = new TransferenciaProviderFake();
+    const calls: Array<{ dataInicio: string; dataFim: string }> = [];
+    const original = fake.buscarPagamentos.bind(fake);
+    fake.buscarPagamentos = async (i) => {
+      calls.push(i);
+      return original(i);
+    };
+    const { idRepasse } = await seedRepasseComLancamento(APROVADA, T0);
+    await reenviarRepasseContaPeloInter(deps(fake, spyEnqueuer().enqueuer), {
+      idRepasse,
+      ...base,
+      ...CONFIRMA,
+    });
+    expect(calls).toEqual([{ dataInicio: '2026-07-16', dataFim: '2026-07-20' }]);
+  });
+
+  it('extrato inconclusivo (erro/429/incompleto) ⇒ falha fechada', async () => {
+    const quebrado = new TransferenciaProviderFake();
+    quebrado.buscarPagamentos = async () => {
+      throw new Error('extrato incompleto');
+    };
+    await expectRefusedAndUntouched(quebrado);
+  });
+
+  it('valor digitado diferente do repasse ⇒ recusa sem consultar o extrato', async () => {
+    const fake = new TransferenciaProviderFake();
+    await expectRefusedAndUntouched(fake, { valorDigitadoCents: 4400 });
+  });
+
+  it('sem o atestado "conferi o extrato" ⇒ recusa', async () => {
+    await expectRefusedAndUntouched(new TransferenciaProviderFake(), { atestado: false });
+  });
+
+  it('débito sem relação (outro valor, outro destinatário) não bloqueia', async () => {
+    const { idRepasse } = await seedRepasseComLancamento(APROVADA, T0);
+    const spy = spyEnqueuer();
+    await reenviarRepasseContaPeloInter(
+      deps(
+        new TransferenciaProviderFake({
+          buscarResultados: [
+            debito({
+              valorCents: 1234 as never,
+              recipientDocument: '11144477735',
+              recipientName: 'Outra Pessoa',
+            }),
+          ],
+        }),
+        spy.enqueuer,
+      ),
+      { idRepasse, ...base, ...CONFIRMA },
+    );
+    expect(spy.executar).toEqual([idRepasse]);
   });
 });

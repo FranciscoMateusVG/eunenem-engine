@@ -57,7 +57,7 @@ import {
   FinanceiroInputInvalidoError,
   FinanceiroRepasseNaoEncontradoError,
   FinanceiroRepasseReenvioInelegivelError,
-FinanceiroRepasseStatusInvalidoError,
+  FinanceiroRepasseStatusInvalidoError,
   ID_PLATAFORMA_EUNENEM,
   InitialCampaignGiftTemplateInvalidError,
   MAX_CATALOGO_IMAGEM_SIZE_BYTES,
@@ -3182,7 +3182,14 @@ const repassesRouter = t.router({
    * admin and motivo land on the attempt audit trail.
    */
   reenviarPeloInter: adminProcedure
-    .input(z.object({ idRepasse: z.string().uuid(), motivo: z.string().trim().min(10).max(1000) }))
+    .input(
+      z.object({
+        idRepasse: z.string().uuid(),
+        motivo: z.string().trim().min(10).max(1000),
+        valorDigitadoCents: z.number().int().positive(),
+        atestado: z.literal(true),
+      }),
+    )
     .output(z.object({ idRepasse: z.string(), status: z.string() }))
     .mutation(async ({ ctx, input }) => {
       const { usuario } = await resolverUsuarioAutenticado(ctx.deps, ctx.headers);
@@ -3191,10 +3198,17 @@ const repassesRouter = t.router({
           {
             livroFinanceiroRepository: ctx.deps.livroFinanceiroRepository,
             repasseJobEnqueuer: ctx.deps.repasseJobEnqueuer,
+            transferenciaProvider: ctx.deps.transferenciaProvider,
             clock: ctx.deps.clock,
             observability: ctx.deps.observability,
           },
-          { idRepasse: input.idRepasse, motivo: input.motivo, solicitadoPor: usuario.email },
+          {
+            idRepasse: input.idRepasse,
+            motivo: input.motivo,
+            solicitadoPor: usuario.email,
+            valorDigitadoCents: input.valorDigitadoCents,
+            atestado: input.atestado,
+          },
         );
         return { idRepasse: result.repasse.id, status: result.repasse.status };
       } catch (error: unknown) {
@@ -3203,10 +3217,7 @@ const repassesRouter = t.router({
           throw new TRPCError({ code: "NOT_FOUND", message: "repasse_nao_encontrado" });
         }
         if (error instanceof FinanceiroRepasseReenvioInelegivelError) {
-          throw new TRPCError({
-            code: "CONFLICT",
-            message: "Este repasse não pode ser enviado pelo Inter por esta ação (já houve tentativa, referência bancária ou não é conta).",
-          });
+          throw new TRPCError({ code: "CONFLICT", message: mensagemReenvioInelegivel(error) });
         }
         if (error instanceof FinanceiroInputInvalidoError) {
           throw new TRPCError({ code: "BAD_REQUEST", message: error.message });
@@ -4957,6 +4968,22 @@ const despesasRouter = t.router({
     };
   }),
 });
+
+function mensagemReenvioInelegivel(error: FinanceiroRepasseReenvioInelegivelError): string {
+  if (error.motivo === "possivel_pagamento_manual") {
+    const lista = error.candidatos
+      .map(
+        (c) =>
+          `${c.e2eId ?? "sem E2E"} — R$ ${(c.valorCents / 100).toFixed(2)} em ${c.dataMovimento ?? "data não informada"}`,
+      )
+      .join("; ");
+    return `Envio bloqueado: o extrato do Inter mostra débito(s) que podem ser o pagamento deste repasse (${lista}). Resolva pelo fluxo de verificação manual; nada foi alterado.`;
+  }
+  if (error.motivo === "extrato_inconclusivo") {
+    return "Envio bloqueado: não foi possível ler o extrato do Inter por completo. Tente novamente mais tarde; nada foi alterado.";
+  }
+  return "Este repasse não pode ser enviado pelo Inter por esta ação (já houve tentativa, referência bancária ou não é conta).";
+}
 
 export const adminRouter = t.router({
   /** Nested sub-router for usuarios browse + paginated list. */
