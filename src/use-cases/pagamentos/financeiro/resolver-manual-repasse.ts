@@ -35,20 +35,21 @@ export const RESOLUCAO_MANUAL_FALHOU_ERRO = 'RESOLUCAO_MANUAL_FALHOU';
 
 export const ResolverManualPagoRepasseInputSchema = z.object({
   idRepasse: IdRepasseSchema,
-  motivo: z.string().trim().min(10).max(1000),
+  /** Optional (aperture-puali): the admin's click is the authorization. */
+  motivo: z.string().trim().max(1000).optional(),
   /**
    * Inter's server-generated `codigoSolicitacao` for the payment the admin
    * confirmed is ours (copied from the persisted candidate list). This is the
    * ONLY identifier Inter reliably round-trips; the domain records it exactly
    * like the auto-pago path.
    */
-  interCodigoSolicitacao: z.string().trim().min(1).max(255),
+  interCodigoSolicitacao: z.string().trim().min(1).max(255).default('confirmado_manualmente'),
   /** Identifier of the acting admin (email) — audit trail. */
   resolvidoPor: z.string().min(1).max(255),
 });
 
 export type ResolverManualPagoRepasseInput = Readonly<
-  z.infer<typeof ResolverManualPagoRepasseInputSchema>
+  z.input<typeof ResolverManualPagoRepasseInputSchema>
 >;
 
 export const ResolverManualFalhouRepasseInputSchema = z.object({
@@ -83,8 +84,7 @@ export async function resolverManualPagoRepasse(
     try {
       const parsed = ResolverManualPagoRepasseInputSchema.safeParse(input);
       if (!parsed.success) {
-        const message = parsed.error.issues.map((issue) => issue.message).join('; ');
-        throw new FinanceiroInputInvalidoError(message);
+        throw new FinanceiroInputInvalidoError('Dados inválidos para confirmar o repasse.');
       }
       const { idRepasse, interCodigoSolicitacao, resolvidoPor, motivo } = parsed.data;
       span.setAttribute('financeiro.repasse.id', idRepasse);
@@ -93,7 +93,7 @@ export async function resolverManualPagoRepasse(
         idRepasse,
         interCodigoSolicitacao,
         resolvidoPor,
-        motivo,
+        motivo: motivo ?? '',
         agora: clock(),
       });
 

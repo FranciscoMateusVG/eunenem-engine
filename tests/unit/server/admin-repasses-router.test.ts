@@ -752,6 +752,12 @@ describe('admin.repasses.resolverManualPago (aperture-477nz)', () => {
     expect(attempts.at(-1)?.requestSummary).toContain('resolucao_manual_pago_por:');
   });
 
+  it('aperture-puali: "Confirmei que saiu" works with only idRepasse (no motivo, no codigo)', async () => {
+    const { idRepasse } = await seedVerificandoFlagged(rig);
+    const result = await rig.caller.admin.repasses.resolverManualPago({ idRepasse });
+    expect(result.status).toBe('pago');
+  });
+
   it('is a no-op on a non-flagged repasse (never entered manual resolution): does not book, does not stamp', async () => {
     // solicitado repasse — never flagged. The idempotent repo guard no-ops.
     const { idRepasse, idsLancamentos } = await seedPendingRepasse(rig);

@@ -5,6 +5,7 @@ import type { RepasseJobEnqueuer } from '../../../adapters/pagamentos/transferen
 import type { TransferenciaProvider } from '../../../adapters/pagamentos/transferencia-provider.js';
 import type { IdRepasse } from '../../../domain/pagamentos/financeiro/value-objects/ids.js';
 import { FinanceiroInputInvalidoError } from '../../../errors/pagamentos/financeiro/input-invalido.error.js';
+import { FinanceiroRepasseNaoEncontradoError } from '../../../errors/pagamentos/financeiro/repasse-nao-encontrado.error.js';
 import {
   classifyDestination,
   decideManualRecovery,
@@ -112,60 +113,42 @@ export async function consultarRecuperacaoRepasse(deps: RecoveryDeps, idRepasse:
     evidenceDigest: createHash('sha256').update(JSON.stringify(result)).digest('hex'),
   };
 }
+/**
+ * aperture-puali — the admin asking to retry IS the authorization. No
+ * attestation, evidence or typed amount; the extrato lookup stays available as
+ * information (`consultarRecuperacaoRepasse`) but never blocks. Server-side
+ * safety is invisible: the repository locks the row (FOR UPDATE), only a
+ * `verificando` repasse moves to `aprovado` (so at most one attempt is queued
+ * even under concurrent clicks) and an audit row records who/when/motivo.
+ */
 export const RecoveryInputSchema = z.object({
   idRepasse: z.string().uuid(),
-  expectedTransferAttempts: z.number().int().positive(),
-  evidenceDigest: z.string().regex(/^[a-f0-9]{64}$/),
-  motivo: z.string().trim().min(10).max(1000),
-  attestation: z
-    .object({
-      evidence: z.string().trim().min(10).max(2000),
-      periodStart: z.string().date(),
-      periodEnd: z.string().date(),
-      confirmedAmountCents: z.number().int().positive(),
-      dismissedE2Es: z.array(z.string().trim().min(1).max(255)).max(1000),
-    })
-    .optional(),
+  motivo: z.string().trim().max(1000).optional(),
 });
 export async function recuperarRepasse(
-  deps: RecoveryDeps & { repasseJobEnqueuer: RepasseJobEnqueuer },
+  deps: Pick<RecoveryDeps, 'livroFinanceiroRepository' | 'clock'> & {
+    repasseJobEnqueuer: RepasseJobEnqueuer;
+  },
   input: z.infer<typeof RecoveryInputSchema>,
   actor: string,
 ) {
   const parsed = RecoveryInputSchema.safeParse(input);
-  if (!parsed.success) throw new FinanceiroInputInvalidoError('Preencha motivo e confirmação');
+  if (!parsed.success) throw new FinanceiroInputInvalidoError('Repasse inválido.');
   const value = parsed.data;
-  const preview = await consultarRecuperacaoRepasse(deps, value.idRepasse as IdRepasse);
-  if (preview.decision === 'blocked')
-    throw new FinanceiroInputInvalidoError('Débito compatível ou sem destino: reenvio bloqueado');
-  if (
-    preview.evidenceDigest !== value.evidenceDigest ||
-    preview.expectedTransferAttempts !== value.expectedTransferAttempts
-  ) {
-    throw new FinanceiroInputInvalidoError('Consulta mudou. Consulte o Inter novamente');
-  }
-  if (preview.decision === 'manual_attestation') {
-    const att = value.attestation;
-    if (
-      !att ||
-      att.confirmedAmountCents !== preview.amountCents ||
-      att.periodStart > preview.period.dataInicio ||
-      att.periodEnd < preview.period.dataFim ||
-      preview.candidates.some((c) => !c.e2eId || !att.dismissedE2Es.includes(c.e2eId))
-    ) {
-      throw new FinanceiroInputInvalidoError('Ateste valor, período e cada E2E descartado');
-    }
-  }
+  const repasse = await deps.livroFinanceiroRepository.findRepasseById(
+    value.idRepasse as IdRepasse,
+  );
+  if (!repasse) throw new FinanceiroRepasseNaoEncontradoError(value.idRepasse as IdRepasse);
   return deps.livroFinanceiroRepository.recuperarRepasseTransaction(
     {
       idRepasse: value.idRepasse as IdRepasse,
-      expectedTransferAttempts: value.expectedTransferAttempts,
+      // Pinned to the attempt count read now: the locked transaction no-ops if
+      // another admin already moved the repasse on.
+      expectedTransferAttempts: repasse.transferAttempts,
       audit: JSON.stringify({
-        kind: preview.decision,
+        kind: 'admin_retry',
         actor,
-        motivo: value.motivo,
-        evidence: preview,
-        attestation: value.attestation ?? null,
+        motivo: value.motivo ?? null,
       }),
       agora: deps.clock(),
     },
