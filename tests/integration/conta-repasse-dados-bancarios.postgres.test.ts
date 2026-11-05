@@ -21,6 +21,7 @@ import { NoopLogger } from '../../src/observability/noop-logger.js';
 import type { Observability } from '../../src/observability/observability.js';
 import { aprovarRepasseRecebedor } from '../../src/use-cases/pagamentos/financeiro/aprovar-repasse-recebedor.js';
 import { executarTransferenciaRepasse } from '../../src/use-cases/pagamentos/financeiro/executar-transferencia-repasse.js';
+import { reenviarRepasseContaPeloInter } from '../../src/use-cases/pagamentos/financeiro/reenviar-repasse-conta-pelo-inter.js';
 import { seedLancamentoParents } from '../helpers/seed-lancamento-parents.js';
 import { createTestDatabase, type TestDatabase } from '../helpers/test-db.js';
 
@@ -83,7 +84,10 @@ beforeEach(async () => {
   await clean();
 });
 
-async function seedRepasseComLancamento(): Promise<{ idRepasse: IdRepasse; idCampanha: string }> {
+async function seedRepasseComLancamento(
+  override: Partial<RepasseRecebedor> = {},
+  transferidoEm: Date | null = null,
+): Promise<{ idRepasse: IdRepasse; idCampanha: string }> {
   const idRepasse = randomUUID() as IdRepasse;
   const idCampanha = randomUUID();
   const repasse: RepasseRecebedor = {
@@ -98,8 +102,14 @@ async function seedRepasseComLancamento(): Promise<{ idRepasse: IdRepasse; idCam
     interCodigoSolicitacao: null,
     transferAttempts: 0,
     lastTransferError: null,
+    ...override,
   };
   await repo.saveRepasse(repasse);
+  // saveRepasse persists only the basic columns; transfer columns go in directly.
+  await sql`UPDATE repasses_recebedor
+      SET transfer_referencia = ${repasse.transferReferencia},
+          transfer_attempts = ${repasse.transferAttempts}
+      WHERE id = ${idRepasse}`.execute(testDb.db);
   const lancamento: LancamentoFinanceiro = {
     id: randomUUID() as never,
     idPagamento: randomUUID() as never,
@@ -109,7 +119,7 @@ async function seedRepasseComLancamento(): Promise<{ idRepasse: IdRepasse; idCam
     tipo: 'credito_saldo_recebedor',
     amountCents: 4500 as never,
     criadoEm: T0,
-    transferidoEm: null,
+    transferidoEm,
     canceladoEm: null,
     idRepasse: idRepasse as never,
   };
@@ -210,5 +220,108 @@ describe('conta recebedor — pago automaticamente via DADOS_BANCARIOS', () => {
     expect(persisted?.status).toBe('falhou');
     expect(persisted?.lastTransferError).toBe('BANCO_DESCONHECIDO');
     expect(await stamped(idRepasse)).toBe(0);
+  });
+});
+
+describe('conta já aprovada e marcada transferida sem envio — "Enviar pelo Inter agora"', () => {
+  const APROVADA_SEM_ENVIO = { status: 'aprovado', aprovadoEm: T0 } as const;
+
+  function reenviarDeps(enqueuer: RepasseJobEnqueuer) {
+    return {
+      livroFinanceiroRepository: repo,
+      repasseJobEnqueuer: enqueuer,
+      clock: () => new Date(),
+      observability,
+    };
+  }
+
+  it('desmarca o ledger, enfileira pela mesma via nova, audita e depois paga por DADOS_BANCARIOS', async () => {
+    const { idRepasse } = await seedRepasseComLancamento(APROVADA_SEM_ENVIO, T0);
+    expect(await stamped(idRepasse)).toBe(1);
+    const spy = spyEnqueuer();
+
+    const { repasse } = await reenviarRepasseContaPeloInter(reenviarDeps(spy.enqueuer), {
+      idRepasse,
+      motivo: 'Aprovado antes da correção; nenhum envio ocorreu',
+      solicitadoPor: 'admin@eunenem.com',
+    });
+
+    expect(repasse.transferReferencia).not.toBeNull();
+    expect(spy.executar).toEqual([idRepasse]);
+    expect(await stamped(idRepasse)).toBe(0);
+    const audit = await sql<{ request_summary: string; operation: string }>`
+      SELECT request_summary, operation FROM repasse_transfer_attempts WHERE repasse_id = ${idRepasse}`.execute(
+      testDb.db,
+    );
+    expect(audit.rows).toHaveLength(1);
+    expect(audit.rows[0]?.operation).toBe('reenvio_inter');
+    expect(audit.rows[0]?.request_summary).toContain('admin@eunenem.com');
+    expect(audit.rows[0]?.request_summary).toContain('Aprovado antes da correção');
+
+    const fake = new TransferenciaProviderFake({ pagarPixOutcome: 'pago' });
+    await executarTransferenciaRepasse(
+      {
+        livroFinanceiroRepository: repo,
+        transferenciaProvider: fake,
+        clock: () => new Date(),
+        observability,
+      },
+      { idRepasse },
+    );
+    expect(fake.pagarPixCalls).toBe(1);
+    expect(fake.pagarPixInputs[0]?.destinatario.tipo).toBe('DADOS_BANCARIOS');
+    expect((await repo.findRepasseById(idRepasse))?.status).toBe('enviado_ao_banco');
+  });
+
+  it('segunda chamada não reenvia (um único job, ledger já desmarcado)', async () => {
+    const { idRepasse } = await seedRepasseComLancamento(APROVADA_SEM_ENVIO, T0);
+    const spy = spyEnqueuer();
+    const input = { idRepasse, motivo: 'Aprovado antes da correção', solicitadoPor: 'a@b.com' };
+    await reenviarRepasseContaPeloInter(reenviarDeps(spy.enqueuer), input);
+    await expect(
+      reenviarRepasseContaPeloInter(reenviarDeps(spy.enqueuer), input),
+    ).rejects.toThrow();
+    expect(spy.executar).toHaveLength(1);
+  });
+
+  it.each([
+    ['com referência bancária registrada', { bankTransferRef: 'E2E123' }],
+    ['com tentativa de envio já feita', { transferAttempts: 1, transferReferencia: 'EN1' }],
+    ['ainda solicitado', { status: 'solicitado', aprovadoEm: null }],
+  ])('inelegível %s: rejeita sem enfileirar nem desmarcar', async (_nome, override) => {
+    const { idRepasse } = await seedRepasseComLancamento(
+      { ...APROVADA_SEM_ENVIO, ...override } as Partial<RepasseRecebedor>,
+      T0,
+    );
+    const spy = spyEnqueuer();
+    await expect(
+      reenviarRepasseContaPeloInter(reenviarDeps(spy.enqueuer), {
+        idRepasse,
+        motivo: 'Aprovado antes da correção',
+        solicitadoPor: 'a@b.com',
+      }),
+    ).rejects.toThrow();
+    expect(spy.executar).toHaveLength(0);
+    expect(await stamped(idRepasse)).toBe(1);
+  });
+
+  it('recebedor PIX (não conta): rejeita', async () => {
+    recebedorAtual = {
+      metodo: 'pix',
+      nomeTitular: 'Bia',
+      cpfTitular: '52998224725',
+      tipoChavePix: 'email',
+      chavePix: 'bia@example.com',
+    };
+    const { idRepasse } = await seedRepasseComLancamento(APROVADA_SEM_ENVIO, T0);
+    const spy = spyEnqueuer();
+    await expect(
+      reenviarRepasseContaPeloInter(reenviarDeps(spy.enqueuer), {
+        idRepasse,
+        motivo: 'Aprovado antes da correção',
+        solicitadoPor: 'a@b.com',
+      }),
+    ).rejects.toThrow();
+    expect(spy.executar).toHaveLength(0);
   });
 });

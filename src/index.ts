@@ -847,6 +847,7 @@ export { ArrecadacaoRecebedorJaExisteError } from './errors/arrecadacao/recebedo
 export { CarrinhoMultiplasCampanhasError } from './errors/checkout/carrinho-multiplas-campanhas.error.js';
 export { FinanceiroRepasseJaPendenteError } from './errors/pagamentos/financeiro/repasse-ja-pendente.error.js';
 export { FinanceiroRepasseNaoEncontradoError } from './errors/pagamentos/financeiro/repasse-nao-encontrado.error.js';
+export { FinanceiroRepasseReenvioInelegivelError } from './errors/pagamentos/financeiro/repasse-reenvio-inelegivel.error.js';
 export { FinanceiroRepasseStatusInvalidoError } from './errors/pagamentos/financeiro/repasse-status-invalido.error.js';
 export { ContaComPendenciasFinanceirasError } from './errors/usuario/conta-com-pendencias.error.js';
 export { UsuarioNaoEncontradoError } from './errors/usuario/nao-encontrado.error.js';
@@ -1281,6 +1282,14 @@ export {
   ObterSaldoRecebedorInputSchema,
   obterSaldoRecebedor,
 } from './use-cases/pagamentos/financeiro/obter-saldo-recebedor.js';
+export type {
+  ReenviarRepasseContaPeloInterDeps,
+  ReenviarRepasseContaPeloInterInput,
+} from './use-cases/pagamentos/financeiro/reenviar-repasse-conta-pelo-inter.js';
+export {
+  ReenviarRepasseContaPeloInterInputSchema,
+  reenviarRepasseContaPeloInter,
+} from './use-cases/pagamentos/financeiro/reenviar-repasse-conta-pelo-inter.js';
 // Plan 0015 (aperture-7pqee): maturarLancamentosPendentes removed.
 // Lançamento has no FSM; admin manually marks transferidoEm via the new
 // marcar-lancamento-transferido use-case (Phase 2).

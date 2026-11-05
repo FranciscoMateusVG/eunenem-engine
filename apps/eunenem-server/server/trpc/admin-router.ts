@@ -56,7 +56,8 @@ import {
   estornarPagamento,
   FinanceiroInputInvalidoError,
   FinanceiroRepasseNaoEncontradoError,
-  FinanceiroRepasseStatusInvalidoError,
+  FinanceiroRepasseReenvioInelegivelError,
+FinanceiroRepasseStatusInvalidoError,
   ID_PLATAFORMA_EUNENEM,
   InitialCampaignGiftTemplateInvalidError,
   MAX_CATALOGO_IMAGEM_SIZE_BYTES,
@@ -71,6 +72,7 @@ import {
   prepareInitialCampaignTemplateItems,
   resolverManualPagoRepasse,
   retentarTransferenciaRepasse,
+  reenviarRepasseContaPeloInter,
   ValorUnitarioPresenteWriteSchema,
 } from "../../../../src/index.js";
 import type {
@@ -2642,7 +2644,7 @@ const RepasseTransferAttemptDTOSchema = z.object({
   outcome: z.string().nullable(),
   codigoSolicitacao: z.string().nullable(),
   error: z.string().nullable(),
-  operation: z.enum(['pagar_pix', 'cancelar', 'resolver_manual']).nullable(),
+  operation: z.enum(['pagar_pix', 'cancelar', 'resolver_manual', 'reenvio_inter']).nullable(),
   httpStatus: z.number().int().min(100).max(599).nullable(),
   providerRequestId: z.string().max(128).nullable(),
   responseClass: z
@@ -3166,6 +3168,48 @@ const repassesRouter = t.router({
             code: "BAD_REQUEST",
             message: error.message,
           });
+        }
+        throw error;
+      }
+    }),
+
+  /**
+   * reenviarPeloInter({ idRepasse, motivo }) — aperture-mno2s. "Enviar pelo
+   * Inter agora": admin-only, never automatic. For a `conta` repasse approved
+   * by the old manual path (ledger stamped transferido, zero send attempts, no
+   * bank reference): un-stamps the ledger and enqueues the real Inter send.
+   * Any attempt or bank reference ⇒ CONFLICT, nothing changes. The acting
+   * admin and motivo land on the attempt audit trail.
+   */
+  reenviarPeloInter: adminProcedure
+    .input(z.object({ idRepasse: z.string().uuid(), motivo: z.string().trim().min(10).max(1000) }))
+    .output(z.object({ idRepasse: z.string(), status: z.string() }))
+    .mutation(async ({ ctx, input }) => {
+      const { usuario } = await resolverUsuarioAutenticado(ctx.deps, ctx.headers);
+      try {
+        const result = await reenviarRepasseContaPeloInter(
+          {
+            livroFinanceiroRepository: ctx.deps.livroFinanceiroRepository,
+            repasseJobEnqueuer: ctx.deps.repasseJobEnqueuer,
+            clock: ctx.deps.clock,
+            observability: ctx.deps.observability,
+          },
+          { idRepasse: input.idRepasse, motivo: input.motivo, solicitadoPor: usuario.email },
+        );
+        return { idRepasse: result.repasse.id, status: result.repasse.status };
+      } catch (error: unknown) {
+        if (error instanceof FinanceiroContestacaoMedError) throw new TRPCError({code: "CONFLICT", message: error.message});
+        if (error instanceof FinanceiroRepasseNaoEncontradoError) {
+          throw new TRPCError({ code: "NOT_FOUND", message: "repasse_nao_encontrado" });
+        }
+        if (error instanceof FinanceiroRepasseReenvioInelegivelError) {
+          throw new TRPCError({
+            code: "CONFLICT",
+            message: "Este repasse não pode ser enviado pelo Inter por esta ação (já houve tentativa, referência bancária ou não é conta).",
+          });
+        }
+        if (error instanceof FinanceiroInputInvalidoError) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: error.message });
         }
         throw error;
       }

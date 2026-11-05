@@ -13,6 +13,7 @@ import {
   marcarRepasseNeedsManualResolution,
   marcarRepassePago,
   marcarRepasseVerificando,
+  motivoReenvioInelegivel,
   type RepasseRecebedor,
   resolverManualFalhou,
   resolverManualPago,
@@ -28,6 +29,7 @@ import type {
 import { FinanceiroPagamentoJaRegistradoError } from '../../../errors/pagamentos/financeiro/pagamento-ja-registrado.error.js';
 import { FinanceiroRepasseJaPendenteError } from '../../../errors/pagamentos/financeiro/repasse-ja-pendente.error.js';
 import { FinanceiroRepasseNaoEncontradoError } from '../../../errors/pagamentos/financeiro/repasse-nao-encontrado.error.js';
+import { FinanceiroRepasseReenvioInelegivelError } from '../../../errors/pagamentos/financeiro/repasse-reenvio-inelegivel.error.js';
 import { FinanceiroRepasseStatusInvalidoError } from '../../../errors/pagamentos/financeiro/repasse-status-invalido.error.js';
 import type { RecebedorRepository } from '../../arrecadacao/recebedor-repository.js';
 import { PaymentMoneyMovementMemoryCoordinator } from '../payment-money-movement-lock.memory.js';
@@ -89,7 +91,7 @@ interface RepasseTransferAttemptRecord {
   codigoSolicitacao: string | null;
   error: string | null;
   finishedAt: Date | null;
-  operation: 'pagar_pix' | 'cancelar' | 'resolver_manual' | null;
+  operation: 'pagar_pix' | 'cancelar' | 'resolver_manual' | 'reenvio_inter' | null;
   httpStatus: number | null;
   providerRequestId: string | null;
   responseClass: RepasseTransferObservation['responseClass'] | null;
@@ -781,6 +783,79 @@ export class LivroFinanceiroRepositoryMemory implements LivroFinanceiroRepositor
 
           span.setStatus({ code: SpanStatusCode.OK });
           return { repasse: updated };
+        } catch (error: unknown) {
+          span.recordException(error as Error);
+          span.setStatus({ code: SpanStatusCode.ERROR });
+          throw error;
+        } finally {
+          span.end();
+        }
+      },
+    );
+  }
+
+  async reenviarRepasseContaPeloInterTransaction(
+    input: {
+      readonly idRepasse: IdRepasse;
+      readonly transferReferencia: string;
+      readonly solicitadoPor: string;
+      readonly motivo: string;
+      readonly agora: Date;
+    },
+    enqueueDentroDaTransacao: (executor: RepasseTransactionExecutor) => Promise<void>,
+  ): Promise<{ readonly repasse: RepasseRecebedor; readonly lancamentosDesmarcados: number }> {
+    return tracer.startActiveSpan(
+      'db.financeiro_livro.repasses.reenviarContaPeloInterTransaction',
+      async (span) => {
+        span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'UPDATE' });
+        try {
+          const existing = this.repasses.get(input.idRepasse);
+          if (!existing) {
+            throw new FinanceiroRepasseNaoEncontradoError(input.idRepasse);
+          }
+          const tentativas = this.repasseTransferAttempts.filter(
+            (a) => a.repasseId === input.idRepasse && a.operation === 'pagar_pix',
+          ).length;
+          const motivoInelegivel = motivoReenvioInelegivel(existing, tentativas);
+          if (motivoInelegivel) {
+            throw new FinanceiroRepasseReenvioInelegivelError(input.idRepasse, motivoInelegivel);
+          }
+
+          const updated = { ...existing, transferReferencia: input.transferReferencia };
+          this.repasses.set(updated.id, updated);
+          let lancamentosDesmarcados = 0;
+          for (const [id, l] of this.lancamentos) {
+            if (
+              l.idRepasse === input.idRepasse &&
+              l.transferidoEm !== null &&
+              l.canceladoEm === null
+            ) {
+              this.lancamentos.set(id, { ...l, transferidoEm: null });
+              lancamentosDesmarcados += 1;
+            }
+          }
+          const maxAttemptNo = this.repasseTransferAttempts
+            .filter((a) => a.repasseId === input.idRepasse)
+            .reduce((max, a) => Math.max(max, a.attemptNo), 0);
+          this.pushTransferAttempt({
+            id: randomUUID(),
+            repasseId: input.idRepasse,
+            attemptNo: maxAttemptNo + 1,
+            referencia: input.transferReferencia,
+            startedAt: input.agora,
+            requestSummary: `reenvio_inter_por:${input.solicitadoPor};motivo:${input.motivo}`,
+            outcome: 'reenvio_autorizado',
+            codigoSolicitacao: null,
+            error: null,
+            finishedAt: input.agora,
+            operation: 'reenvio_inter',
+            stateBefore: existing.status,
+            stateAfter: existing.status,
+          });
+          await enqueueDentroDaTransacao({ executeSql: async () => ({ rows: [] }) });
+
+          span.setStatus({ code: SpanStatusCode.OK });
+          return { repasse: updated, lancamentosDesmarcados };
         } catch (error: unknown) {
           span.recordException(error as Error);
           span.setStatus({ code: SpanStatusCode.ERROR });
