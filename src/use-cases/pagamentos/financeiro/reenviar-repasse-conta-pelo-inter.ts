@@ -34,24 +34,17 @@ async function comPrazo<T>(promise: Promise<T>): Promise<T> {
  * although no money was sent (approved, ledger stamped, zero send attempts, no
  * bank reference): un-stamp the ledger and enqueue the real Inter send through
  * the same pipeline new approvals use, atomically, with an audit row (acting
- * admin + motivo). Any attempt or bank reference makes it ineligible, so it
- * cannot double-pay.
+ * admin + optional motivo). Any attempt or bank reference makes it ineligible,
+ * so it cannot double-pay.
  *
- * An old manual approval could have been paid by hand with the bank reference
- * left blank, so before un-stamping the Inter extrato is checked from the
- * solicitação (minus a day) to today: any debit of the same amount or to the same
- * recipient, or an extrato that cannot be read completely, REFUSES the resend
- * (fail closed). The operator must also re-type the amount and attest they
- * checked the statement.
+ * aperture-puali — the admin asking to resend IS the authorization: no typed
+ * amount, no attestation, and the Inter extrato never blocks. It is exposed
+ * separately (`consultarCandidatosReenvio`) as information only.
  */
 export const ReenviarRepasseContaPeloInterInputSchema = z.object({
   idRepasse: IdRepasseSchema,
-  motivo: z.string().trim().min(10).max(1000),
+  motivo: z.string().trim().max(1000).optional(),
   solicitadoPor: z.string().trim().min(1).max(320),
-  /** The operator re-typed the repasse amount (cents) to prove they looked at it. */
-  valorDigitadoCents: z.number().int().positive(),
-  /** "Conferi o extrato e este repasse não foi pago por fora." */
-  atestado: z.literal(true),
 });
 
 export type ReenviarRepasseContaPeloInterInput = Readonly<
@@ -77,11 +70,9 @@ export async function reenviarRepasseContaPeloInter(
     try {
       const parsed = ReenviarRepasseContaPeloInterInputSchema.safeParse(input);
       if (!parsed.success) {
-        throw new FinanceiroInputInvalidoError(
-          parsed.error.issues.map((issue) => issue.message).join('; '),
-        );
+        throw new FinanceiroInputInvalidoError('Dados inválidos para reenviar o repasse.');
       }
-      const { idRepasse, motivo, solicitadoPor, valorDigitadoCents } = parsed.data;
+      const { idRepasse, motivo, solicitadoPor } = parsed.data;
       span.setAttribute('financeiro.repasse.id', idRepasse);
 
       const repasse = await livroFinanceiroRepository.findRepasseById(idRepasse);
@@ -93,19 +84,12 @@ export async function reenviarRepasseContaPeloInter(
         throw new FinanceiroRepasseReenvioInelegivelError(idRepasse, 'recebedor_nao_conta');
       }
 
-      if (valorDigitadoCents !== repasse.amountCents) {
-        throw new FinanceiroInputInvalidoError(
-          'O valor digitado não confere com o valor do repasse.',
-        );
-      }
-      await assertSemPagamentoManualNoExtrato(deps, repasse, recebedor);
-
       const result = await livroFinanceiroRepository.reenviarRepasseContaPeloInterTransaction(
         {
           idRepasse,
           transferReferencia: gerarTransferReferencia(idRepasse),
           solicitadoPor,
-          motivo,
+          motivo: motivo ?? '',
           agora: clock(),
         },
         (executor) => repasseJobEnqueuer.enqueueExecutar({ idRepasse }, executor),
@@ -128,11 +112,33 @@ export async function reenviarRepasseContaPeloInter(
   });
 }
 
-async function assertSemPagamentoManualNoExtrato(
-  deps: ReenviarRepasseContaPeloInterDeps,
-  repasse: RepasseRecebedor,
-  recebedor: { readonly nomeTitular: string; readonly cpfTitular: string },
-): Promise<void> {
+export interface CandidatoExtratoReenvio {
+  readonly e2eId: string | null;
+  readonly valorCents: number;
+  readonly dataMovimento: string | null;
+}
+
+/**
+ * Informational only (never blocks a resend): debits in the Inter extrato that
+ * look like a hand payment of this repasse. `disponivel: false` when the
+ * extrato could not be read.
+ */
+export async function consultarCandidatosReenvio(
+  deps: Pick<
+    ReenviarRepasseContaPeloInterDeps,
+    'livroFinanceiroRepository' | 'transferenciaProvider' | 'clock'
+  >,
+  idRepasse: z.infer<typeof IdRepasseSchema>,
+): Promise<{
+  readonly disponivel: boolean;
+  readonly candidatos: readonly CandidatoExtratoReenvio[];
+}> {
+  const repasse = await deps.livroFinanceiroRepository.findRepasseById(idRepasse);
+  if (!repasse) throw new FinanceiroRepasseNaoEncontradoError(idRepasse);
+  const recebedor = await deps.livroFinanceiroRepository.findRecebedorAtivoPorIdCampanha(
+    repasse.idCampanha,
+  );
+  if (recebedor?.metodo !== 'conta') return { disponivel: false, candidatos: [] };
   // The old workflow was pay-by-hand THEN approve, so the payment can predate
   // aprovadoEm: start at the solicitação, minus a day (extrato dates are BRT).
   const inicio = new Date(repasse.solicitadoEm.getTime() - 86_400_000);
@@ -146,7 +152,7 @@ async function assertSemPagamentoManualNoExtrato(
   try {
     pagamentos = await comPrazo(deps.transferenciaProvider.buscarPagamentos(periodo));
   } catch {
-    throw new FinanceiroRepasseReenvioInelegivelError(repasse.id, 'extrato_inconclusivo');
+    return { disponivel: false, candidatos: [] };
   }
   const cpf = recebedor.cpfTitular.replace(/\D/g, '');
   const nome = recebedor.nomeTitular.normalize('NFKC').trim().replace(/\s+/g, ' ').toLowerCase();
@@ -163,11 +169,5 @@ async function assertSemPagamentoManualNoExtrato(
       valorCents: p.valorCents as number,
       dataMovimento: p.dataMovimento ?? null,
     }));
-  if (candidatos.length > 0) {
-    throw new FinanceiroRepasseReenvioInelegivelError(
-      repasse.id,
-      'possivel_pagamento_manual',
-      candidatos,
-    );
-  }
+  return { disponivel: true, candidatos };
 }

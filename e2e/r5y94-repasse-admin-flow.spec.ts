@@ -209,24 +209,11 @@ test.describe('aperture-r5y94 — repasse admin payout walks', () => {
       await expect(page.getByText(CANDIDATE_CODE).first()).toBeVisible();
       await expect(page.getByText('e***@e***.com').first()).toBeVisible();
 
-      // Fresh read-only lookup, evidence table, then a separate confirmation.
-      await page.getByRole('button', { name: 'Confirmei que NÃO saiu' }).click();
-      await expect(
-        page.getByRole('table').filter({ hasText: 'Débitos candidatos no extrato' }),
-      ).toBeVisible();
-      await expect(page.getByText('A consulta é inconclusiva.', { exact: false })).toBeVisible();
-      const authorize = page.getByRole('button', { name: 'Autorizar uma nova tentativa' });
-      await expect(authorize).toBeDisabled();
-      await page.getByLabel('Motivo obrigatório').fill('Extrato sintético conferido pelo teste');
-      await page.getByLabel('Evidência do extrato').fill('Período sintético completo conferido');
-      await page.getByLabel('Digite o valor em reais', { exact: false }).fill('73,50');
-      await page
-        .getByRole('checkbox', { name: 'Confirmo esta ação e seu registro no histórico.' })
-        .check();
-      await authorize.click();
+      // One click + one confirmation; the Inter lookup is information only.
+      await page.getByRole('button', { name: 'Tentar de novo' }).click();
       const retryDialog = page.getByRole('dialog', { name: 'Confirmar nova tentativa' });
       await expect(retryDialog).toBeVisible();
-      await expect(retryDialog).toContainText('pagar duas vezes');
+      await expect(retryDialog).toContainText('recebe duas vezes');
       await retryDialog.getByRole('button', { name: 'Voltar' }).click();
       await expect(retryDialog).toBeHidden();
       // No retry/payment was authorized by opening or dismissing the dialog.
@@ -234,17 +221,9 @@ test.describe('aperture-r5y94 — repasse admin payout walks', () => {
       expect((await getLancamentoById(db, idLancamento))?.transferido_em).toBeNull();
 
       await page.getByRole('button', { name: 'Confirmei que saiu', exact: true }).click();
-      const markPaid = page.getByRole('button', { name: 'Confirmar como pago', exact: true });
-      await expect(markPaid).toBeDisabled();
-      await page.getByLabel('Referência bancária', { exact: true }).fill(CANDIDATE_CODE);
-      await page
-        .getByRole('checkbox', { name: 'Confirmo esta ação e seu registro no histórico.' })
-        .check();
-      await markPaid.click();
       const pagoDialog = page.getByRole('dialog', { name: 'Confirmar pagamento manual' });
       await expect(pagoDialog).toBeVisible();
-      await expect(pagoDialog).toContainText(CANDIDATE_CODE);
-      await pagoDialog.getByRole('button', { name: 'Confirmar definitivamente' }).click();
+      await pagoDialog.getByRole('button', { name: 'Confirmar', exact: true }).click();
       await expect(pagoDialog).toBeHidden();
 
       // Manual pago books the repasse + settles the lançamento.

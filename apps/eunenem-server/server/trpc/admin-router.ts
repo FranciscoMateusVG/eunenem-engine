@@ -73,6 +73,7 @@ import {
   resolverManualPagoRepasse,
   retentarTransferenciaRepasse,
   reenviarRepasseContaPeloInter,
+  consultarCandidatosReenvio,
   ValorUnitarioPresenteWriteSchema,
 } from "../../../../src/index.js";
 import type {
@@ -3181,13 +3182,30 @@ const repassesRouter = t.router({
    * Any attempt or bank reference ⇒ CONFLICT, nothing changes. The acting
    * admin and motivo land on the attempt audit trail.
    */
+  /** Informational extrato lookup for the resend screen — never blocks. */
+  candidatosReenvio: adminProcedure
+    .input(z.object({ idRepasse: z.string().uuid() }))
+    .query(async ({ ctx, input }) => {
+      try {
+        const r = await consultarCandidatosReenvio(
+          {
+            livroFinanceiroRepository: ctx.deps.livroFinanceiroRepository,
+            transferenciaProvider: ctx.deps.transferenciaProvider,
+            clock: ctx.deps.clock,
+          },
+          input.idRepasse as never,
+        );
+        return { disponivel: r.disponivel, candidatos: [...r.candidatos] };
+      } catch {
+        return { disponivel: false, candidatos: [] };
+      }
+    }),
+
   reenviarPeloInter: adminProcedure
     .input(
       z.object({
         idRepasse: z.string().uuid(),
-        motivo: z.string().trim().min(10).max(1000),
-        valorDigitadoCents: z.number().int().positive(),
-        atestado: z.literal(true),
+        motivo: z.string().trim().max(1000).optional(),
       }),
     )
     .output(z.object({ idRepasse: z.string(), status: z.string() }))
@@ -3204,10 +3222,8 @@ const repassesRouter = t.router({
           },
           {
             idRepasse: input.idRepasse,
-            motivo: input.motivo,
+            ...(input.motivo ? { motivo: input.motivo } : {}),
             solicitadoPor: usuario.email,
-            valorDigitadoCents: input.valorDigitadoCents,
-            atestado: input.atestado,
           },
         );
         return { idRepasse: result.repasse.id, status: result.repasse.status };
@@ -3242,8 +3258,8 @@ const repassesRouter = t.router({
     .input(
       z.object({
         idRepasse: z.string().uuid(),
-        codigoSolicitacao: z.string().trim().min(1).max(255),
-        motivo: z.string().trim().min(10).max(1000),
+        codigoSolicitacao: z.string().trim().min(1).max(255).optional(),
+        motivo: z.string().trim().max(1000).optional(),
       }),
     )
     .output(
@@ -3267,8 +3283,8 @@ const repassesRouter = t.router({
           },
           {
             idRepasse: input.idRepasse,
-            interCodigoSolicitacao: input.codigoSolicitacao,
-            motivo: input.motivo,
+            ...(input.codigoSolicitacao ? { interCodigoSolicitacao: input.codigoSolicitacao } : {}),
+            ...(input.motivo ? { motivo: input.motivo } : {}),
             resolvidoPor: usuario.email,
           },
         );
@@ -3330,6 +3346,7 @@ const repassesRouter = t.router({
         const result = await recuperarRepasse(ctx.deps, input, usuario.email);
         return { idRepasse: result.repasse.id, status: result.repasse.status };
       } catch (error) {
+        if (error instanceof FinanceiroRepasseNaoEncontradoError) throw new TRPCError({ code: "NOT_FOUND", message: "Repasse não encontrado." });
         if (error instanceof FinanceiroInputInvalidoError) throw new TRPCError({ code: "BAD_REQUEST", message: error.message });
         throw error;
       }

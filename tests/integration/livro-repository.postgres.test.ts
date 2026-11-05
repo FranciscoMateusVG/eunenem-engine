@@ -872,6 +872,30 @@ describe('LivroFinanceiroRepositoryPostgres — manual resolution (aperture-477n
     expect(history).toHaveLength(3);
   });
 
+  it('aperture-puali — stale screen (expected=1 but attempt 2 is verificando) never queues another retry', async () => {
+    const { idRepasse } = await seedVerificando();
+    await sql`UPDATE repasses_recebedor SET transfer_attempts = 2 WHERE id = ${idRepasse}`.execute(
+      testDb.db,
+    );
+    let enqueued = 0;
+    const deps = {
+      livroFinanceiroRepository: repo,
+      clock: () => new Date('2026-07-16T12:10:00Z'),
+      repasseJobEnqueuer: {
+        enqueueExecutar: async () => {
+          enqueued++;
+        },
+        enqueueConfirmar: async () => {},
+      },
+    };
+    await expect(
+      recuperarRepasse(deps, { idRepasse, expectedTransferAttempts: 1 }, 'a@b.com'),
+    ).rejects.toThrow('O repasse mudou');
+    expect(enqueued).toBe(0);
+    await recuperarRepasse(deps, { idRepasse, expectedTransferAttempts: 2 }, 'a@b.com');
+    expect(enqueued).toBe(1);
+  });
+
   it('45h33 — enqueue failure rolls recovery and audit back', async () => {
     const { idRepasse } = await seedVerificando();
     await expect(
@@ -899,7 +923,7 @@ describe('LivroFinanceiroRepositoryPostgres — manual resolution (aperture-477n
     'OTHER',
     'UNKNOWN_DEST',
     'PIXP97',
-  ])('45h33 real PG + HTTP %s: no double payment; manual attestation required when inconclusive', async (status) => {
+  ])('45h33 real PG + HTTP %s: one click retries regardless of extrato; never double-queues', async (status) => {
     const { idRepasse, idCampanha } = await seedVerificando();
     await sql`INSERT INTO recebedores (id, campanha_id, nome_titular, metodo, tipo_chave_pix, chave_pix, cpf_titular, is_active, criada_em)
       VALUES (${randomUUID()}, ${idCampanha}, 'Ana Teste', 'pix', 'email', 'ana@example.test', '52998224725', TRUE, NOW())`.execute(
@@ -990,54 +1014,27 @@ describe('LivroFinanceiroRepositoryPostgres — manual resolution (aperture-477n
           enqueueConfirmar: async () => {},
         },
       };
+      // The extrato lookup is information only: it never blocks the retry.
       const preview = await consultarRecuperacaoRepasse(deps, idRepasse);
-      const input = {
-        idRepasse,
-        evidenceDigest: preview.evidenceDigest,
-        expectedTransferAttempts: 1,
-        motivo: 'Extrato sintético conferido',
-        attestation: {
-          evidence: 'Extrato sintético sem pagamento',
-          periodStart: preview.period.dataInicio,
-          periodEnd: preview.period.dataFim,
-          confirmedAmountCents: 5000,
-          dismissedE2Es: [] as string[],
-        },
-      };
-      if (['REALIZADO', 'MATCH', 'UNKNOWN_DEST'].includes(status)) {
-        await expect(recuperarRepasse(deps, input, 'admin@example.test')).rejects.toThrow(
-          'bloqueado',
-        );
-        expect(enqueued).toBe(0);
-      } else {
-        if (['HTTP404', 'PIXP97'].includes(status)) {
-          const { attestation: _, ...withoutAttestation } = input;
-          await expect(
-            recuperarRepasse(deps, withoutAttestation, 'admin@example.test'),
-          ).rejects.toThrow('Ateste');
-          expect(enqueued).toBe(0);
-          for (const attestation of [
-            { ...input.attestation, evidence: '' },
-            { ...input.attestation, confirmedAmountCents: 1 },
-            { ...input.attestation, periodStart: '2027-01-01' },
-            { ...input.attestation, periodEnd: '2020-01-01' },
-          ]) {
-            await expect(
-              recuperarRepasse(deps, { ...input, attestation }, 'admin@example.test'),
-            ).rejects.toThrow();
-          }
-          expect(enqueued).toBe(0);
-        }
-        if (status === 'OTHER') {
-          await expect(recuperarRepasse(deps, input, 'admin@example.test')).rejects.toThrow(
-            'Ateste',
-          );
-          input.attestation.dismissedE2Es.push('E_SYNTHETIC');
-        }
-        await recuperarRepasse(deps, input, 'admin@example.test');
-        expect(enqueued).toBe(1);
-        expect((await repo.findRepasseById(idRepasse))?.status).toBe('aprovado');
-      }
+      expect(preview.candidates.length).toBe(
+        ['MATCH', 'OTHER', 'UNKNOWN_DEST'].includes(status) ? 1 : 0,
+      );
+      // One click: no attestation, evidence, amount or motivo.
+      await recuperarRepasse(
+        deps,
+        { idRepasse, expectedTransferAttempts: 1 },
+        'admin@example.test',
+      );
+      expect(enqueued).toBe(1);
+      expect((await repo.findRepasseById(idRepasse))?.status).toBe('aprovado');
+      // A second click (or a concurrent one) never queues another attempt.
+      await expect(
+        recuperarRepasse(deps, { idRepasse, expectedTransferAttempts: 1 }, 'admin@example.test'),
+      ).rejects.toThrow('O repasse mudou');
+      expect(enqueued).toBe(1);
+      const history = await repo.findTransferAttemptsByRepasseId(idRepasse);
+      const audit = history.find((a) => a.operation === 'resolver_manual');
+      expect(audit?.requestSummary).toContain('admin@example.test');
       expect(calls.filter((c) => c.startsWith('POST /banking'))).toEqual([]);
     } finally {
       server.closeAllConnections();
