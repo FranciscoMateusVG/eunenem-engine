@@ -508,7 +508,7 @@ export function useStubRepasseResolverManualPago(
       onSuccess({
         idRepasse: result.idRepasse,
         status: result.status as RepasseStatus,
-        codigoSolicitacao: input.codigoSolicitacao,
+        codigoSolicitacao: input.codigoSolicitacao ?? "confirmado_manualmente",
       });
     },
   });
@@ -521,7 +521,7 @@ export function useStubRepasseResolverManualPago(
         ? {
             idRepasse: mutation.data.idRepasse,
             status: mutation.data.status as RepasseStatus,
-            codigoSolicitacao: mutation.variables.codigoSolicitacao,
+            codigoSolicitacao: mutation.variables.codigoSolicitacao ?? "confirmado_manualmente",
           }
         : null,
   };
