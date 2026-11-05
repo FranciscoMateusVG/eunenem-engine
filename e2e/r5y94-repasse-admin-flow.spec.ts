@@ -57,6 +57,8 @@ async function aprovar(page: import('@playwright/test').Page): Promise<void> {
   await page.getByRole('button', { name: 'Aprovar repasse' }).click();
   const dialog = page.getByRole('dialog', { name: 'Confirmar aprovação de repasse' });
   await expect(dialog).toBeVisible();
+  // Approval is an explicit choice (aperture-mno2s): send via Inter, no hand-paid reference.
+  await dialog.getByRole('radio', { name: /Enviar pelo Inter agora/ }).check();
   await dialog.getByRole('button', { name: 'Confirmar aprovação' }).click();
   await expect(dialog).toBeHidden();
 }
