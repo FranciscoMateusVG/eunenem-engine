@@ -485,6 +485,15 @@ export class TransferenciaProviderInter implements TransferenciaProvider {
         const resultados: PagamentoEncontrado[] = [];
         for (const transacao of transacoes) {
           const encontrado = mapPixOutTransacao(transacao, input.incluirTodosDebitos === true);
+          // The resend guard must not silently skip a debit it cannot read:
+          // an unreadable amount is inconclusive evidence (caller refuses).
+          if (
+            encontrado === null &&
+            input.incluirTodosDebitos === true &&
+            transacao.tipoOperacao === 'D'
+          ) {
+            throw new Error('buscarPagamentos: débito com valor ilegível (extrato inconclusivo)');
+          }
           if (encontrado !== null) {
             resultados.push(encontrado);
           }

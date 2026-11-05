@@ -438,6 +438,26 @@ describe('TransferenciaProviderInter — buscarPagamentos incluirTodosDebitos (a
   });
 });
 
+describe('TransferenciaProviderInter — guard strictness (aperture-mno2s)', () => {
+  it('incluirTodosDebitos: a debit with an unreadable valor is inconclusive (throws), not skipped', async () => {
+    const t = new ScriptedTransport().push(TOKEN_OK, {
+      statusCode: 200,
+      body: JSON.stringify({
+        ultimaPagina: true,
+        totalPaginas: 1,
+        transacoes: [{ tipoOperacao: 'D', tipoTransacao: 'TED', valor: 'abc', detalhes: {} }],
+      }),
+    });
+    await expect(
+      newProvider(t).buscarPagamentos({
+        dataInicio: '2026-07-01',
+        dataFim: '2026-07-02',
+        incluirTodosDebitos: true,
+      }),
+    ).rejects.toThrow(/ilegível/);
+  });
+});
+
 describe('TransferenciaProviderInter — x-id-idempotente (aperture-mno2s)', () => {
   const keyOf = (t: ScriptedTransport) =>
     t.calls.find((c) => c.path === '/banking/v2/pix')?.headers['x-id-idempotente'];
