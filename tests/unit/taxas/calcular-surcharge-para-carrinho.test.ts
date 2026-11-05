@@ -13,7 +13,6 @@ describe('calcularSurchargeParaCarrinho — base is gift + EuNeném fee', () => 
       metodo: 'credit_card',
     });
     expect(r?.amountCents).toBe(926);
-    expect(21796 + 926).toBe(22722);
   });
 
   it('pix returns null', async () => {

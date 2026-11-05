@@ -44,7 +44,8 @@ import {
   useRef,
 } from 'react';
 import { type OrigemCarrinho, despacharComDelta } from './analytics-funil.js';
-import { computeCardSurchargeCents, type MoneyCents } from '../../../../src/index.js';
+import { computeCardSurchargeCents } from '../../../../src/adapters/pagamentos/card-surcharge.js';
+import type { MoneyCents } from '../../../../src/domain/money.js';
 import type { VisitorGift } from './visitorGift.js';
 
 // ── Types ──────────────────────────────────────────────────────────────────
