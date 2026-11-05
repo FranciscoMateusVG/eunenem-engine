@@ -445,3 +445,27 @@ export function resolverManualFalhou(repasse: RepasseRecebedor, erro: string): R
     needsManualResolution: false,
   };
 }
+
+/**
+ * aperture-mno2s. Why a repasse may NOT be re-sent through Inter by the
+ * "Enviar pelo Inter agora" admin action, or null when it is eligible: only
+ * an `aprovado` repasse with no stable reference, no send attempt and no
+ * recorded bank reference (i.e. approved by the old manual `conta` path,
+ * ledger stamped, but no money ever sent).
+ */
+export function motivoReenvioInelegivel(
+  repasse: RepasseRecebedor,
+  tentativasDeEnvio: number,
+): 'nao_aprovado' | 'ja_enviado_ou_tentado' | 'referencia_bancaria_registrada' | null {
+  if (repasse.status !== 'aprovado') return 'nao_aprovado';
+  if (repasse.bankTransferRef !== null) return 'referencia_bancaria_registrada';
+  if (
+    repasse.transferReferencia !== null ||
+    repasse.transferAttempts > 0 ||
+    tentativasDeEnvio > 0 ||
+    repasse.interCodigoSolicitacao !== null
+  ) {
+    return 'ja_enviado_ou_tentado';
+  }
+  return null;
+}

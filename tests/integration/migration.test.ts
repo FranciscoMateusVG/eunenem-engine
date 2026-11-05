@@ -484,6 +484,9 @@ describe('Migration round-trip', () => {
     //    this sequence must start at the LATEST migration and walk earlier.
     //    Adding a new migration on top REQUIRES prepending its down-step here.
 
+    // 077 repasse attempt 'reenvio_inter' operation.
+    expect((await migrator.migrateDown()).error).toBeUndefined();
+
     // 076 list cohort range lookup.
     expect(
       (

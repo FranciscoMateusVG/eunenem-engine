@@ -261,6 +261,30 @@ export interface LivroFinanceiroRepository {
   ): Promise<{ readonly repasse: RepasseRecebedor }>;
 
   /**
+   * aperture-mno2s — release a `conta` repasse that the old manual approval
+   * marked transferido WITHOUT any money being sent, and enqueue its real
+   * send. Eligible ONLY when, under FOR UPDATE: status='aprovado',
+   * transfer_referencia IS NULL, transfer_attempts = 0, bank_transfer_ref IS
+   * NULL and no payment attempt row exists. Otherwise throws
+   * FinanceiroRepasseReenvioInelegivelError and changes nothing.
+   *
+   * Atomically: binds the stable transferReferencia, clears transferido_em on
+   * the linked lançamentos, appends an audit row (acting admin + motivo) and
+   * invokes `enqueueDentroDaTransacao` bound to this transaction. Never
+   * automatic — only an explicit admin action calls it.
+   */
+  reenviarRepasseContaPeloInterTransaction(
+    input: {
+      readonly idRepasse: IdRepasse;
+      readonly transferReferencia: string;
+      readonly solicitadoPor: string;
+      readonly motivo: string;
+      readonly agora: Date;
+    },
+    enqueueDentroDaTransacao: (executor: RepasseTransactionExecutor) => Promise<void>,
+  ): Promise<{ readonly repasse: RepasseRecebedor; readonly lancamentosDesmarcados: number }>;
+
+  /**
    * executar step A — claim the transfer and record intent BEFORE the HTTP call.
    *
    *   - Fresh claim (status ∈ {aprovado, falhou}): domain iniciarTransferencia
@@ -423,7 +447,7 @@ export interface RepasseTransferAttempt {
   readonly outcome: string | null;
   readonly codigoSolicitacao: string | null;
   readonly error: string | null;
-  readonly operation: 'pagar_pix' | 'cancelar' | 'resolver_manual' | null;
+  readonly operation: 'pagar_pix' | 'cancelar' | 'resolver_manual' | 'reenvio_inter' | null;
   readonly httpStatus: number | null;
   readonly providerRequestId: string | null;
   readonly responseClass: TransferenciaProviderDiagnostics['responseClass'] | null;

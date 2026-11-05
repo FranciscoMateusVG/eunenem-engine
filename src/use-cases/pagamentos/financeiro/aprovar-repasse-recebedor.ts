@@ -7,6 +7,7 @@ import type { IdRepasse } from '../../../domain/pagamentos/financeiro/value-obje
 import { IdRepasseSchema } from '../../../domain/pagamentos/financeiro/value-objects/ids.js';
 import { FinanceiroInputInvalidoError } from '../../../errors/pagamentos/financeiro/input-invalido.error.js';
 import { FinanceiroRepasseNaoEncontradoError } from '../../../errors/pagamentos/financeiro/repasse-nao-encontrado.error.js';
+import { FinanceiroRepasseStatusInvalidoError } from '../../../errors/pagamentos/financeiro/repasse-status-invalido.error.js';
 import type { Observability } from '../../../observability/observability.js';
 
 /**
@@ -86,10 +87,10 @@ export async function aprovarRepasseRecebedor(
       span.setAttribute('financeiro.repasse.id', idRepasse);
       span.setAttribute('financeiro.repasse.bank_transfer_ref.set', bankTransferRef !== null);
 
-      // Determine the payout method: PIX recebedores get the automated
-      // transfer (approve = pay, async via pg-boss); `conta` (bank
-      // coordinate) recebedores keep the existing manual bankTransferRef
-      // path. metodo is stable — the branch decision is re-validated under
+      // Determine the payout method: PIX-key AND `conta` (bank coordinates →
+      // Inter DADOS_BANCARIOS) recebedores get the automated transfer (approve
+      // = pay, async via pg-boss); approval never stamps `transferido_em` —
+      // only a recorded send does. metodo is stable — the branch decision is re-validated under
       // FOR UPDATE inside whichever transaction runs.
       const repasse = await livroFinanceiroRepository.findRepasseById(idRepasse);
       if (!repasse) {
@@ -99,9 +100,18 @@ export async function aprovarRepasseRecebedor(
         repasse.idCampanha,
       );
 
-      if (recebedor?.metodo === 'pix') {
+      // A bank reference means the operator already paid it by hand (any metodo):
+      // never auto-send on top of it, or the recebedor is paid twice. A recorded
+      // reference is the only way approval stamps a repasse transferido.
+      if (bankTransferRef !== null && repasse.transferReferencia !== null) {
+        // An automatic send is already queued/in flight for this repasse: a bank
+        // reference now would be silently dropped. Tell the operator instead.
+        throw new FinanceiroRepasseStatusInvalidoError(idRepasse, repasse.status);
+      }
+      const pagoManualmente = bankTransferRef !== null;
+      if (recebedor && !pagoManualmente) {
         const transferReferencia = gerarTransferReferencia(idRepasse);
-        span.setAttribute('financeiro.repasse.metodo', 'pix');
+        span.setAttribute('financeiro.repasse.metodo', recebedor.metodo);
 
         // Transactional enqueue — the executar job is inserted inside the
         // same DB transaction as the FSM transition to `aprovado`. Approve
@@ -122,8 +132,15 @@ export async function aprovarRepasseRecebedor(
         return { repasse: pixResult.repasse, lancamentosAfetados: 0 };
       }
 
-      // Manual path (conta, or no active recebedor): unchanged behavior —
-      // stamps transferido_em at approval and records bankTransferRef.
+      // Manual path (no active recebedor on record, or a conta paid by hand with a
+      // recorded bank reference): stamps transferido_em at approval. 'aprovado'
+      // and 'transferido' are distinct: without an automatic send, only a
+      // recorded bank reference proves the money left.
+      if (bankTransferRef === null) {
+        throw new FinanceiroInputInvalidoError(
+          'Sem envio automático possível, informe a referência bancária da transferência feita manualmente.',
+        );
+      }
       span.setAttribute('financeiro.repasse.metodo', recebedor?.metodo ?? 'desconhecido');
       const result = await livroFinanceiroRepository.aprovarRepasseTransaction({
         idRepasse,

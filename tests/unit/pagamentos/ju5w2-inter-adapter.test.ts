@@ -98,10 +98,11 @@ function newProvider(t: ScriptedTransport): TransferenciaProviderInter {
 }
 
 const input = {
-  chave: CHAVE,
+  destinatario: { tipo: 'CHAVE' as const, chave: CHAVE },
   valorCents: cents(12345),
   descricao: 'ref:EN123',
   referencia: 'EN123',
+  tentativa: 1,
 };
 
 describe('TransferenciaProviderInter — pagarPix tipoRetorno mapping (money-safety)', () => {
@@ -343,9 +344,12 @@ describe('TransferenciaProviderInter — pagarPix throw classification', () => {
 
   it('pre-flight empty chave → Transitoria, no request sent', async () => {
     const t = new ScriptedTransport();
-    await expect(newProvider(t).pagarPix({ ...input, chave: '' })).rejects.toBeInstanceOf(
-      TransferenciaTransitoriaError,
-    );
+    await expect(
+      newProvider(t).pagarPix({
+        ...input,
+        destinatario: { tipo: 'CHAVE', chave: '' },
+      }),
+    ).rejects.toBeInstanceOf(TransferenciaTransitoriaError);
     expect(t.calls).toHaveLength(0);
   });
 
@@ -355,6 +359,127 @@ describe('TransferenciaProviderInter — pagarPix throw classification', () => {
       newProvider(t).pagarPix({ ...input, valorCents: cents(0) }),
     ).rejects.toBeInstanceOf(TransferenciaTransitoriaError);
     expect(t.calls).toHaveLength(0);
+  });
+});
+
+const DADOS_BANCARIOS = {
+  tipo: 'DADOS_BANCARIOS' as const,
+  nome: 'Bia Silva',
+  cpfCnpj: '52998224725',
+  ispb: '60701190',
+  agencia: '0123',
+  conta: '4567890',
+  tipoConta: 'CONTA_POUPANCA' as const,
+};
+
+describe('TransferenciaProviderInter — DADOS_BANCARIOS wire contract (aperture-mno2s)', () => {
+  it('sends the exact DADOS_BANCARIOS body through the transport seam', async () => {
+    const t = new ScriptedTransport().push(TOKEN_OK, pagar('PAGAMENTO'));
+    await newProvider(t).pagarPix({ ...input, destinatario: DADOS_BANCARIOS });
+    expect(t.lastPixBody().destinatario).toEqual({
+      tipo: 'DADOS_BANCARIOS',
+      nome: 'Bia Silva',
+      cpfCnpj: '52998224725',
+      agencia: '0123',
+      contaCorrente: '4567890',
+      tipoConta: 'CONTA_POUPANCA',
+      instituicaoFinanceira: { ispb: '60701190' },
+    });
+  });
+
+  it('keeps the PIX-key body exactly {tipo:CHAVE, chave}', async () => {
+    const t = new ScriptedTransport().push(TOKEN_OK, pagar('PAGAMENTO'));
+    await newProvider(t).pagarPix(input);
+    expect(t.lastPixBody().destinatario).toEqual({ tipo: 'CHAVE', chave: CHAVE });
+  });
+
+  it('424 with PIXP97 on DADOS_BANCARIOS is ambiguous (never Transitoria, never auto-retried)', async () => {
+    const t = new ScriptedTransport().push(TOKEN_OK, {
+      statusCode: 424,
+      body: JSON.stringify({ codigo: 'PIXP97', title: 'Falha', correlationId: 'corr-1' }),
+    });
+    await expect(
+      newProvider(t).pagarPix({ ...input, destinatario: DADOS_BANCARIOS }),
+    ).rejects.toBeInstanceOf(TransferenciaAmbiguaError);
+    expect(t.calls.filter((c) => c.path === '/banking/v2/pix')).toHaveLength(1);
+  });
+
+  it('incomplete dados bancários → Transitoria pre-flight, no request sent', async () => {
+    const t = new ScriptedTransport();
+    await expect(
+      newProvider(t).pagarPix({ ...input, destinatario: { ...DADOS_BANCARIOS, ispb: '' } }),
+    ).rejects.toBeInstanceOf(TransferenciaTransitoriaError);
+    expect(t.calls).toHaveLength(0);
+  });
+});
+
+describe('TransferenciaProviderInter — buscarPagamentos incluirTodosDebitos (aperture-mno2s)', () => {
+  const extrato = {
+    statusCode: 200,
+    body: JSON.stringify({
+      ultimaPagina: true,
+      totalPaginas: 1,
+      transacoes: [
+        { tipoOperacao: 'D', tipoTransacao: 'PIX', valor: '45.00', detalhes: { endToEndId: 'E1' } },
+        { tipoOperacao: 'D', tipoTransacao: 'TRANSFERENCIA', valor: '45.00', detalhes: {} },
+        { tipoOperacao: 'C', tipoTransacao: 'PIX', valor: '45.00', detalhes: {} },
+      ],
+    }),
+  };
+
+  it('default (reconciliation) keeps PIX-out only; the guard flag also returns TED/transferência debits, never credits', async () => {
+    const janela = { dataInicio: '2026-07-01', dataFim: '2026-07-02' };
+    const a = new ScriptedTransport().push(TOKEN_OK, extrato);
+    expect(await newProvider(a).buscarPagamentos(janela)).toHaveLength(1);
+    const b = new ScriptedTransport().push(TOKEN_OK, extrato);
+    expect(
+      await newProvider(b).buscarPagamentos({ ...janela, incluirTodosDebitos: true }),
+    ).toHaveLength(2);
+  });
+});
+
+describe('TransferenciaProviderInter — guard strictness (aperture-mno2s)', () => {
+  it('incluirTodosDebitos: a debit with an unreadable valor is inconclusive (throws), not skipped', async () => {
+    const t = new ScriptedTransport().push(TOKEN_OK, {
+      statusCode: 200,
+      body: JSON.stringify({
+        ultimaPagina: true,
+        totalPaginas: 1,
+        transacoes: [{ tipoOperacao: 'D', tipoTransacao: 'TED', valor: 'abc', detalhes: {} }],
+      }),
+    });
+    await expect(
+      newProvider(t).buscarPagamentos({
+        dataInicio: '2026-07-01',
+        dataFim: '2026-07-02',
+        incluirTodosDebitos: true,
+      }),
+    ).rejects.toThrow(/ilegível/);
+  });
+});
+
+describe('TransferenciaProviderInter — x-id-idempotente (aperture-mno2s)', () => {
+  const keyOf = (t: ScriptedTransport) =>
+    t.calls.find((c) => c.path === '/banking/v2/pix')?.headers['x-id-idempotente'];
+
+  it('is present, UUID-shaped and deterministic for the same referencia + tentativa', async () => {
+    const a = new ScriptedTransport().push(TOKEN_OK, pagar('PAGAMENTO'));
+    const b = new ScriptedTransport().push(TOKEN_OK, pagar('PAGAMENTO'));
+    await newProvider(a).pagarPix(input);
+    await newProvider(b).pagarPix(input);
+    expect(keyOf(a)).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
+    expect(keyOf(a)).toBe(keyOf(b));
+  });
+
+  it('differs for another tentativa or another referencia', async () => {
+    const a = new ScriptedTransport().push(TOKEN_OK, pagar('PAGAMENTO'));
+    const b = new ScriptedTransport().push(TOKEN_OK, pagar('PAGAMENTO'));
+    const c = new ScriptedTransport().push(TOKEN_OK, pagar('PAGAMENTO'));
+    await newProvider(a).pagarPix(input);
+    await newProvider(b).pagarPix({ ...input, tentativa: 2 });
+    await newProvider(c).pagarPix({ ...input, referencia: 'EN999' });
+    expect(keyOf(b)).not.toBe(keyOf(a));
+    expect(keyOf(c)).not.toBe(keyOf(a));
   });
 });
 
