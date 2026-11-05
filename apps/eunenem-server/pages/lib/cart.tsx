@@ -44,6 +44,8 @@ import {
   useRef,
 } from 'react';
 import { type OrigemCarrinho, despacharComDelta } from './analytics-funil.js';
+import { computeCardSurchargeCents } from '../../../../src/adapters/pagamentos/card-surcharge.js';
+import type { MoneyCents } from '../../../../src/domain/money.js';
 import type { VisitorGift } from './visitorGift.js';
 
 // ── Types ──────────────────────────────────────────────────────────────────
@@ -238,10 +240,10 @@ export function CartProvider({ slug, children }: CartProviderProps) {
       (s, l) => s + l.valorCents * l.quantidade,
       0,
     );
-    const totalCartaoCents = state.lines.reduce(
-      (s, l) => s + (l.valorComTaxaCartaoCents ?? l.valorCents) * l.quantidade,
-      0,
-    );
+    // The card fee (3.9% + R$0.39) is charged ONCE on the whole cart
+    // (gift + EuNeném fee), same formula the checkout uses.
+    const totalCartaoCents =
+      totalPixCents + computeCardSurchargeCents(totalPixCents as MoneyCents);
     return {
       state,
       // aperture-qq74p — analytics from the REAL transition via the

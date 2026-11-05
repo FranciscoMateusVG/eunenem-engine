@@ -340,7 +340,7 @@ export const LANDING_FAQS: ReadonlyArray<LandingFaq> = [
     q: 'A EuNeném cobra taxa?',
     a: `Sim, mas pode ficar tranquila! 💜 **Quem cria a lista não paga nenhuma taxa e recebe 100% do valor definido para cada presente.**
 
-A EuNeném cobra uma taxa de serviço de **8,98%**, paga pelo convidado no momento da compra. Nos pagamentos com cartão de crédito, há também um acréscimo de 3,99% referente aos custos de processamento.
+A EuNeném cobra uma taxa de serviço de **8,98%**, paga pelo convidado no momento da compra. Nos pagamentos com cartão de crédito, há também um acréscimo referente ao custo de processamento do cartão: 3,9% do valor total (presente + taxa de serviço) mais R$ 0,39 por compra.
 
 Por exemplo, se você adicionar um presente de R$ 100 à sua lista, receberá exatamente R$ 100, sem nenhum desconto.
 

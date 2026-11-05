@@ -8,6 +8,7 @@ import {
   calcularComposicaoValoresParaItem,
   calcularSurchargeParaCarrinho,
   type Campanha,
+  type MoneyCents,
   computeCardSurchargeCents,
   quantidadeRestante,
   type IdCampanha,
@@ -515,6 +516,7 @@ export const paginaRouter = t.router({
       const itens = [];
       let totalPixCents = 0;
       let totalContributionCents = 0;
+      let totalFeeCents = 0;
       for (const id of ids) {
         const gift = gifts.get(id);
         if (!gift || gift.idCampanha !== campanha.id || gift.idOpcaoContribuicao !== idOpcaoPresentes) continue;
@@ -528,11 +530,12 @@ export const paginaRouter = t.router({
         const valorCents = composition.receiverUnitAmountCents + composition.feeUnitAmountCents;
         totalPixCents += valorCents * quantidade;
         totalContributionCents += composition.contributionUnitAmountCents * quantidade;
+        totalFeeCents += composition.feeUnitAmountCents * quantidade;
         itens.push({ idContribuicao: id, nome: gift.nome, quantidade, qtyAvailable, valorCents,
-          valorComTaxaCartaoCents: valorCents + computeCardSurchargeCents(gift.valor), imagemUrl: gift.imagemUrl });
+          valorComTaxaCartaoCents: valorCents + computeCardSurchargeCents(valorCents as MoneyCents), imagemUrl: gift.imagemUrl });
       }
       const surcharge = totalPixCents > 0 ? await calcularSurchargeParaCarrinho(ctx.deps, {
-        totalContributionCents, metodo: 'credit_card',
+        totalContributionCents, totalFeeCents, metodo: 'credit_card',
       }) : null;
       return { itens, totalPixCents, totalCartaoCents: totalPixCents + (surcharge?.amountCents ?? 0) };
     }),
@@ -615,7 +618,10 @@ export const paginaRouter = t.router({
             id: c.id as string,
             nome: c.nome,
             valor: valorComTaxa,
-            valorComTaxaCartao: valorComTaxa + computeCardSurchargeCents(c.valor),
+            // Stripe's 3.9% + R$0.39 applies to gift + EuNeném fee (valorComTaxa).
+            // This is the exact price of buying this one gift; carts with several
+            // items pay the fixed R$0.39 only once (the cart total is computed server-side).
+            valorComTaxaCartao: valorComTaxa + computeCardSurchargeCents(valorComTaxa as MoneyCents),
             imagemUrl: c.imagemUrl,
             grupo: c.grupo,
             quantidade: c.quantidade,

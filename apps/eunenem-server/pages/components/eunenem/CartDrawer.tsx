@@ -1117,7 +1117,7 @@ function MetodoPicker({
         onSelect={() => setMetodo("credit_card")}
         emoji="💳"
         label="Cartão"
-        hint="processamento: 3,9% sobre o total + R$ 0,39"
+        hint="taxa de processamento do cartão: 3,9% do total + R$ 0,39 (uma vez só)"
       />
     </fieldset>
   );

@@ -157,12 +157,16 @@ describe('7mqsg item 2 — no fictional signature/default', () => {
 describe('7mqsg item 3 — card fee hint without "arredondado para cima"', () => {
   it('keeps the fee copy and drops only the rounding phrase', () => {
     const cart = src('pages/components/eunenem/CartDrawer.tsx');
-    expect(cart).toMatch(/hint="processamento: 3,9% sobre o total \+ R\$ 0,39"/);
+    expect(cart).toMatch(
+      /hint="taxa de processamento do cartão: 3,9% do total \+ R\$ 0,39 \(uma vez só\)"/,
+    );
     expect(cart).not.toMatch(/arredondad/);
   });
-  it('public FAQ uses the requested 3,99% processing copy without a rounding phrase', () => {
+  it('public FAQ explains the 3,9% + R$ 0,39 processing copy without a rounding phrase', () => {
     const landing = src('pages/lib/mocks/landing.ts');
-    expect(landing).toContain('acréscimo de 3,99% referente aos custos de processamento.');
+    expect(landing).toContain(
+      '3,9% do valor total (presente + taxa de serviço) mais R$ 0,39 por compra.',
+    );
     expect(landing).not.toMatch(/arredondamento para cima/);
   });
 });
