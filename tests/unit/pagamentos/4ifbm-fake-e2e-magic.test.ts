@@ -17,7 +17,7 @@ import { TransferenciaTransitoriaError } from '../../../src/adapters/pagamentos/
 
 function pagarInput(chave: string, valorCents = 4500) {
   return {
-    chave,
+    destinatario: { tipo: 'CHAVE' as const, chave },
     valorCents: valorCents as never,
     descricao: 'EuNeném — repasse e2e',
     referencia: 'ENe2eref',

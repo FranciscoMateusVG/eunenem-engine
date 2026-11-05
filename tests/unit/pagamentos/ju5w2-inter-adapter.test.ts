@@ -98,7 +98,7 @@ function newProvider(t: ScriptedTransport): TransferenciaProviderInter {
 }
 
 const input = {
-  chave: CHAVE,
+  destinatario: { tipo: 'CHAVE' as const, chave: CHAVE },
   valorCents: cents(12345),
   descricao: 'ref:EN123',
   referencia: 'EN123',
@@ -343,9 +343,12 @@ describe('TransferenciaProviderInter — pagarPix throw classification', () => {
 
   it('pre-flight empty chave → Transitoria, no request sent', async () => {
     const t = new ScriptedTransport();
-    await expect(newProvider(t).pagarPix({ ...input, chave: '' })).rejects.toBeInstanceOf(
-      TransferenciaTransitoriaError,
-    );
+    await expect(
+      newProvider(t).pagarPix({
+        ...input,
+        destinatario: { tipo: 'CHAVE', chave: '' },
+      }),
+    ).rejects.toBeInstanceOf(TransferenciaTransitoriaError);
     expect(t.calls).toHaveLength(0);
   });
 

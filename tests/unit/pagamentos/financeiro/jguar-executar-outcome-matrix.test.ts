@@ -577,11 +577,10 @@ describe('executarTransferenciaRepasse — degenerate inputs', () => {
     expect(rig.enqueued.confirmar).toHaveLength(0);
   });
 
-  it('non-pix recebedor: attempt opened + closed falhou/RECEBEDOR_NAO_PIX, no pagarPix', async () => {
+  it('conta recebedor without a resolvable bank: attempt opened + closed falhou/BANCO_DESCONHECIDO, no pagarPix', async () => {
     const rig = await buildRig({ metodoRecebedor: 'conta' });
-    // The repo transaction does not gate on metodo (the use-case does), so a
-    // mis-routed conta repasse CAN reach the queue — the handler must fail it
-    // safely instead of paying without a chave.
+    // This rig's conta recebedor carries no COMPE code, so no ISPB resolves:
+    // the handler must fail closed instead of sending to an unknown bank.
     const { idRepasse } = await seedRepasseAprovado(rig);
     const provider = fake();
 
@@ -590,12 +589,12 @@ describe('executarTransferenciaRepasse — degenerate inputs', () => {
     expect(provider.pagarPixCalls).toBe(0);
     const repasse = await rig.livro.findRepasseById(idRepasse as never);
     expect(repasse?.status).toBe('falhou');
-    expect(repasse?.lastTransferError).toBe('RECEBEDOR_NAO_PIX');
+    expect(repasse?.lastTransferError).toBe('BANCO_DESCONHECIDO');
 
     const attempts = await rig.livro.findTransferAttemptsByRepasseId(idRepasse as never);
     expect(attempts).toHaveLength(1);
     expect(attempts[0]?.outcome).toBe('falhou');
-    expect(attempts[0]?.error).toBe('RECEBEDOR_NAO_PIX');
+    expect(attempts[0]?.error).toBe('BANCO_DESCONHECIDO');
     expect(attempts[0]?.finishedAt).not.toBeNull();
   });
 });

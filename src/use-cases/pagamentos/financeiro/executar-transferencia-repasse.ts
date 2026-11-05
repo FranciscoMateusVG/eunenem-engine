@@ -2,11 +2,14 @@
 import { SpanStatusCode } from '@opentelemetry/api';
 import type { LivroFinanceiroRepository } from '../../../adapters/pagamentos/financeiro/livro-repository.js';
 import {
+  type PagarPixDestinatario,
   TransferenciaAmbiguaError,
   type TransferenciaProvider,
   type TransferenciaProviderDiagnostics,
   TransferenciaTransitoriaError,
 } from '../../../adapters/pagamentos/transferencia-provider.js';
+import { ispbPorCodigoCompe } from '../../../domain/pagamentos/financeiro/value-objects/bancos-ispb.js';
+import type { DadosRecebedorAtivo } from '../../../domain/pagamentos/financeiro/value-objects/dados-recebedor-ativo.js';
 import type { IdRepasse } from '../../../domain/pagamentos/financeiro/value-objects/ids.js';
 import type { Observability } from '../../../observability/observability.js';
 import { pixKeyFingerprint } from './manual-recovery-policy.js';
@@ -77,6 +80,35 @@ function observation(diagnostics: TransferenciaProviderDiagnostics, startedAt: n
   return { ...diagnostics, durationMs: auditDurationMs(startedAt) } as const;
 }
 
+const TIPO_CONTA_INTER = {
+  cc: 'CONTA_CORRENTE',
+  cp: 'CONTA_POUPANCA',
+  pg: 'CONTA_PAGAMENTO',
+  csl: 'CONTA_SALARIO',
+} as const;
+
+/**
+ * Derives the provider destination from the active recebedor. A `conta`
+ * recebedor becomes `DADOS_BANCARIOS`; its ISPB comes from the COMPE code and
+ * an unknown bank yields `BANCO_DESCONHECIDO` (fail closed — never guessed).
+ */
+function montarDestinatario(
+  recebedor: DadosRecebedorAtivo,
+): PagarPixDestinatario | { readonly erro: 'BANCO_DESCONHECIDO' } {
+  if (recebedor.metodo === 'pix') return { tipo: 'CHAVE', chave: recebedor.chavePix };
+  const ispb = ispbPorCodigoCompe(recebedor.codigoBanco);
+  if (ispb === undefined) return { erro: 'BANCO_DESCONHECIDO' };
+  return {
+    tipo: 'DADOS_BANCARIOS',
+    nome: recebedor.nomeTitular,
+    cpfCnpj: recebedor.cpfTitular.replace(/\D/g, ''),
+    ispb,
+    agencia: recebedor.agencia.padStart(4, '0'),
+    conta: `${recebedor.conta}${recebedor.contaDigito}`,
+    tipoConta: TIPO_CONTA_INTER[recebedor.tipoConta],
+  };
+}
+
 export async function executarTransferenciaRepasse(
   deps: ExecutarTransferenciaRepasseDeps,
   input: ExecutarTransferenciaRepasseInput,
@@ -98,13 +130,17 @@ export async function executarTransferenciaRepasse(
       const recebedor = await livroFinanceiroRepository.findRecebedorAtivoPorIdCampanha(
         repasse.idCampanha,
       );
-      if (!recebedor || recebedor.metodo !== 'pix') {
-        // A non-pix repasse should never be in this queue. Fail it safely
-        // rather than call pagarPix without a chave.
+      const destino = recebedor ? montarDestinatario(recebedor) : undefined;
+      if (!recebedor || !destino || 'erro' in destino) {
+        // No payable destination (no active recebedor, or a conta whose bank is
+        // not in the COMPE→ISPB table). Fail closed: record a falhou attempt
+        // with a clear code and NEVER call the provider.
+        const erro = destino && 'erro' in destino ? destino.erro : 'RECEBEDOR_SEM_DESTINO';
         const agora = clock();
         const iniciado = await livroFinanceiroRepository.iniciarTransferenciaTransaction({
           idRepasse,
-          requestSummary: 'recebedor_nao_pix',
+          requestSummary:
+            erro === 'BANCO_DESCONHECIDO' ? 'banco_desconhecido' : 'recebedor_sem_destino',
           agora,
         });
         if (iniciado.acao === 'prosseguir') {
@@ -113,26 +149,29 @@ export async function executarTransferenciaRepasse(
             attemptId: iniciado.attemptId,
             resultado: {
               tipo: 'falhou',
-              erro: 'RECEBEDOR_NAO_PIX',
+              erro,
               observation: {
                 ...diagnosticsFallback('local_rejection'),
-                diagnosticCode: 'recipient_not_pix',
+                diagnosticCode: 'invalid_recipient',
                 diagnosticField: 'recipient',
-                diagnosticReason: 'unsupported',
+                diagnosticReason: erro === 'BANCO_DESCONHECIDO' ? 'unsupported' : 'required',
                 durationMs: 0,
               },
             },
             agora: clock(),
           });
         }
-        logger.error('financeiro.repasse.executar.recebedor_nao_pix', { idRepasse });
+        logger.error('financeiro.repasse.executar.sem_destino', { idRepasse, erro });
         span.setStatus({ code: SpanStatusCode.OK });
         return;
       }
 
       const agora = clock();
       // Audit: amount, key type and approved comparison fingerprint; never the plaintext key.
-      const requestSummary = `valor:${repasse.amountCents};tipo_chave:${recebedor.tipoChavePix};key_sha256:${pixKeyFingerprint(recebedor.chavePix)}`;
+      const requestSummary =
+        recebedor.metodo === 'pix'
+          ? `valor:${repasse.amountCents};tipo_chave:${recebedor.tipoChavePix};key_sha256:${pixKeyFingerprint(recebedor.chavePix)}`
+          : `valor:${repasse.amountCents};destino:dados_bancarios;banco:${recebedor.codigoBanco};dest_sha256:${pixKeyFingerprint(`${recebedor.codigoBanco}|${recebedor.agencia}|${recebedor.conta}${recebedor.contaDigito}`)}`;
 
       const iniciado = await livroFinanceiroRepository.iniciarTransferenciaTransaction({
         idRepasse,
@@ -194,7 +233,7 @@ export async function executarTransferenciaRepasse(
       const providerStartedAt = performance.now();
       try {
         outcome = await transferenciaProvider.pagarPix({
-          chave: recebedor.chavePix,
+          destinatario: destino,
           valorCents: repasse.amountCents,
           descricao: `EuNeném — repasse ${shortId}`,
           referencia,

@@ -92,9 +92,39 @@ export interface TransferenciaProviderPrivateError {
   readonly truncated: boolean;
 }
 
-export interface PagarPixInput {
+/** Bank-account destination types accepted by Inter's `DADOS_BANCARIOS`. */
+export type TipoContaInter =
+  | 'CONTA_CORRENTE'
+  | 'CONTA_POUPANCA'
+  | 'CONTA_PAGAMENTO'
+  | 'CONTA_SALARIO';
+
+/** PIX addressed by key. */
+export interface DestinatarioChave {
+  readonly tipo: 'CHAVE';
   /** chave PIX — cpf/cnpj/email/telefone/aleatoria. NEVER logged. */
   readonly chave: string;
+}
+
+/** PIX addressed by bank coordinates (same endpoint, `DADOS_BANCARIOS`). NEVER logged. */
+export interface DestinatarioDadosBancarios {
+  readonly tipo: 'DADOS_BANCARIOS';
+  readonly nome: string;
+  /** CPF/CNPJ, digits only. */
+  readonly cpfCnpj: string;
+  /** 8-digit ISPB of the destination institution. */
+  readonly ispb: string;
+  /** Agency, 4 digits zero-padded, without check digit. */
+  readonly agencia: string;
+  /** Account number INCLUDING its check digit. */
+  readonly conta: string;
+  readonly tipoConta: TipoContaInter;
+}
+
+export type PagarPixDestinatario = DestinatarioChave | DestinatarioDadosBancarios;
+
+export interface PagarPixInput {
+  readonly destinatario: PagarPixDestinatario;
   readonly valorCents: MoneyCents;
   /** e.g. "EuNeném — repasse <shortid>". */
   readonly descricao: string;

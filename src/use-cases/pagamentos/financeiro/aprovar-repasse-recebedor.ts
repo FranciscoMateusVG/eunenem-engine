@@ -86,10 +86,10 @@ export async function aprovarRepasseRecebedor(
       span.setAttribute('financeiro.repasse.id', idRepasse);
       span.setAttribute('financeiro.repasse.bank_transfer_ref.set', bankTransferRef !== null);
 
-      // Determine the payout method: PIX recebedores get the automated
-      // transfer (approve = pay, async via pg-boss); `conta` (bank
-      // coordinate) recebedores keep the existing manual bankTransferRef
-      // path. metodo is stable — the branch decision is re-validated under
+      // Determine the payout method: PIX-key AND `conta` (bank coordinates →
+      // Inter DADOS_BANCARIOS) recebedores get the automated transfer (approve
+      // = pay, async via pg-boss); approval never stamps `transferido_em` —
+      // only a recorded send does. metodo is stable — the branch decision is re-validated under
       // FOR UPDATE inside whichever transaction runs.
       const repasse = await livroFinanceiroRepository.findRepasseById(idRepasse);
       if (!repasse) {
@@ -99,9 +99,12 @@ export async function aprovarRepasseRecebedor(
         repasse.idCampanha,
       );
 
-      if (recebedor?.metodo === 'pix') {
+      // A conta approval that carries a bank reference means the operator already
+      // paid it by hand: that is the only way a conta repasse is stamped transferido.
+      const pagoManualmente = recebedor?.metodo === 'conta' && bankTransferRef !== null;
+      if (recebedor && !pagoManualmente) {
         const transferReferencia = gerarTransferReferencia(idRepasse);
-        span.setAttribute('financeiro.repasse.metodo', 'pix');
+        span.setAttribute('financeiro.repasse.metodo', recebedor.metodo);
 
         // Transactional enqueue — the executar job is inserted inside the
         // same DB transaction as the FSM transition to `aprovado`. Approve
@@ -122,8 +125,8 @@ export async function aprovarRepasseRecebedor(
         return { repasse: pixResult.repasse, lancamentosAfetados: 0 };
       }
 
-      // Manual path (conta, or no active recebedor): unchanged behavior —
-      // stamps transferido_em at approval and records bankTransferRef.
+      // Manual path (no active recebedor on record, or a conta paid by hand with a
+      // recorded bank reference): stamps transferido_em at approval.
       span.setAttribute('financeiro.repasse.metodo', recebedor?.metodo ?? 'desconhecido');
       const result = await livroFinanceiroRepository.aprovarRepasseTransaction({
         idRepasse,
