@@ -185,3 +185,32 @@ it('aperture-mno2s approve modal is an explicit choice: send via Inter vs alread
   expect(bankTransferRefDaEscolha('por_fora', '  ')).toBeUndefined();
   expect(bankTransferRefDaEscolha(null, 'PIX-1')).toBeUndefined();
 });
+
+it('aperture-puali retry dialog shows Inter lookup + extrato candidates as information only', () => {
+  const html: string = renderToStaticMarkup(
+    createElement(RecoveryConfirmation, {
+      mode: 'retry',
+      amountCents: 19500,
+      busy: false,
+      info: {
+        lookup: 'positive',
+        statementAvailable: true,
+        candidates: [
+          {
+            e2eId: 'E_SYN',
+            amountCents: 19500,
+            dataMovimento: '2026-10-19',
+            destination: 'matches',
+          },
+        ],
+      },
+      onConfirm() {},
+      onClose() {},
+    }),
+  );
+  expect(html).toContain('Inter diz: pagamento encontrado');
+  expect(html).toContain('E_SYN');
+  expect(html).toContain('recebe duas vezes');
+  expect(html).not.toContain('disabled=""');
+  expect(html).not.toContain('<input');
+});

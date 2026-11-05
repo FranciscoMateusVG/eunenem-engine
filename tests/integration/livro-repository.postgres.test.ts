@@ -872,6 +872,30 @@ describe('LivroFinanceiroRepositoryPostgres — manual resolution (aperture-477n
     expect(history).toHaveLength(3);
   });
 
+  it('aperture-puali — stale screen (expected=1 but attempt 2 is verificando) never queues another retry', async () => {
+    const { idRepasse } = await seedVerificando();
+    await sql`UPDATE repasses_recebedor SET transfer_attempts = 2 WHERE id = ${idRepasse}`.execute(
+      testDb.db,
+    );
+    let enqueued = 0;
+    const deps = {
+      livroFinanceiroRepository: repo,
+      clock: () => new Date('2026-07-16T12:10:00Z'),
+      repasseJobEnqueuer: {
+        enqueueExecutar: async () => {
+          enqueued++;
+        },
+        enqueueConfirmar: async () => {},
+      },
+    };
+    await expect(
+      recuperarRepasse(deps, { idRepasse, expectedTransferAttempts: 1 }, 'a@b.com'),
+    ).rejects.toThrow('O repasse mudou');
+    expect(enqueued).toBe(0);
+    await recuperarRepasse(deps, { idRepasse, expectedTransferAttempts: 2 }, 'a@b.com');
+    expect(enqueued).toBe(1);
+  });
+
   it('45h33 — enqueue failure rolls recovery and audit back', async () => {
     const { idRepasse } = await seedVerificando();
     await expect(
@@ -996,11 +1020,19 @@ describe('LivroFinanceiroRepositoryPostgres — manual resolution (aperture-477n
         ['MATCH', 'OTHER', 'UNKNOWN_DEST'].includes(status) ? 1 : 0,
       );
       // One click: no attestation, evidence, amount or motivo.
-      await recuperarRepasse(deps, { idRepasse }, 'admin@example.test');
+      await recuperarRepasse(
+        deps,
+        { idRepasse, expectedTransferAttempts: 1 },
+        'admin@example.test',
+      );
       expect(enqueued).toBe(1);
       expect((await repo.findRepasseById(idRepasse))?.status).toBe('aprovado');
       // A second click (or a concurrent one) never queues another attempt.
-      await recuperarRepasse(deps, { idRepasse }, 'admin@example.test');
+      await recuperarRepasse(
+        deps,
+        { idRepasse, expectedTransferAttempts: 1 },
+        'admin@example.test',
+      );
       expect(enqueued).toBe(1);
       const history = await repo.findTransferAttemptsByRepasseId(idRepasse);
       const audit = history.find((a) => a.operation === 'resolver_manual');

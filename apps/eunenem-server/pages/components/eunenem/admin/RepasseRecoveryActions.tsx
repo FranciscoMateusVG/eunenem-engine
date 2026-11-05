@@ -81,6 +81,7 @@ export function ManualResolutionActions({ repasse }: { repasse: RepasseDetail })
   const retry = trpc.admin.repasses.recuperar.useMutation({
     onSuccess: (result) => afterResolution(result.status, 'aprovado'),
   });
+  const info = trpc.admin.repasses.consultarRecuperacao.useMutation();
   const busy = paid.isPending || retry.isPending;
   const error = paid.error ?? retry.error;
   if (resolvedElsewhere)
@@ -117,7 +118,11 @@ export function ManualResolutionActions({ repasse }: { repasse: RepasseDetail })
         </details>
       )}
       <div className="flex flex-wrap gap-3">
-        <RecoveryActionButton variant="warning" disabled={busy} onClick={() => setDialog('retry')}>
+        <RecoveryActionButton variant="warning" disabled={busy} onClick={() => {
+            setDialog('retry');
+            info.mutate({ idRepasse: repasse.idRepasse });
+          }}
+        >
           Tentar de novo
         </RecoveryActionButton>
         <RecoveryActionButton variant="primary" disabled={busy} onClick={() => setDialog('paid')}>
@@ -129,11 +134,17 @@ export function ManualResolutionActions({ repasse }: { repasse: RepasseDetail })
           mode={dialog}
           amountCents={repasse.amountCents}
           busy={busy}
+          info={dialog === 'retry' ? info.data : undefined}
+          infoLoading={dialog === 'retry' && info.isPending}
           error={error ? mensagemErroAdmin(error.message) : undefined}
           onClose={() => setDialog(null)}
           onConfirm={() => {
             if (dialog === 'paid') paid.mutate({ idRepasse: repasse.idRepasse });
-            else retry.mutate({ idRepasse: repasse.idRepasse });
+            else
+              retry.mutate({
+                idRepasse: repasse.idRepasse,
+                expectedTransferAttempts: repasse.transferAttempts,
+              });
           }}
         />
       )}
@@ -159,7 +170,7 @@ export function RecoveryCandidatesTable({
   return (
     <div className="overflow-x-auto">
       <table className="w-full border-collapse text-left">
-        <caption>Débitos candidatos no extrato — confira antes de atestar</caption>
+        <caption>Débitos candidatos no extrato (informativo)</caption>
         <thead>
           <tr>
             {['E2E', 'Valor', 'Data', 'Destino'].map((title) => (
@@ -205,10 +216,18 @@ export function RecoveryCandidatesTable({
   );
 }
 
+const LOOKUP_LABEL: Record<string, string> = {
+  positive: 'pagamento encontrado (REALIZADO)',
+  negative: 'pagamento não realizado',
+  inconclusive: 'consulta inconclusiva',
+};
+
 export function RecoveryConfirmation({
   mode,
   amountCents,
   busy,
+  info,
+  infoLoading,
   error,
   onConfirm,
   onClose,
@@ -216,6 +235,20 @@ export function RecoveryConfirmation({
   mode: 'paid' | 'retry';
   amountCents: number;
   busy: boolean;
+  /** Informational Inter lookup; never blocks the confirmation. */
+  info?:
+    | {
+        lookup: string;
+        statementAvailable: boolean;
+        candidates: readonly {
+          e2eId: string | null;
+          amountCents?: number;
+          dataMovimento?: string | null;
+          destination: 'matches' | 'different' | 'unknown';
+        }[];
+      }
+    | undefined;
+  infoLoading?: boolean | undefined;
   error?: string | undefined;
   onConfirm: () => void;
   onClose: () => void;
@@ -237,6 +270,16 @@ export function RecoveryConfirmation({
           <p>Tem certeza? O repasse será marcado como pago.</p>
         ) : (
           <p>Tem certeza? Se o PIX anterior tiver saído, o recebedor recebe duas vezes.</p>
+        )}
+        {mode === 'retry' && infoLoading && <p role="status">Consultando o Inter (informativo)…</p>}
+        {mode === 'retry' && info && (
+          <div role="note" className="space-y-2 text-[13px]">
+            <p>
+              Inter diz: {LOOKUP_LABEL[info.lookup] ?? 'sem resposta conclusiva'}. Extrato:{' '}
+              {info.statementAvailable ? 'consultado' : 'indisponível'}. (Informativo)
+            </p>
+            {info.candidates.length > 0 && <RecoveryCandidatesTable candidates={info.candidates} />}
+          </div>
         )}
         {error && (
           <p role="alert" className="text-red-700">

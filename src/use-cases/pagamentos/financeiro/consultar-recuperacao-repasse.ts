@@ -5,7 +5,6 @@ import type { RepasseJobEnqueuer } from '../../../adapters/pagamentos/transferen
 import type { TransferenciaProvider } from '../../../adapters/pagamentos/transferencia-provider.js';
 import type { IdRepasse } from '../../../domain/pagamentos/financeiro/value-objects/ids.js';
 import { FinanceiroInputInvalidoError } from '../../../errors/pagamentos/financeiro/input-invalido.error.js';
-import { FinanceiroRepasseNaoEncontradoError } from '../../../errors/pagamentos/financeiro/repasse-nao-encontrado.error.js';
 import {
   classifyDestination,
   decideManualRecovery,
@@ -123,6 +122,8 @@ export async function consultarRecuperacaoRepasse(deps: RecoveryDeps, idRepasse:
  */
 export const RecoveryInputSchema = z.object({
   idRepasse: z.string().uuid(),
+  /** The attempt count the admin's screen showed; a stale screen no-ops. */
+  expectedTransferAttempts: z.number().int().positive(),
   motivo: z.string().trim().max(1000).optional(),
 });
 export async function recuperarRepasse(
@@ -135,16 +136,17 @@ export async function recuperarRepasse(
   const parsed = RecoveryInputSchema.safeParse(input);
   if (!parsed.success) throw new FinanceiroInputInvalidoError('Repasse inválido.');
   const value = parsed.data;
-  const repasse = await deps.livroFinanceiroRepository.findRepasseById(
-    value.idRepasse as IdRepasse,
-  );
-  if (!repasse) throw new FinanceiroRepasseNaoEncontradoError(value.idRepasse as IdRepasse);
+  const atual = await deps.livroFinanceiroRepository.findRepasseById(value.idRepasse as IdRepasse);
+  if (
+    atual &&
+    (atual.status !== 'verificando' || atual.transferAttempts !== value.expectedTransferAttempts)
+  )
+    throw new FinanceiroInputInvalidoError('O repasse mudou, recarregue a página.');
   return deps.livroFinanceiroRepository.recuperarRepasseTransaction(
     {
       idRepasse: value.idRepasse as IdRepasse,
-      // Pinned to the attempt count read now: the locked transaction no-ops if
-      // another admin already moved the repasse on.
-      expectedTransferAttempts: repasse.transferAttempts,
+      // The locked transaction no-ops if the repasse moved on since the screen.
+      expectedTransferAttempts: value.expectedTransferAttempts,
       audit: JSON.stringify({
         kind: 'admin_retry',
         actor,
