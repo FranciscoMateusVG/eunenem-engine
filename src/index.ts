@@ -1287,6 +1287,7 @@ export type {
   ReenviarRepasseContaPeloInterInput,
 } from './use-cases/pagamentos/financeiro/reenviar-repasse-conta-pelo-inter.js';
 export {
+  consultarCandidatosReenvio,
   ReenviarRepasseContaPeloInterInputSchema,
   reenviarRepasseContaPeloInter,
 } from './use-cases/pagamentos/financeiro/reenviar-repasse-conta-pelo-inter.js';

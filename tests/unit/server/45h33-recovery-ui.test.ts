@@ -6,8 +6,7 @@ import {
 } from '../../../apps/eunenem-server/pages/AdminRepasseDetailPage.js';
 import {
   ManualResolutionActions,
-  motivoBloqueioConfirmacao,
-  motivoBloqueioReenvio,
+  mensagemErroAdmin,
   RecoveryActionButton,
   RecoveryCandidatesTable,
   RecoveryConfirmation,
@@ -39,8 +38,8 @@ it('45h33 renders both manual exits even without reconciliation candidates; rend
     ),
   );
   expect(html).toContain('Confirmei que saiu');
-  expect(html).toContain('Confirmei que NÃO saiu');
-  expect(html).toContain('Nenhuma consulta envia dinheiro');
+  expect(html).toContain('Tentar de novo');
+  expect(html).not.toContain('Motivo obrigatório');
 });
 
 it('45h33 candidate evidence is a table with E2E, amount, date and classification', () => {
@@ -64,8 +63,6 @@ it.each(['paid', 'retry'])('45h33 %s requires an explicit modal confirmation', (
     createElement(RecoveryConfirmation, {
       mode,
       amountCents: 19500,
-      reference: 'BANK_REFERENCE',
-      reason: 'Motivo sintético',
       busy: false,
       onConfirm() {},
       onClose() {},
@@ -74,7 +71,9 @@ it.each(['paid', 'retry'])('45h33 %s requires an explicit modal confirmation', (
   expect(html).toContain('role="dialog"');
   expect(html).toContain('aria-modal="true"');
   expect(html).toContain('Voltar');
-  expect(html).toContain(mode === 'paid' ? 'BANK_REFERENCE' : 'pagar duas vezes');
+  expect(html).toContain(mode === 'paid' ? 'marcado como pago' : 'recebe duas vezes');
+  expect(html).not.toContain('<textarea');
+  expect(html).not.toContain('<input');
 });
 
 it('45h33 reports a competing resolution without claiming success', () => {
@@ -102,7 +101,7 @@ it('aperture-mno2s manual-resolution actions render as styled, visibly clickable
       ),
     ),
   );
-  for (const label of ['Confirmei que saiu', 'Confirmei que NÃO saiu']) {
+  for (const label of ['Confirmei que saiu', 'Tentar de novo']) {
     const tag = html.match(new RegExp(`<button[^>]*>(?:(?!</button>).)*${label}`))?.[0] ?? '';
     expect(tag, label).toContain('type="button"');
     expect(tag, label).toMatch(/class="[^"]*\bborder\b[^"]*\bbg-[a-z]+-\d+/);
@@ -129,30 +128,7 @@ it('aperture-mno2s a disabled action button shows why it is disabled', () => {
   expect(html).toContain('cursor-not-allowed');
 });
 
-it('aperture-mno2s names the first missing requirement of the confirm button', () => {
-  const base = {
-    busy: false,
-    confirmed: true,
-    reason: 'motivo suficiente',
-    mode: 'paid',
-    reference: 'E123',
-    hasPreview: true,
-    decision: 'safe',
-  };
-  expect(motivoBloqueioConfirmacao(base)).toBeNull();
-  expect(motivoBloqueioConfirmacao({ ...base, reason: 'curto' })).toMatch(/motivo/i);
-  expect(motivoBloqueioConfirmacao({ ...base, confirmed: false })).toMatch(/confirmo/i);
-  expect(motivoBloqueioConfirmacao({ ...base, reference: ' ' })).toMatch(/refer[êe]ncia/i);
-  expect(motivoBloqueioConfirmacao({ ...base, mode: 'retry', hasPreview: false })).toMatch(
-    /consulta/i,
-  );
-  expect(motivoBloqueioConfirmacao({ ...base, mode: 'retry', decision: 'blocked' })).toMatch(
-    /bloquead/i,
-  );
-  expect(motivoBloqueioConfirmacao({ ...base, busy: true })).toMatch(/aguarde/i);
-});
-
-it('aperture-mno2s "Enviar pelo Inter agora" shows a double-payment warning and a disabled, explained button', () => {
+it('aperture-puali "Enviar pelo Inter agora" is one button, no typed amount, no attestation', () => {
   const queryClient = new QueryClient();
   const client = trpc.createClient({ links: [] });
   const html: string = renderToStaticMarkup(
@@ -169,29 +145,18 @@ it('aperture-mno2s "Enviar pelo Inter agora" shows a double-payment warning and 
     ),
   );
   expect(html).toContain('Enviar pelo Inter agora');
-  expect(html).toContain('pagar duas vezes');
-  expect(html).toContain('confirme no extrato do Inter que nenhum PIX');
-  expect(html).toContain('disabled=""');
-  expect(html).toContain('aria-describedby=');
-  expect(html).toContain('cursor-not-allowed');
+  expect(html).not.toContain('<input');
+  expect(html).not.toContain('<textarea');
+  expect(html).not.toContain('disabled=""');
 });
 
-it('aperture-mno2s reenvio button names the first missing requirement', () => {
-  const ok = {
-    busy: false,
-    reason: 'motivo suficiente',
-    typedAmount: '45,00',
-    amountCents: 4500,
-    attested: true,
-  };
-  expect(motivoBloqueioReenvio(ok)).toBeNull();
-  expect(motivoBloqueioReenvio({ ...ok, reason: 'curto' })).toMatch(/motivo/i);
-  expect(motivoBloqueioReenvio({ ...ok, typedAmount: '44,00' })).toMatch(/valor/i);
-  expect(motivoBloqueioReenvio({ ...ok, typedAmount: '45.00' })).toBeNull();
-  expect(motivoBloqueioReenvio({ ...ok, typedAmount: '4500.00' })).toMatch(/valor/i);
-  expect(motivoBloqueioReenvio({ ...ok, typedAmount: '' })).toMatch(/valor/i);
-  expect(motivoBloqueioReenvio({ ...ok, attested: false })).toMatch(/conferi/i);
-  expect(motivoBloqueioReenvio({ ...ok, busy: true })).toMatch(/aguarde/i);
+it('aperture-puali admin errors are short Portuguese, never raw Zod/JSON', () => {
+  const raw = '[{"code":"too_small","path":["motivo"],"message":"Too small"}]';
+  expect(mensagemErroAdmin(raw)).not.toContain('too_small');
+  expect(mensagemErroAdmin(raw)).toMatch(/tente novamente/i);
+  expect(mensagemErroAdmin('{"code":"x"}')).toMatch(/tente novamente/i);
+  expect(mensagemErroAdmin('')).toMatch(/tente novamente/i);
+  expect(mensagemErroAdmin('Repasse não encontrado.')).toBe('Repasse não encontrado.');
 });
 
 it('aperture-mno2s approve modal is an explicit choice: send via Inter vs already paid outside (reference required)', () => {
@@ -219,4 +184,33 @@ it('aperture-mno2s approve modal is an explicit choice: send via Inter vs alread
   expect(bankTransferRefDaEscolha('por_fora', '  PIX-1 ')).toBe('PIX-1');
   expect(bankTransferRefDaEscolha('por_fora', '  ')).toBeUndefined();
   expect(bankTransferRefDaEscolha(null, 'PIX-1')).toBeUndefined();
+});
+
+it('aperture-puali retry dialog shows Inter lookup + extrato candidates as information only', () => {
+  const html: string = renderToStaticMarkup(
+    createElement(RecoveryConfirmation, {
+      mode: 'retry',
+      amountCents: 19500,
+      busy: false,
+      info: {
+        lookup: 'positive',
+        statementAvailable: true,
+        candidates: [
+          {
+            e2eId: 'E_SYN',
+            amountCents: 19500,
+            dataMovimento: '2026-10-19',
+            destination: 'matches',
+          },
+        ],
+      },
+      onConfirm() {},
+      onClose() {},
+    }),
+  );
+  expect(html).toContain('Inter diz: pagamento encontrado');
+  expect(html).toContain('E_SYN');
+  expect(html).toContain('recebe duas vezes');
+  expect(html).not.toContain('disabled=""');
+  expect(html).not.toContain('<input');
 });

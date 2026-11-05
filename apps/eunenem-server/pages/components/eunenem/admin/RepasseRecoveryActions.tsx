@@ -52,40 +52,17 @@ export function RecoveryActionButton({
   );
 }
 
-/** First reason the final confirm button is disabled, or null when it is enabled. */
-export function motivoBloqueioConfirmacao(args: {
-  busy: boolean;
-  confirmed: boolean;
-  reason: string;
-  mode: 'paid' | 'retry';
-  reference: string;
-  hasPreview: boolean;
-  decision?: string | undefined;
-}): string | null {
-  if (args.busy) return 'Aguarde a operação em andamento.';
-  if (args.mode === 'retry' && !args.hasPreview)
-    return 'Aguarde a consulta ao Inter terminar para liberar a nova tentativa.';
-  if (args.mode === 'retry' && args.decision === 'blocked')
-    return 'Reenvio bloqueado pela consulta: já existe pagamento ou o destino não é verificável.';
-  if (args.mode === 'paid' && !args.reference.trim())
-    return 'Informe a referência bancária da transferência.';
-  if (args.reason.trim().length < 10) return 'Descreva o motivo (mínimo de 10 caracteres).';
-  if (!args.confirmed) return 'Marque "Confirmo esta ação" para continuar.';
-  return null;
+/** Short Portuguese message for an admin; never raw Zod/JSON text. */
+export function mensagemErroAdmin(message: string | undefined | null): string {
+  const text = (message ?? '').trim();
+  if (!text || /^[[{]/.test(text) || /"(code|path|expected|received)"/.test(text))
+    return 'Não foi possível concluir a ação. Confira os dados e tente novamente.';
+  return text;
 }
 
 export function ManualResolutionActions({ repasse }: { repasse: RepasseDetail }) {
-  const [confirmationOpen, setConfirmationOpen] = useState(false);
+  const [dialog, setDialog] = useState<'paid' | 'retry' | null>(null);
   const [resolvedElsewhere, setResolvedElsewhere] = useState<string | null>(null);
-  const [mode, setMode] = useState<'paid' | 'retry' | null>(null);
-  const [reason, setReason] = useState('');
-  const [reference, setReference] = useState('');
-  const [evidence, setEvidence] = useState('');
-  const [amount, setAmount] = useState('');
-  const [periodStart, setPeriodStart] = useState('');
-  const [periodEnd, setPeriodEnd] = useState('');
-  const [dismissed, setDismissed] = useState<string[]>([]);
-  const [confirmed, setConfirmed] = useState(false);
   const utils = trpc.useUtils();
   const refresh = async () => {
     await Promise.all([
@@ -93,15 +70,8 @@ export function ManualResolutionActions({ repasse }: { repasse: RepasseDetail })
       utils.admin.repasses.list.invalidate(),
     ]);
   };
-  const preview = trpc.admin.repasses.consultarRecuperacao.useMutation({
-    onSuccess: (data) => {
-      setPeriodStart(data.period.dataInicio);
-      setPeriodEnd(data.period.dataFim);
-      setConfirmed(false);
-    },
-  });
   const afterResolution = async (status: string, expected: string) => {
-    setConfirmationOpen(false);
+    setDialog(null);
     if (status !== expected) setResolvedElsewhere(status);
     else await refresh();
   };
@@ -111,21 +81,9 @@ export function ManualResolutionActions({ repasse }: { repasse: RepasseDetail })
   const retry = trpc.admin.repasses.recuperar.useMutation({
     onSuccess: (result) => afterResolution(result.status, 'aprovado'),
   });
-  const busy = preview.isPending || paid.isPending || retry.isPending;
-  const data = preview.data;
-  const error = paid.error ?? retry.error ?? preview.error;
-  const inputClass = 'block w-full rounded border border-line bg-paper p-2';
-  const bloqueioConfirmacao = mode
-    ? motivoBloqueioConfirmacao({
-        busy,
-        confirmed,
-        reason,
-        mode,
-        reference,
-        hasPreview: Boolean(data),
-        decision: data?.decision,
-      })
-    : null;
+  const info = trpc.admin.repasses.consultarRecuperacao.useMutation();
+  const busy = paid.isPending || retry.isPending;
+  const error = paid.error ?? retry.error;
   if (resolvedElsewhere)
     return <RecoveryResolvedElsewhere status={resolvedElsewhere} onRefresh={refresh} />;
   return (
@@ -134,212 +92,65 @@ export function ManualResolutionActions({ repasse }: { repasse: RepasseDetail })
       aria-label="Resolver repasse em verificação"
     >
       <h2>Resolver repasse em verificação</h2>
-      {repasse.searchCandidates.length > 0 && <details open>
-        <summary>Candidatos históricos — não substituem a nova consulta ao Inter</summary>
-        <table className="w-full text-left"><thead><tr><th>Código</th><th>Valor</th><th>Data</th><th>Chave mascarada</th></tr></thead>
-          <tbody>{repasse.searchCandidates.map(candidate => <tr key={candidate.codigoSolicitacao}>
-            <td>{candidate.codigoSolicitacao}</td><td>{(candidate.valorCents / 100).toFixed(2)}</td>
-            <td>{candidate.dataMovimento ?? 'Não informada'}</td><td>{candidate.chaveMascarada ?? 'Não informada'}</td>
-          </tr>)}</tbody></table>
-      </details>}
-      <p>Nenhuma consulta envia dinheiro. Confira o extrato antes de confirmar.</p>
+      {repasse.searchCandidates.length > 0 && (
+        <details open>
+          <summary>Candidatos no extrato (informativo)</summary>
+          <table className="w-full text-left">
+            <thead>
+              <tr>
+                <th>Código</th>
+                <th>Valor</th>
+                <th>Data</th>
+                <th>Chave mascarada</th>
+              </tr>
+            </thead>
+            <tbody>
+              {repasse.searchCandidates.map((candidate) => (
+                <tr key={candidate.codigoSolicitacao}>
+                  <td>{candidate.codigoSolicitacao}</td>
+                  <td>{(candidate.valorCents / 100).toFixed(2)}</td>
+                  <td>{candidate.dataMovimento ?? 'Não informada'}</td>
+                  <td>{candidate.chaveMascarada ?? 'Não informada'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </details>
+      )}
       <div className="flex flex-wrap gap-3">
-        <RecoveryActionButton
-          variant="primary"
-          disabled={busy}
-          hint={busy ? 'Aguarde a operação em andamento.' : null}
-          onClick={() => {
-            setMode('paid');
-            setConfirmed(false);
+        <RecoveryActionButton variant="warning" disabled={busy} onClick={() => {
+            setDialog('retry');
+            info.mutate({ idRepasse: repasse.idRepasse });
           }}
         >
+          Tentar de novo
+        </RecoveryActionButton>
+        <RecoveryActionButton variant="primary" disabled={busy} onClick={() => setDialog('paid')}>
           Confirmei que saiu
         </RecoveryActionButton>
-        <RecoveryActionButton
-          variant="warning"
-          disabled={busy}
-          hint={busy ? 'Aguarde a operação em andamento.' : null}
-          onClick={() => {
-            setMode('retry');
-            setDismissed([]);
-            setConfirmed(false);
-            preview.mutate({ idRepasse: repasse.idRepasse });
-          }}
-        >
-          Confirmei que NÃO saiu
-        </RecoveryActionButton>
       </div>
-      {mode && (
-        <>
-          <label>
-            Motivo obrigatório
-            <textarea
-              className={inputClass}
-              value={reason}
-              onChange={(e) => setReason(e.target.value)}
-              maxLength={1000}
-            />
-          </label>
-          {mode === 'paid' ? (
-            <label>
-              Referência bancária
-              <input
-                className={inputClass}
-                value={reference}
-                onChange={(e) => setReference(e.target.value)}
-                maxLength={255}
-              />
-            </label>
-          ) : (
-            <>
-              {preview.isPending && <p role="status">Consultando o Inter…</p>}
-              {data && (
-                <div className="space-y-2">
-                  <p>
-                    Consulta: {data.lookup}. Extrato:{' '}
-                    {data.statementAvailable ? 'consultado' : 'indisponível; confira externamente'}.
-                    Período: {data.period.dataInicio} a {data.period.dataFim}.
-                  </p>
-                  <RecoveryCandidatesTable candidates={data.candidates} />
-                  {data.candidates.map((candidate, index) => (
-                    <label className="block" key={candidate.e2eId ?? index}>
-                      {candidate.e2eId ?? 'Sem E2E'} —{' '}
-                      {candidate.destination === 'matches'
-                        ? 'destino compatível'
-                        : candidate.destination === 'unknown'
-                          ? 'destino não identificado'
-                          : 'outro destinatário'}
-                      {candidate.destination === 'different' && candidate.e2eId && (
-                        <input
-                          type="checkbox"
-                          aria-label={`Descartar ${candidate.e2eId}`}
-                          checked={dismissed.includes(candidate.e2eId)}
-                          onChange={(e) =>
-                            setDismissed(
-                              e.target.checked
-                                ? [...dismissed, candidate.e2eId ?? '']
-                                : dismissed.filter((id) => id !== candidate.e2eId),
-                            )
-                          }
-                        />
-                      )}
-                    </label>
-                  ))}
-                  {data.decision === 'blocked' ? (
-                    <p role="alert">
-                      Reenvio bloqueado: pagamento existente ou débito sem destino verificável. Não
-                      há exceção manual.
-                    </p>
-                  ) : data.decision === 'manual_attestation' ? (
-                    <>
-                      <p>
-                        A consulta é inconclusiva. Atesto que conferi o extrato e que nenhum
-                        pagamento deste repasse saiu.
-                      </p>
-                      <label>
-                        Evidência do extrato
-                        <textarea
-                          className={inputClass}
-                          value={evidence}
-                          onChange={(e) => setEvidence(e.target.value)}
-                          maxLength={2000}
-                        />
-                      </label>
-                      <label>
-                        Período conferido — início
-                        <input
-                          type="date"
-                          value={periodStart}
-                          onChange={(e) => setPeriodStart(e.target.value)}
-                        />
-                      </label>
-                      <label>
-                        Fim
-                        <input
-                          type="date"
-                          value={periodEnd}
-                          onChange={(e) => setPeriodEnd(e.target.value)}
-                        />
-                      </label>
-                      <label>
-                        Digite o valor em reais ({(data.amountCents / 100).toFixed(2)})
-                        <input
-                          className={inputClass}
-                          inputMode="decimal"
-                          value={amount}
-                          onChange={(e) => setAmount(e.target.value)}
-                        />
-                      </label>
-                    </>
-                  ) : (
-                    <p>Inter retornou negativa definitiva; nenhuma saída compatível no extrato.</p>
-                  )}
-                </div>
-              )}
-            </>
-          )}
-          <label className="block">
-            <input
-              type="checkbox"
-              checked={confirmed}
-              onChange={(e) => setConfirmed(e.target.checked)}
-            />{' '}
-            Confirmo esta ação e seu registro no histórico.
-          </label>
-          <RecoveryActionButton
-            variant={mode === 'paid' ? 'primary' : 'warning'}
-            disabled={bloqueioConfirmacao !== null}
-            hint={bloqueioConfirmacao}
-            onClick={() => setConfirmationOpen(true)}
-          >
-            {busy
-              ? 'Aguarde…'
-              : mode === 'paid'
-                ? 'Confirmar como pago'
-                : 'Autorizar uma nova tentativa'}
-          </RecoveryActionButton>
-        </>
-      )}
-      {confirmationOpen && mode && (
+      {dialog && (
         <RecoveryConfirmation
-          mode={mode}
+          mode={dialog}
           amountCents={repasse.amountCents}
-          reference={reference}
-          reason={reason}
           busy={busy}
-          error={error?.message}
-          onClose={() => setConfirmationOpen(false)}
+          info={dialog === 'retry' ? info.data : undefined}
+          infoLoading={dialog === 'retry' && info.isPending}
+          error={error ? mensagemErroAdmin(error.message) : undefined}
+          onClose={() => setDialog(null)}
           onConfirm={() => {
-            if (mode === 'paid')
-              paid.mutate({
-                idRepasse: repasse.idRepasse,
-                codigoSolicitacao: reference,
-                motivo: reason,
-              });
-            else if (data)
+            if (dialog === 'paid') paid.mutate({ idRepasse: repasse.idRepasse });
+            else
               retry.mutate({
                 idRepasse: repasse.idRepasse,
-                motivo: reason,
-                evidenceDigest: data.evidenceDigest,
-                expectedTransferAttempts: data.expectedTransferAttempts,
-                ...(data.decision === 'manual_attestation'
-                  ? {
-                      attestation: {
-                        evidence,
-                        periodStart,
-                        periodEnd,
-                        confirmedAmountCents: Math.round(Number(amount.replace(',', '.')) * 100),
-                        dismissedE2Es: dismissed,
-                      },
-                    }
-                  : {}),
+                expectedTransferAttempts: repasse.transferAttempts,
               });
           }}
         />
       )}
-      {error && (
+      {error && !dialog && (
         <p role="alert" className="text-red-700">
-          {error.message}
+          {mensagemErroAdmin(error.message)}
         </p>
       )}
     </section>
@@ -359,7 +170,7 @@ export function RecoveryCandidatesTable({
   return (
     <div className="overflow-x-auto">
       <table className="w-full border-collapse text-left">
-        <caption>Débitos candidatos no extrato — confira antes de atestar</caption>
+        <caption>Débitos candidatos no extrato (informativo)</caption>
         <thead>
           <tr>
             {['E2E', 'Valor', 'Data', 'Destino'].map((title) => (
@@ -405,21 +216,39 @@ export function RecoveryCandidatesTable({
   );
 }
 
+const LOOKUP_LABEL: Record<string, string> = {
+  positive: 'pagamento encontrado (REALIZADO)',
+  negative: 'pagamento não realizado',
+  inconclusive: 'consulta inconclusiva',
+};
+
 export function RecoveryConfirmation({
   mode,
   amountCents,
-  reference,
-  reason,
   busy,
+  info,
+  infoLoading,
   error,
   onConfirm,
   onClose,
 }: {
   mode: 'paid' | 'retry';
   amountCents: number;
-  reference: string;
-  reason: string;
   busy: boolean;
+  /** Informational Inter lookup; never blocks the confirmation. */
+  info?:
+    | {
+        lookup: string;
+        statementAvailable: boolean;
+        candidates: readonly {
+          e2eId: string | null;
+          amountCents?: number;
+          dataMovimento?: string | null;
+          destination: 'matches' | 'different' | 'unknown';
+        }[];
+      }
+    | undefined;
+  infoLoading?: boolean | undefined;
   error?: string | undefined;
   onConfirm: () => void;
   onClose: () => void;
@@ -432,23 +261,26 @@ export function RecoveryConfirmation({
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
     >
       <div className="max-h-[85vh] w-full max-w-lg space-y-4 overflow-auto rounded bg-paper p-6 shadow-xl">
-        <h2>{mode === 'paid' ? 'Confirmei que saiu' : 'Confirmei que NÃO saiu'}</h2>
+        <h2>{mode === 'paid' ? 'Confirmei que saiu' : 'Tentar de novo'}</h2>
         <p>
           Valor:{' '}
           {(amountCents / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
         </p>
         {mode === 'paid' ? (
-          <p>
-            Referência bancária obrigatória: {reference}. Confirmo que este pagamento chegou ao
-            recebedor.
-          </p>
+          <p>Tem certeza? O repasse será marcado como pago.</p>
         ) : (
-          <p>
-            Autorizo uma única nova tentativa após conferir o extrato. Um atestado incorreto pode
-            pagar duas vezes.
-          </p>
+          <p>Tem certeza? Se o PIX anterior tiver saído, o recebedor recebe duas vezes.</p>
         )}
-        <p>Motivo: {reason}</p>
+        {mode === 'retry' && infoLoading && <p role="status">Consultando o Inter (informativo)…</p>}
+        {mode === 'retry' && info && (
+          <div role="note" className="space-y-2 text-[13px]">
+            <p>
+              Inter diz: {LOOKUP_LABEL[info.lookup] ?? 'sem resposta conclusiva'}. Extrato:{' '}
+              {info.statementAvailable ? 'consultado' : 'indisponível'}. (Informativo)
+            </p>
+            {info.candidates.length > 0 && <RecoveryCandidatesTable candidates={info.candidates} />}
+          </div>
+        )}
         {error && (
           <p role="alert" className="text-red-700">
             {error}
@@ -460,15 +292,10 @@ export function RecoveryConfirmation({
           </RecoveryActionButton>
           <RecoveryActionButton
             variant={mode === 'paid' ? 'primary' : 'warning'}
-            disabled={busy || reason.trim().length < 10 || (mode === 'paid' && !reference.trim())}
-            hint={
-              busy
-                ? 'Aguarde a operação em andamento.'
-                : 'Motivo (mín. 10 caracteres)' + (mode === 'paid' ? ' e referência bancária são obrigatórios.' : ' é obrigatório.')
-            }
+            disabled={busy}
             onClick={onConfirm}
           >
-            {busy ? 'Confirmando…' : 'Confirmar definitivamente'}
+            {busy ? 'Confirmando…' : 'Confirmar'}
           </RecoveryActionButton>
         </div>
       </div>
@@ -496,119 +323,101 @@ export function RecoveryResolvedElsewhere({
   );
 }
 
-/** "45,00" / "45.00" → cents, or null when it is not a valid amount. */
-function parseReaisToCents(value: string): number | null {
-  const trimmed = value.trim();
-  // "45.00" is a decimal; "1.234,56" / "1.234" use the dot as a thousands separator.
-  const normalized = /^\d+\.\d{1,2}$/.test(trimmed)
-    ? trimmed
-    : trimmed.replace(/\./g, '').replace(',', '.');
-  if (!/^\d+(\.\d{1,2})?$/.test(normalized)) return null;
-  return Math.round(Number(normalized) * 100);
-}
-
-/** First reason the "Enviar pelo Inter agora" button is disabled, or null when enabled. */
-export function motivoBloqueioReenvio(args: {
-  busy: boolean;
-  reason: string;
-  typedAmount: string;
-  amountCents: number;
-  attested: boolean;
-}): string | null {
-  if (args.busy) return 'Aguarde a operação em andamento.';
-  if (args.reason.trim().length < 10) return 'Descreva o motivo (mínimo de 10 caracteres).';
-  if (parseReaisToCents(args.typedAmount) !== args.amountCents)
-    return 'Digite o valor exato do repasse em reais para confirmar.';
-  if (!args.attested) return 'Marque que conferiu o extrato e que o repasse não foi pago por fora.';
-  return null;
-}
-
 /**
  * aperture-mno2s — "Enviar pelo Inter agora": only for a conta repasse that
- * the old manual approval marked transferido although nothing was sent. The
- * server re-checks eligibility and the Inter extrato; this is the operator side.
+ * the old manual approval marked transferido although nothing was sent.
+ * aperture-puali — one button + one confirmation; the extrato is info only.
  */
 export function ReenvioPeloInterActions({
   repasse,
 }: {
   repasse: Pick<RepasseDetail, 'idRepasse' | 'amountCents'>;
 }) {
-  const [reason, setReason] = useState('');
-  const [typedAmount, setTypedAmount] = useState('');
-  const [attested, setAttested] = useState(false);
+  const [open, setOpen] = useState(false);
   const utils = trpc.useUtils();
+  const extrato = trpc.admin.repasses.candidatosReenvio.useQuery(
+    { idRepasse: repasse.idRepasse },
+    { retry: false },
+  );
   const send = trpc.admin.repasses.reenviarPeloInter.useMutation({
     onSuccess: async () => {
+      setOpen(false);
       await Promise.all([
         utils.admin.repasses.show.invalidate(),
         utils.admin.repasses.list.invalidate(),
       ]);
     },
   });
-  const bloqueio = motivoBloqueioReenvio({
-    busy: send.isPending,
-    reason,
-    typedAmount,
-    amountCents: repasse.amountCents,
-    attested,
-  });
-  const inputClass = 'block w-full rounded border border-line bg-paper p-2';
+  const candidatos = extrato.data?.candidatos ?? [];
   return (
     <section
       className="space-y-3 rounded border border-rose-300 bg-rose-50 p-5"
       aria-label="Enviar pelo Inter agora"
     >
       <h2>Enviar pelo Inter agora</h2>
-      <p role="alert" className="font-semibold text-rose-800">
-        Atenção: este repasse foi aprovado e marcado como transferido, mas nenhum envio automático
-        foi feito. Se ele já foi pago por fora, enviar de novo vai pagar duas vezes — confirme no
-        extrato do Inter que nenhum PIX, TED ou transferência para este recebedor foi feito antes de
-        continuar. O sistema também consulta o extrato e bloqueia o envio se achar um débito de
-        mesmo valor ou para o mesmo destinatário; nesse caso não há exceção.
+      <p>
+        Este repasse foi aprovado e marcado como transferido, mas nenhum envio automático foi feito.
       </p>
-      <label className="block">
-        Motivo obrigatório
-        <textarea
-          className={inputClass}
-          value={reason}
-          onChange={(e) => setReason(e.target.value)}
-          maxLength={1000}
-        />
-      </label>
-      <label className="block">
-        Digite o valor do repasse em reais ({(repasse.amountCents / 100).toFixed(2).replace('.', ',')})
-        <input
-          className={inputClass}
-          inputMode="decimal"
-          value={typedAmount}
-          onChange={(e) => setTypedAmount(e.target.value)}
-        />
-      </label>
-      <label className="block">
-        <input type="checkbox" checked={attested} onChange={(e) => setAttested(e.target.checked)} />{' '}
-        Conferi o extrato e este repasse não foi pago por fora.
-      </label>
+      {candidatos.length > 0 && (
+        <div role="note">
+          <p>Débitos no extrato que podem ser este repasse (informativo):</p>
+          <ul>
+            {candidatos.map((c, i) => (
+              <li key={c.e2eId ?? i}>
+                {c.e2eId ?? 'sem E2E'} — R$ {(c.valorCents / 100).toFixed(2).replace('.', ',')} em{' '}
+                {c.dataMovimento ?? 'data não informada'}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
       <RecoveryActionButton
         variant="warning"
-        disabled={bloqueio !== null}
-        hint={bloqueio}
-        onClick={() => {
-          const valorDigitadoCents = parseReaisToCents(typedAmount);
-          if (valorDigitadoCents === null) return;
-          send.mutate({
-            idRepasse: repasse.idRepasse,
-            motivo: reason,
-            valorDigitadoCents,
-            atestado: true,
-          });
-        }}
+        disabled={send.isPending}
+        onClick={() => setOpen(true)}
       >
-        {send.isPending ? 'Enviando…' : 'Enviar pelo Inter agora'}
+        Enviar pelo Inter agora
       </RecoveryActionButton>
-      {send.error && (
-        <p role="alert" className="text-red-700">
-          {send.error.message}
-        </p>
+      {open && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Confirmar envio pelo Inter"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+        >
+          <div className="w-full max-w-lg space-y-4 rounded bg-paper p-6 shadow-xl">
+            <h2>Enviar pelo Inter agora</h2>
+            <p>
+              Valor:{' '}
+              {(repasse.amountCents / 100).toLocaleString('pt-BR', {
+                style: 'currency',
+                currency: 'BRL',
+              })}
+            </p>
+            <p>Tem certeza? Se o PIX anterior tiver saído, o recebedor recebe duas vezes.</p>
+            {send.error && (
+              <p role="alert" className="text-red-700">
+                {mensagemErroAdmin(send.error.message)}
+              </p>
+            )}
+            <div className="flex gap-3">
+              <RecoveryActionButton
+                variant="neutral"
+                disabled={send.isPending}
+                onClick={() => setOpen(false)}
+              >
+                Voltar
+              </RecoveryActionButton>
+              <RecoveryActionButton
+                variant="warning"
+                disabled={send.isPending}
+                onClick={() => send.mutate({ idRepasse: repasse.idRepasse })}
+              >
+                {send.isPending ? 'Enviando…' : 'Confirmar'}
+              </RecoveryActionButton>
+            </div>
+          </div>
+        </div>
       )}
     </section>
   );

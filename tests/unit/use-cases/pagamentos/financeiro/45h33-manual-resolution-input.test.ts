@@ -7,14 +7,13 @@ import {
 const idRepasse = '10000000-0000-4000-8000-000000000001';
 const resolvidoPor = 'admin@example.test';
 describe('45h33 explicit manual resolution', () => {
-  it('does not accept marking paid without the mandatory reason', () => {
+  it('aperture-puali: accepts marking paid with only idRepasse + admin (motivo and reference optional)', () => {
     expect(
       ResolverManualPagoRepasseInputSchema.safeParse({
         idRepasse,
         resolvidoPor,
-        interCodigoSolicitacao: 'bank-reference',
       }).success,
-    ).toBe(false);
+    ).toBe(true);
   });
   it('does not accept an unqualified no-payment assertion without a reason', () => {
     expect(
