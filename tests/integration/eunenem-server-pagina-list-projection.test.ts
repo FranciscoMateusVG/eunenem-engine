@@ -23,11 +23,11 @@
  *   - eunenem RegraTaxa: presente = 8.98% (REGRAS_TAXA_SEED)
  *   - fee  = ceil(100 × 898 / 10_000) = 9
  *   - valor = 100 + 9 = 109
- *   - surcharge = ceil((100 × 0.039 + 39) / (1 − 0.039))
- *               = ceil(42.9 / 0.961)
- *               = ceil(44.64)
- *               = 45
- *   - valorComTaxaCartao = 109 + 45 = 154
+ *   - surcharge (on gift + fee = 109) = ceil((109 × 0.039 + 39) / (1 − 0.039))
+ *               = ceil(43.251 / 0.961)
+ *               = ceil(45.006)
+ *               = 46
+ *   - valorComTaxaCartao = 109 + 46 = 155
  */
 
 import { randomUUID } from 'node:crypto';
@@ -181,8 +181,8 @@ describe('pagina.obterListaPresentes projection (aperture-ines9)', () => {
     expect(item.nome).toBe('BABADOR B');
     // valor = 100 + ceil(8.98) = 109
     expect(item.valor).toBe(109);
-    // valorComTaxaCartao = 109 + 45 (Stripe Brazil 3.9% + R$0.39 gross-up
-    // computed off the bare 100 base) = 154
-    expect(item.valorComTaxaCartao).toBe(154);
+    // valorComTaxaCartao = 109 + 46 (Stripe Brazil 3.9% + R$0.39 gross-up
+    // computed off gift + fee = 109) = 155
+    expect(item.valorComTaxaCartao).toBe(155);
   });
 });
