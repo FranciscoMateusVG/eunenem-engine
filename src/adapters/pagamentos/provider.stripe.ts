@@ -46,15 +46,11 @@ const CURRENCY = 'brl' as const;
 const PIX_EXPIRES_AFTER_SECONDS = 600 as const;
 
 /**
- * v1 NOTE — card surcharge handling:
- * Legacy eunenem adds a "Taxa de processamento do cartão" line item for
- * card payments using formula `ceil((base * 0.039) / (1 - 0.039))` (3.9%
- * gross-up so the buyer covers Stripe's processing fee). We are NOT
- * shipping that in v1 — the buyer pays exactly `composicaoValores.totalPaidCents`
- * and the 3.9% Stripe cost eats into our platform fee margin. A follow-up
- * bead will add provider-aware surcharge handling without breaking the
- * PagamentoValorDivergenteError invariant. (Trade-off banked with
- * GLaDOS, 2026-05-30.)
+ * Card surcharge: a "Taxa de processamento do cartão" line item is added for
+ * card payments, computed by `computeCardSurchargeCents` on the gift + the
+ * EuNeném fee (Stripe charges 3.9% + R$0.39 on the whole total). The buyer
+ * pays `composicaoValores.totalPaidCents`, which already includes it, so the
+ * PagamentoValorDivergenteError invariant holds.
  */
 
 /**

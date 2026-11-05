@@ -350,10 +350,12 @@ async function runPagamentoCarrinho(
           (acc, c) => acc + c.lineContributionAmountCents,
           0,
         );
+        const totalFeeCents = itemComposicoes.reduce((acc, c) => acc + c.lineFeeAmountCents, 0);
         const surchargeItem = await calcularSurchargeParaCarrinho(
           { observability },
           {
             totalContributionCents: totalContributionCents as never,
+            totalFeeCents: totalFeeCents as never,
             metodo: parsed.metodo,
           },
         );

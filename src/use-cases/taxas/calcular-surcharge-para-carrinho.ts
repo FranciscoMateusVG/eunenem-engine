@@ -16,8 +16,8 @@ import type { Observability } from '../../observability/observability.js';
  *
  * PIX flows: returns `null` (no surcharge item).
  * Cartão flows: returns the `SnapshotComposicaoValoresItemSurcharge`
- * for the cart's TOTAL contribution amount (sum across all
- * contribuicao items, BEFORE platform fee).
+ * for the cart's gift + platform fee total (what Stripe actually
+ * charges its percentage on).
  *
  * The surcharge item is the LAST item in the cart per operator review
  * lock #18 — the saga calling code is responsible for appending it
@@ -31,11 +31,15 @@ import type { Observability } from '../../observability/observability.js';
 export const CalcularSurchargeParaCarrinhoInputSchema = z.object({
   /**
    * Sum of `contributionUnitAmountCents × quantidade` across all
-   * contribuicao items in the cart. NOT including fee — surcharge
-   * applies to the buyer's gross gift amount, not the platform's
-   * net revenue base.
+   * contribuicao items in the cart (the gift amount, before fee).
    */
   totalContributionCents: MoneyCentsSchema,
+  /**
+   * Sum of the EuNeném platform fee across the cart. Stripe charges its
+   * 3.9% + R$0.39 on the WHOLE charged total (gift + fee), so the surcharge
+   * base is `totalContributionCents + totalFeeCents`.
+   */
+  totalFeeCents: MoneyCentsSchema,
   metodo: z.enum(['pix', 'credit_card']),
 });
 
@@ -60,6 +64,7 @@ export async function calcularSurchargeParaCarrinho(
 
       span.setAttributes({
         'taxas.cart.total_contribution_cents': parsed.totalContributionCents,
+        'taxas.cart.total_fee_cents': parsed.totalFeeCents,
         'taxas.cart.metodo': parsed.metodo,
       });
 
@@ -69,10 +74,13 @@ export async function calcularSurchargeParaCarrinho(
         return null;
       }
 
-      const surchargeCents = computeCardSurchargeCents(parsed.totalContributionCents) as MoneyCents;
+      const surchargeCents = computeCardSurchargeCents(
+        (parsed.totalContributionCents + parsed.totalFeeCents) as MoneyCents,
+      ) as MoneyCents;
 
       logger.info('taxas.cart.surcharge_calculada', {
         totalContributionCents: parsed.totalContributionCents,
+        totalFeeCents: parsed.totalFeeCents,
         surchargeCents,
         metodo: parsed.metodo satisfies MetodoPagamento,
       });
