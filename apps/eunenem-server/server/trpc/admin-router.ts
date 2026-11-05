@@ -4977,7 +4977,7 @@ function mensagemReenvioInelegivel(error: FinanceiroRepasseReenvioInelegivelErro
           `${c.e2eId ?? "sem E2E"} — R$ ${(c.valorCents / 100).toFixed(2)} em ${c.dataMovimento ?? "data não informada"}`,
       )
       .join("; ");
-    return `Envio bloqueado: o extrato do Inter mostra débito(s) que podem ser o pagamento deste repasse (${lista}). Resolva pelo fluxo de verificação manual; nada foi alterado.`;
+    return `Envio bloqueado: o extrato do Inter mostra débito(s) que podem ser o pagamento deste repasse (${lista}). Se o repasse já foi pago, não há nada a enviar. Caso contrário, pague manualmente e aprove registrando a referência bancária, ou acione a engenharia (esta ação não tem exceção). Nada foi alterado.`;
   }
   if (error.motivo === "extrato_inconclusivo") {
     return "Envio bloqueado: não foi possível ler o extrato do Inter por completo. Tente novamente mais tarde; nada foi alterado.";

@@ -1,6 +1,10 @@
 import { createRequire } from 'node:module';
 import { expect, it } from 'vitest';
 import {
+  AprovarEscolha,
+  bankTransferRefDaEscolha,
+} from '../../../apps/eunenem-server/pages/AdminRepasseDetailPage.js';
+import {
   ManualResolutionActions,
   motivoBloqueioConfirmacao,
   motivoBloqueioReenvio,
@@ -183,7 +187,36 @@ it('aperture-mno2s reenvio button names the first missing requirement', () => {
   expect(motivoBloqueioReenvio(ok)).toBeNull();
   expect(motivoBloqueioReenvio({ ...ok, reason: 'curto' })).toMatch(/motivo/i);
   expect(motivoBloqueioReenvio({ ...ok, typedAmount: '44,00' })).toMatch(/valor/i);
+  expect(motivoBloqueioReenvio({ ...ok, typedAmount: '45.00' })).toBeNull();
+  expect(motivoBloqueioReenvio({ ...ok, typedAmount: '4500.00' })).toMatch(/valor/i);
   expect(motivoBloqueioReenvio({ ...ok, typedAmount: '' })).toMatch(/valor/i);
   expect(motivoBloqueioReenvio({ ...ok, attested: false })).toMatch(/conferi/i);
   expect(motivoBloqueioReenvio({ ...ok, busy: true })).toMatch(/aguarde/i);
+});
+
+it('aperture-mno2s approve modal is an explicit choice: send via Inter vs already paid outside (reference required)', () => {
+  const props = {
+    amountCents: 4500,
+    destinationLabel: 'Itaú (341) · ag 0123 · conta 456789-0',
+    choice: null,
+    reference: '',
+    onChoice() {},
+    onReference() {},
+    disabled: false,
+  };
+  const html: string = renderToStaticMarkup(createElement(AprovarEscolha, props));
+  expect(html).toContain('Enviar pelo Inter agora');
+  expect(html).toContain('Já paguei por fora');
+  expect(html).toContain('Itaú (341)');
+  expect(html).toContain('45,00');
+  expect(html).not.toMatch(/opcional/i);
+  expect(html).not.toContain('Pode preencher depois');
+  const paid: string = renderToStaticMarkup(
+    createElement(AprovarEscolha, { ...props, choice: 'por_fora' }),
+  );
+  expect(paid).toMatch(/refer[êe]ncia banc[áa]ria obrigat[óo]ria/i);
+  expect(bankTransferRefDaEscolha('enviar', '  x ')).toBeNull();
+  expect(bankTransferRefDaEscolha('por_fora', '  PIX-1 ')).toBe('PIX-1');
+  expect(bankTransferRefDaEscolha('por_fora', '  ')).toBeUndefined();
+  expect(bankTransferRefDaEscolha(null, 'PIX-1')).toBeUndefined();
 });

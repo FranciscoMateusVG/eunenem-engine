@@ -484,7 +484,7 @@ export class TransferenciaProviderInter implements TransferenciaProvider {
 
         const resultados: PagamentoEncontrado[] = [];
         for (const transacao of transacoes) {
-          const encontrado = mapPixOutTransacao(transacao);
+          const encontrado = mapPixOutTransacao(transacao, input.incluirTodosDebitos === true);
           if (encontrado !== null) {
             resultados.push(encontrado);
           }
@@ -746,12 +746,15 @@ function mapConsultStatus(status: string | undefined): ConsultarPagamentoStatus 
  * adapter surfaces exactly what Inter returns and never fabricates a
  * reference — the caller owns the matching policy.
  */
-function mapPixOutTransacao(transacao: InterExtratoTransacao): PagamentoEncontrado | null {
+function mapPixOutTransacao(
+  transacao: InterExtratoTransacao,
+  todosDebitos = false,
+): PagamentoEncontrado | null {
   const isDebit = transacao.tipoOperacao === 'D';
   const isPix = transacao.tipoTransacao === 'PIX';
   const detalhes = transacao.detalhes;
   const codigoSolicitacao = detalhes?.codigoSolicitacao;
-  if (!isDebit || !isPix) {
+  if (!isDebit || (!isPix && !todosDebitos)) {
     return null;
   }
   if (transacao.valor === undefined) {

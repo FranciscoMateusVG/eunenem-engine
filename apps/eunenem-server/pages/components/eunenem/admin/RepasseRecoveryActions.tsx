@@ -498,7 +498,11 @@ export function RecoveryResolvedElsewhere({
 
 /** "45,00" / "45.00" → cents, or null when it is not a valid amount. */
 function parseReaisToCents(value: string): number | null {
-  const normalized = value.trim().replace(/\./g, '').replace(',', '.');
+  const trimmed = value.trim();
+  // "45.00" is a decimal; "1.234,56" / "1.234" use the dot as a thousands separator.
+  const normalized = /^\d+\.\d{1,2}$/.test(trimmed)
+    ? trimmed
+    : trimmed.replace(/\./g, '').replace(',', '.');
   if (!/^\d+(\.\d{1,2})?$/.test(normalized)) return null;
   return Math.round(Number(normalized) * 100);
 }
@@ -558,8 +562,9 @@ export function ReenvioPeloInterActions({
       <p role="alert" className="font-semibold text-rose-800">
         Atenção: este repasse foi aprovado e marcado como transferido, mas nenhum envio automático
         foi feito. Se ele já foi pago por fora, enviar de novo vai pagar duas vezes — confirme no
-        extrato do Inter que nenhum PIX para este recebedor foi feito antes de continuar. O sistema
-        também consulta o extrato e bloqueia o envio se achar um débito compatível.
+        extrato do Inter que nenhum PIX, TED ou transferência para este recebedor foi feito antes de
+        continuar. O sistema também consulta o extrato e bloqueia o envio se achar um débito de
+        mesmo valor ou para o mesmo destinatário; nesse caso não há exceção.
       </p>
       <label className="block">
         Motivo obrigatório

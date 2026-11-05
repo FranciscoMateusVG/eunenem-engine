@@ -251,6 +251,16 @@ describe('aprovado ≠ transferido (aperture-mno2s)', () => {
     expect(await stamped(idRepasse)).toBe(1);
   });
 
+  it('referência bancária em repasse já aprovado pela via automática: erro (não descarta a ref em silêncio)', async () => {
+    const { idRepasse } = await seedRepasseComLancamento();
+    const spy = spyEnqueuer();
+    await aprovarRepasseRecebedor(deps(spy.enqueuer), { idRepasse, bankTransferRef: null });
+    await expect(
+      aprovarRepasseRecebedor(deps(spy.enqueuer), { idRepasse, bankTransferRef: 'PAGO-FORA' }),
+    ).rejects.toThrow();
+    expect(spy.executar).toHaveLength(1);
+  });
+
   it('sem recebedor ativo e sem referência: rejeita, nada é marcado transferido', async () => {
     recebedorAtual = undefined as never;
     const noRecebedor = new LivroFinanceiroRepositoryPostgres(testDb.db, {
@@ -473,7 +483,7 @@ describe('"Enviar pelo Inter agora" — guarda contra pagamento manual já feito
     );
   });
 
-  it('a consulta do extrato usa a janela da aprovação até hoje', async () => {
+  it('a consulta do extrato começa na solicitação (−1 dia) e vai até hoje', async () => {
     const fake = new TransferenciaProviderFake();
     const calls: Array<{ dataInicio: string; dataFim: string }> = [];
     const original = fake.buscarPagamentos.bind(fake);
@@ -487,7 +497,28 @@ describe('"Enviar pelo Inter agora" — guarda contra pagamento manual já feito
       ...base,
       ...CONFIRMA,
     });
-    expect(calls).toEqual([{ dataInicio: '2026-07-16', dataFim: '2026-07-20' }]);
+    expect(calls).toEqual([
+      { dataInicio: '2026-07-15', dataFim: '2026-07-20', incluirTodosDebitos: true },
+    ]);
+  });
+
+  it('débito datado ANTES da aprovação (pago à mão e depois aprovado) também bloqueia', async () => {
+    const { idRepasse } = await seedRepasseComLancamento(
+      { status: 'aprovado', aprovadoEm: new Date('2026-07-18T12:00:00Z') },
+      T0,
+    );
+    const pagoAntes = new TransferenciaProviderFake({
+      buscarResultados: [debito({ dataMovimento: '2026-07-16' })],
+    });
+    const spy = spyEnqueuer();
+    await expect(
+      reenviarRepasseContaPeloInter(deps(pagoAntes, spy.enqueuer), {
+        idRepasse,
+        ...base,
+        ...CONFIRMA,
+      }),
+    ).rejects.toThrow();
+    expect(spy.executar).toHaveLength(0);
   });
 
   it('extrato inconclusivo (erro/429/incompleto) ⇒ falha fechada', async () => {

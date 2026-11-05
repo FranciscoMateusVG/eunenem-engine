@@ -39,7 +39,7 @@ async function comPrazo<T>(promise: Promise<T>): Promise<T> {
  *
  * An old manual approval could have been paid by hand with the bank reference
  * left blank, so before un-stamping the Inter extrato is checked from the
- * approval date to today: any debit of the same amount or to the same
+ * solicitação (minus a day) to today: any debit of the same amount or to the same
  * recipient, or an extrato that cannot be read completely, REFUSES the resend
  * (fail closed). The operator must also re-type the amount and attest they
  * checked the statement.
@@ -133,10 +133,14 @@ async function assertSemPagamentoManualNoExtrato(
   repasse: RepasseRecebedor,
   recebedor: { readonly nomeTitular: string; readonly cpfTitular: string },
 ): Promise<void> {
-  const inicio = repasse.aprovadoEm ?? repasse.solicitadoEm;
+  // The old workflow was pay-by-hand THEN approve, so the payment can predate
+  // aprovadoEm: start at the solicitação, minus a day (extrato dates are BRT).
+  const inicio = new Date(repasse.solicitadoEm.getTime() - 86_400_000);
   const periodo = {
     dataInicio: inicio.toISOString().slice(0, 10),
     dataFim: deps.clock().toISOString().slice(0, 10),
+    // A hand payment may have been a TED/transferência, not only a PIX.
+    incluirTodosDebitos: true,
   };
   let pagamentos: Awaited<ReturnType<TransferenciaProvider['buscarPagamentos']>>;
   try {

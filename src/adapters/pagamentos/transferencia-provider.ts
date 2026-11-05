@@ -156,6 +156,12 @@ export interface BuscarPagamentosInput {
   readonly dataInicio: string;
   /** ISO date (yyyy-mm-dd) window end. */
   readonly dataFim: string;
+  /**
+   * When true, return EVERY debit (PIX, TED, transferência…) instead of only
+   * PIX-out. Used by the pre-resend double-payment guard; the reconciliation
+   * path never sets it.
+   */
+  readonly incluirTodosDebitos?: boolean;
 }
 
 export interface PagamentoEncontrado {

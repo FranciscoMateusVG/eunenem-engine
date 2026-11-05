@@ -7,6 +7,7 @@ import type { IdRepasse } from '../../../domain/pagamentos/financeiro/value-obje
 import { IdRepasseSchema } from '../../../domain/pagamentos/financeiro/value-objects/ids.js';
 import { FinanceiroInputInvalidoError } from '../../../errors/pagamentos/financeiro/input-invalido.error.js';
 import { FinanceiroRepasseNaoEncontradoError } from '../../../errors/pagamentos/financeiro/repasse-nao-encontrado.error.js';
+import { FinanceiroRepasseStatusInvalidoError } from '../../../errors/pagamentos/financeiro/repasse-status-invalido.error.js';
 import type { Observability } from '../../../observability/observability.js';
 
 /**
@@ -102,8 +103,12 @@ export async function aprovarRepasseRecebedor(
       // A bank reference means the operator already paid it by hand (any metodo):
       // never auto-send on top of it, or the recebedor is paid twice. A recorded
       // reference is the only way approval stamps a repasse transferido.
-      // (A repasse already approved on the automatic path keeps its idempotent no-op.)
-      const pagoManualmente = bankTransferRef !== null && repasse.transferReferencia === null;
+      if (bankTransferRef !== null && repasse.transferReferencia !== null) {
+        // An automatic send is already queued/in flight for this repasse: a bank
+        // reference now would be silently dropped. Tell the operator instead.
+        throw new FinanceiroRepasseStatusInvalidoError(idRepasse, repasse.status);
+      }
+      const pagoManualmente = bankTransferRef !== null;
       if (recebedor && !pagoManualmente) {
         const transferReferencia = gerarTransferReferencia(idRepasse);
         span.setAttribute('financeiro.repasse.metodo', recebedor.metodo);

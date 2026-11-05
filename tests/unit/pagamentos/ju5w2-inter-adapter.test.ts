@@ -413,6 +413,31 @@ describe('TransferenciaProviderInter — DADOS_BANCARIOS wire contract (aperture
   });
 });
 
+describe('TransferenciaProviderInter — buscarPagamentos incluirTodosDebitos (aperture-mno2s)', () => {
+  const extrato = {
+    statusCode: 200,
+    body: JSON.stringify({
+      ultimaPagina: true,
+      totalPaginas: 1,
+      transacoes: [
+        { tipoOperacao: 'D', tipoTransacao: 'PIX', valor: '45.00', detalhes: { endToEndId: 'E1' } },
+        { tipoOperacao: 'D', tipoTransacao: 'TRANSFERENCIA', valor: '45.00', detalhes: {} },
+        { tipoOperacao: 'C', tipoTransacao: 'PIX', valor: '45.00', detalhes: {} },
+      ],
+    }),
+  };
+
+  it('default (reconciliation) keeps PIX-out only; the guard flag also returns TED/transferência debits, never credits', async () => {
+    const janela = { dataInicio: '2026-07-01', dataFim: '2026-07-02' };
+    const a = new ScriptedTransport().push(TOKEN_OK, extrato);
+    expect(await newProvider(a).buscarPagamentos(janela)).toHaveLength(1);
+    const b = new ScriptedTransport().push(TOKEN_OK, extrato);
+    expect(
+      await newProvider(b).buscarPagamentos({ ...janela, incluirTodosDebitos: true }),
+    ).toHaveLength(2);
+  });
+});
+
 describe('TransferenciaProviderInter — x-id-idempotente (aperture-mno2s)', () => {
   const keyOf = (t: ScriptedTransport) =>
     t.calls.find((c) => c.path === '/banking/v2/pix')?.headers['x-id-idempotente'];

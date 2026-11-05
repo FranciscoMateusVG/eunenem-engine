@@ -987,6 +987,7 @@ function ConfirmAprovarModal({
   onClose: () => void;
   onSuccess: (result: AprovarMutationResult) => void;
 }) {
+  const [escolha, setEscolha] = useState<EscolhaAprovacao | null>(null);
   const [bankTransferRef, setBankTransferRef] = useState("");
 
   // The hook's onSuccess fires AFTER the mutation resolves with the result
@@ -1005,11 +1006,10 @@ function ConfirmAprovarModal({
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
 
+  const refDaEscolha = bankTransferRefDaEscolha(escolha, bankTransferRef);
   const submit = () => {
-    aprovar.mutate({
-      idRepasse: repasse.idRepasse,
-      bankTransferRef: bankTransferRef.trim() === "" ? null : bankTransferRef.trim(),
-    });
+    if (refDaEscolha === undefined) return;
+    aprovar.mutate({ idRepasse: repasse.idRepasse, bankTransferRef: refDaEscolha });
   };
 
   return (
@@ -1030,9 +1030,13 @@ function ConfirmAprovarModal({
         <ModalHeader onClose={onClose} />
         <div className="flex-1 space-y-4 overflow-y-auto px-5 py-4">
           <SummaryFacts repasse={repasse} />
-          <BankTransferRefInput
-            value={bankTransferRef}
-            onChange={setBankTransferRef}
+          <AprovarEscolha
+            amountCents={repasse.amountCents}
+            destinationLabel={destinoLegivel(repasse.destination)}
+            choice={escolha}
+            reference={bankTransferRef}
+            onChoice={setEscolha}
+            onReference={setBankTransferRef}
             disabled={aprovar.isPending}
           />
           {aprovar.error && (
@@ -1045,6 +1049,12 @@ function ConfirmAprovarModal({
           onCancel={onClose}
           onConfirm={submit}
           isPending={aprovar.isPending}
+          canConfirm={refDaEscolha !== undefined}
+          hint={
+            escolha === null
+              ? "Escolha como este repasse será pago."
+              : "Informe a referência bancária do pagamento feito por fora."
+          }
         />
       </div>
     </div>
@@ -1121,37 +1131,98 @@ function SummaryRow({
   );
 }
 
-function BankTransferRefInput({
-  value,
-  onChange,
+export type EscolhaAprovacao = "enviar" | "por_fora";
+
+/**
+ * The bankTransferRef the approval must carry for the chosen option:
+ * null ⇒ Inter sends the money; a string ⇒ already paid outside (reference
+ * required); undefined ⇒ nothing valid chosen yet (the modal cannot confirm).
+ */
+export function bankTransferRefDaEscolha(
+  escolha: EscolhaAprovacao | null,
+  referencia: string,
+): string | null | undefined {
+  if (escolha === "enviar") return null;
+  if (escolha === "por_fora") return referencia.trim() === "" ? undefined : referencia.trim();
+  return undefined;
+}
+
+function destinoLegivel(destination: RepasseDestination | null): string {
+  if (destination === null) return "(sem destino cadastrado)";
+  if (destination.method === "pix") return `PIX ${destination.keyDisplay}`;
+  return `Banco ${destination.bankCode} · ag ${destination.agency}${destination.agencyDigit ? `-${destination.agencyDigit}` : ""} · conta ${destination.account}-${destination.accountDigit}`;
+}
+
+/** Approval is an explicit choice: let Inter send now, or record a payment made outside. */
+export function AprovarEscolha({
+  amountCents,
+  destinationLabel,
+  choice,
+  reference,
+  onChoice,
+  onReference,
   disabled,
 }: {
-  value: string;
-  onChange: (v: string) => void;
+  amountCents: number;
+  destinationLabel: string;
+  choice: EscolhaAprovacao | null;
+  reference: string;
+  onChoice: (c: EscolhaAprovacao) => void;
+  onReference: (v: string) => void;
   disabled: boolean;
 }) {
   return (
-    <div className="space-y-1">
-      <label
-        htmlFor="bankTransferRef"
-        className="block font-mono text-[10px] uppercase tracking-[0.14em] text-ink-mute"
-      >
-        referência bancária (opcional)
-      </label>
-      <input
-        id="bankTransferRef"
-        type="text"
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        disabled={disabled}
-        autoFocus
-        placeholder="TED-xxx / PIX-yyy / opcional"
-        className="w-full rounded-md border border-line bg-paper px-3 py-2 font-mono text-[13px] text-ink placeholder:text-ink-mute focus:border-plum focus:outline-none focus:ring-1 focus:ring-plum disabled:opacity-50"
-      />
-      <p className="font-mono text-[10px] italic text-ink-mute">
-        Pode preencher depois — o registro é gravado mesmo sem referência.
+    <fieldset className="space-y-2" disabled={disabled}>
+      <legend className="font-mono text-[10px] uppercase tracking-[0.14em] text-ink-mute">
+        como este repasse será pago?
+      </legend>
+      <p className="text-[13px] text-ink">
+        {formatBRL(amountCents)} para <strong>{destinationLabel}</strong>
       </p>
-    </div>
+      <label className="flex items-start gap-2 text-[13px]">
+        <input
+          type="radio"
+          name="escolha-aprovacao"
+          checked={choice === "enviar"}
+          onChange={() => onChoice("enviar")}
+        />
+        <span>
+          <strong>Enviar pelo Inter agora</strong> — o sistema paga este valor a este destino ao
+          aprovar.
+        </span>
+      </label>
+      <label className="flex items-start gap-2 text-[13px]">
+        <input
+          type="radio"
+          name="escolha-aprovacao"
+          checked={choice === "por_fora"}
+          onChange={() => onChoice("por_fora")}
+        />
+        <span>
+          <strong>Já paguei por fora</strong> — nada será enviado; a referência bancária é
+          obrigatória.
+        </span>
+      </label>
+      {choice === "por_fora" && (
+        <div className="space-y-1">
+          <label
+            htmlFor="bankTransferRef"
+            className="block font-mono text-[10px] uppercase tracking-[0.14em] text-ink-mute"
+          >
+            referência bancária obrigatória
+          </label>
+          <input
+            id="bankTransferRef"
+            type="text"
+            value={reference}
+            onChange={(e) => onReference(e.target.value)}
+            autoFocus
+            placeholder="TED-xxx / PIX-yyy"
+            className="w-full rounded-md border border-line bg-paper px-3 py-2 font-mono text-[13px] text-ink placeholder:text-ink-mute focus:border-plum focus:outline-none focus:ring-1 focus:ring-plum"
+          />
+        </div>
+      )}
+    </fieldset>
   );
 }
 
@@ -1159,10 +1230,14 @@ function ModalFooter({
   onCancel,
   onConfirm,
   isPending,
+  canConfirm,
+  hint,
 }: {
   onCancel: () => void;
   onConfirm: () => void;
   isPending: boolean;
+  canConfirm: boolean;
+  hint: string;
 }) {
   return (
     <div className="flex items-center justify-end gap-2 border-t border-line bg-cream-2/30 px-5 py-3">
@@ -1174,11 +1249,12 @@ function ModalFooter({
       >
         Cancelar
       </button>
+      {!canConfirm && <span className="mr-auto text-[12px] text-ink-soft">{hint}</span>}
       <button
         type="button"
         onClick={onConfirm}
-        disabled={isPending}
-        className="inline-flex items-center gap-2 rounded-md border border-emerald-300 bg-emerald-50 px-4 py-1.5 font-mono text-[11px] uppercase tracking-[0.14em] text-emerald-800 transition-colors hover:bg-emerald-100 focus:outline-none focus:ring-2 focus:ring-emerald-300 disabled:opacity-50"
+        disabled={isPending || !canConfirm}
+        className="inline-flex cursor-pointer items-center gap-2 rounded-md border border-emerald-300 bg-emerald-50 px-4 py-1.5 font-mono text-[11px] uppercase tracking-[0.14em] text-emerald-800 transition-colors hover:bg-emerald-100 focus:outline-none focus:ring-2 focus:ring-emerald-300 disabled:cursor-not-allowed disabled:opacity-50"
       >
         {isPending ? "Aprovando…" : "Confirmar aprovação"}
       </button>
