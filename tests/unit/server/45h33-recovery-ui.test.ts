@@ -2,6 +2,8 @@ import { createRequire } from 'node:module';
 import { expect, it } from 'vitest';
 import {
   ManualResolutionActions,
+  motivoBloqueioConfirmacao,
+  RecoveryActionButton,
   RecoveryCandidatesTable,
   RecoveryConfirmation,
   RecoveryResolvedElsewhere,
@@ -76,4 +78,70 @@ it('45h33 reports a competing resolution without claiming success', () => {
   expect(html).toContain('já resolvido por outra ação');
   expect(html).toContain('Nenhuma alteração');
   expect(html).toContain('pago');
+});
+
+it('aperture-mno2s manual-resolution actions render as styled, visibly clickable buttons', () => {
+  const queryClient = new QueryClient();
+  const client = trpc.createClient({ links: [] });
+  const html: string = renderToStaticMarkup(
+    createElement(
+      trpc.Provider,
+      { client, queryClient },
+      createElement(
+        QueryClientProvider,
+        { client: queryClient },
+        createElement(ManualResolutionActions, {
+          repasse: { idRepasse: 'synthetic', needsManualResolution: false, searchCandidates: [] },
+        }),
+      ),
+    ),
+  );
+  for (const label of ['Confirmei que saiu', 'Confirmei que NÃO saiu']) {
+    const tag = html.match(new RegExp(`<button[^>]*>(?:(?!</button>).)*${label}`))?.[0] ?? '';
+    expect(tag, label).toContain('type="button"');
+    expect(tag, label).toMatch(/class="[^"]*\bborder\b[^"]*\bbg-[a-z]+-\d+/);
+    expect(tag, label).toContain('cursor-pointer');
+  }
+});
+
+it('aperture-mno2s a disabled action button shows why it is disabled', () => {
+  const html: string = renderToStaticMarkup(
+    createElement(
+      RecoveryActionButton,
+      {
+        variant: 'primary',
+        disabled: true,
+        hint: 'Preencha o motivo (mín. 10 caracteres)',
+        onClick() {},
+      },
+      'Autorizar uma nova tentativa',
+    ),
+  );
+  expect(html).toContain('disabled=""');
+  expect(html).toContain('aria-describedby=');
+  expect(html).toContain('Preencha o motivo');
+  expect(html).toContain('cursor-not-allowed');
+});
+
+it('aperture-mno2s names the first missing requirement of the confirm button', () => {
+  const base = {
+    busy: false,
+    confirmed: true,
+    reason: 'motivo suficiente',
+    mode: 'paid',
+    reference: 'E123',
+    hasPreview: true,
+    decision: 'safe',
+  };
+  expect(motivoBloqueioConfirmacao(base)).toBeNull();
+  expect(motivoBloqueioConfirmacao({ ...base, reason: 'curto' })).toMatch(/motivo/i);
+  expect(motivoBloqueioConfirmacao({ ...base, confirmed: false })).toMatch(/confirmo/i);
+  expect(motivoBloqueioConfirmacao({ ...base, reference: ' ' })).toMatch(/refer[êe]ncia/i);
+  expect(motivoBloqueioConfirmacao({ ...base, mode: 'retry', hasPreview: false })).toMatch(
+    /consulta/i,
+  );
+  expect(motivoBloqueioConfirmacao({ ...base, mode: 'retry', decision: 'blocked' })).toMatch(
+    /bloquead/i,
+  );
+  expect(motivoBloqueioConfirmacao({ ...base, busy: true })).toMatch(/aguarde/i);
 });

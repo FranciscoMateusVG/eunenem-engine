@@ -1,6 +1,78 @@
-import { useState } from 'react';
+import { type ReactNode, useId, useState } from 'react';
 import { trpc } from '@/lib/trpc.js';
 import type { RepasseDetail } from './RepassesStubData.js';
+
+const BUTTON_BASE =
+  'inline-flex cursor-pointer items-center gap-2 rounded-md border px-4 py-2 font-mono text-[12px] uppercase tracking-[0.14em] transition-colors focus:outline-none focus:ring-2 disabled:cursor-not-allowed disabled:opacity-50';
+const BUTTON_VARIANTS = {
+  primary:
+    'border-emerald-300 bg-emerald-50 text-emerald-800 hover:bg-emerald-100 focus:ring-emerald-300',
+  warning:
+    'border-amber-300 bg-amber-50 text-amber-900 hover:bg-amber-100 focus:ring-amber-300',
+  neutral:
+    'border-stone-300 bg-stone-50 text-stone-700 hover:bg-stone-100 focus:ring-stone-300',
+} as const;
+
+/**
+ * A real, visibly styled button. When `disabled`, `hint` explains what is
+ * missing so the operator never faces an unexplained dead control.
+ */
+export function RecoveryActionButton({
+  variant,
+  disabled,
+  hint,
+  onClick,
+  children,
+}: {
+  variant: keyof typeof BUTTON_VARIANTS;
+  disabled: boolean;
+  hint?: string | null | undefined;
+  onClick: () => void;
+  children: ReactNode;
+}) {
+  const hintId = useId();
+  const showHint = disabled && Boolean(hint);
+  return (
+    <span className="inline-flex flex-col items-start gap-1">
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={onClick}
+        aria-describedby={showHint ? hintId : undefined}
+        className={`${BUTTON_BASE} ${BUTTON_VARIANTS[variant]}`}
+      >
+        {children}
+      </button>
+      {showHint && (
+        <span id={hintId} className="text-[12px] text-stone-600">
+          {hint}
+        </span>
+      )}
+    </span>
+  );
+}
+
+/** First reason the final confirm button is disabled, or null when it is enabled. */
+export function motivoBloqueioConfirmacao(args: {
+  busy: boolean;
+  confirmed: boolean;
+  reason: string;
+  mode: 'paid' | 'retry';
+  reference: string;
+  hasPreview: boolean;
+  decision?: string | undefined;
+}): string | null {
+  if (args.busy) return 'Aguarde a operação em andamento.';
+  if (args.mode === 'retry' && !args.hasPreview)
+    return 'Aguarde a consulta ao Inter terminar para liberar a nova tentativa.';
+  if (args.mode === 'retry' && args.decision === 'blocked')
+    return 'Reenvio bloqueado pela consulta: já existe pagamento ou o destino não é verificável.';
+  if (args.mode === 'paid' && !args.reference.trim())
+    return 'Informe a referência bancária da transferência.';
+  if (args.reason.trim().length < 10) return 'Descreva o motivo (mínimo de 10 caracteres).';
+  if (!args.confirmed) return 'Marque "Confirmo esta ação" para continuar.';
+  return null;
+}
 
 export function ManualResolutionActions({ repasse }: { repasse: RepasseDetail }) {
   const [confirmationOpen, setConfirmationOpen] = useState(false);
@@ -43,6 +115,17 @@ export function ManualResolutionActions({ repasse }: { repasse: RepasseDetail })
   const data = preview.data;
   const error = paid.error ?? retry.error ?? preview.error;
   const inputClass = 'block w-full rounded border border-line bg-paper p-2';
+  const bloqueioConfirmacao = mode
+    ? motivoBloqueioConfirmacao({
+        busy,
+        confirmed,
+        reason,
+        mode,
+        reference,
+        hasPreview: Boolean(data),
+        decision: data?.decision,
+      })
+    : null;
   if (resolvedElsewhere)
     return <RecoveryResolvedElsewhere status={resolvedElsewhere} onRefresh={refresh} />;
   return (
@@ -61,19 +144,21 @@ export function ManualResolutionActions({ repasse }: { repasse: RepasseDetail })
       </details>}
       <p>Nenhuma consulta envia dinheiro. Confira o extrato antes de confirmar.</p>
       <div className="flex flex-wrap gap-3">
-        <button
-          type="button"
+        <RecoveryActionButton
+          variant="primary"
           disabled={busy}
+          hint={busy ? 'Aguarde a operação em andamento.' : null}
           onClick={() => {
             setMode('paid');
             setConfirmed(false);
           }}
         >
           Confirmei que saiu
-        </button>
-        <button
-          type="button"
+        </RecoveryActionButton>
+        <RecoveryActionButton
+          variant="warning"
           disabled={busy}
+          hint={busy ? 'Aguarde a operação em andamento.' : null}
           onClick={() => {
             setMode('retry');
             setDismissed([]);
@@ -82,7 +167,7 @@ export function ManualResolutionActions({ repasse }: { repasse: RepasseDetail })
           }}
         >
           Confirmei que NÃO saiu
-        </button>
+        </RecoveryActionButton>
       </div>
       {mode && (
         <>
@@ -201,14 +286,10 @@ export function ManualResolutionActions({ repasse }: { repasse: RepasseDetail })
             />{' '}
             Confirmo esta ação e seu registro no histórico.
           </label>
-          <button
-            type="button"
-            disabled={
-              busy ||
-              !confirmed ||
-              reason.trim().length < 10 ||
-              (mode === 'paid' ? !reference.trim() : !data || data.decision === 'blocked')
-            }
+          <RecoveryActionButton
+            variant={mode === 'paid' ? 'primary' : 'warning'}
+            disabled={bloqueioConfirmacao !== null}
+            hint={bloqueioConfirmacao}
             onClick={() => setConfirmationOpen(true)}
           >
             {busy
@@ -216,7 +297,7 @@ export function ManualResolutionActions({ repasse }: { repasse: RepasseDetail })
               : mode === 'paid'
                 ? 'Confirmar como pago'
                 : 'Autorizar uma nova tentativa'}
-          </button>
+          </RecoveryActionButton>
         </>
       )}
       {confirmationOpen && mode && (
@@ -374,16 +455,21 @@ export function RecoveryConfirmation({
           </p>
         )}
         <div className="flex gap-3">
-          <button type="button" disabled={busy} onClick={onClose}>
+          <RecoveryActionButton variant="neutral" disabled={busy} onClick={onClose}>
             Voltar
-          </button>
-          <button
-            type="button"
+          </RecoveryActionButton>
+          <RecoveryActionButton
+            variant={mode === 'paid' ? 'primary' : 'warning'}
             disabled={busy || reason.trim().length < 10 || (mode === 'paid' && !reference.trim())}
+            hint={
+              busy
+                ? 'Aguarde a operação em andamento.'
+                : 'Motivo (mín. 10 caracteres)' + (mode === 'paid' ? ' e referência bancária são obrigatórios.' : ' é obrigatório.')
+            }
             onClick={onConfirm}
           >
             {busy ? 'Confirmando…' : 'Confirmar definitivamente'}
-          </button>
+          </RecoveryActionButton>
         </div>
       </div>
     </div>
@@ -403,9 +489,9 @@ export function RecoveryResolvedElsewhere({
         Repasse já resolvido por outra ação. Estado atual: {status}. Nenhuma alteração foi feita por
         esta confirmação.
       </p>
-      <button type="button" onClick={onRefresh}>
+      <RecoveryActionButton variant="neutral" disabled={false} onClick={onRefresh}>
         Atualizar
-      </button>
+      </RecoveryActionButton>
     </div>
   );
 }
