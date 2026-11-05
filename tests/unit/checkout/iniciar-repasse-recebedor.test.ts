@@ -13,7 +13,6 @@ import type { LancamentoFinanceiro } from '../../../src/domain/pagamentos/financ
 import { ArrecadacaoCampanhaNaoEncontradaError } from '../../../src/errors/arrecadacao/campanha-nao-encontrada.error.js';
 import { CheckoutCampanhaSemRecebedorError } from '../../../src/errors/checkout/campanha-sem-recebedor.error.js';
 import { CheckoutPlataformaMismatchError } from '../../../src/errors/checkout/plataforma-mismatch.error.js';
-import { CheckoutRecebedorNaoPagavelViaPixError } from '../../../src/errors/checkout/recebedor-nao-pagavel-via-pix.error.js';
 import { FinanceiroSaldoDisponivelInsuficienteError } from '../../../src/errors/pagamentos/financeiro/saldo-disponivel-insuficiente.error.js';
 import { NoopLogger } from '../../../src/observability/noop-logger.js';
 import { noopTracer } from '../../../src/observability/tracer.js';
@@ -187,13 +186,11 @@ describe('iniciarRepasseRecebedor — pre-validation failures', () => {
   });
 });
 
-describe('iniciarRepasseRecebedor — conta receiver landmine', () => {
-  it('throws CheckoutRecebedorNaoPagavelViaPixError for a conta recebedor, never reaching the cents-sweep', async () => {
+describe('iniciarRepasseRecebedor — conta receiver', () => {
+  it('claims the saldo for a conta recebedor (paid via Inter DADOS_BANCARIOS on approval)', async () => {
     // Campanha starts with a PIX recebedor + seeded saldo disponível. Swap
-    // the active recebedor for a 'conta' (bank-account) one: there is no
-    // bank-transfer rail, so the repasse MUST short-circuit BEFORE any
-    // Financeiro delegation. Proof it doesn't crash AND doesn't sweep: the
-    // seeded lançamento stays unclaimed (idRepasse === null) afterwards.
+    // the active recebedor for a 'conta' (bank-account) one: it is payable
+    // automatically (aperture-mno2s), so the solicitação sweeps normally.
     const { deps, idCampanha } = await setupCampanhaComSaldoDisponivel(ID_PLATAFORMA_EUNENEM, 8000);
 
     const ativos = await deps.recebedorRepository.findByCampanhaId(idCampanha);
@@ -219,20 +216,16 @@ describe('iniciarRepasseRecebedor — conta receiver landmine', () => {
     });
     await deps.recebedorRepository.save(contaRecebedor);
 
-    await expect(
-      iniciarRepasseRecebedor(deps, {
-        idPlataforma: ID_PLATAFORMA_EUNENEM,
-        idCampanha,
-        idRepasse: randomUUID(),
-      }),
-    ).rejects.toThrow(CheckoutRecebedorNaoPagavelViaPixError);
+    const repasse = await iniciarRepasseRecebedor(deps, {
+      idPlataforma: ID_PLATAFORMA_EUNENEM,
+      idCampanha,
+      idRepasse: randomUUID(),
+    });
 
-    // The cents-sweep never ran: the disponível lançamento is still unclaimed
-    // (idRepasse === null) — the guard fired BEFORE Financeiro delegation.
+    expect(repasse.status).toBe('solicitado');
     const lancamentos =
       await deps.livroFinanceiroRepository.findLancamentosByIdCampanha(idCampanha);
-    expect(lancamentos.length).toBe(1);
-    expect(lancamentos[0]?.idRepasse).toBeNull();
+    expect(lancamentos[0]?.idRepasse).toBe(repasse.id);
   });
 });
 

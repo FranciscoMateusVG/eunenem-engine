@@ -1,4 +1,5 @@
 import { Buffer } from 'node:buffer';
+import { createHash } from 'node:crypto';
 import { type Span, SpanStatusCode, trace } from '@opentelemetry/api';
 import { type MoneyCents, MoneyCentsSchema } from '../../domain/money.js';
 import {
@@ -15,7 +16,9 @@ import {
   type BuscarPagamentosInput,
   type ConsultarPagamentoResult,
   type ConsultarPagamentoStatus,
+  type DestinatarioDadosBancarios,
   type PagamentoEncontrado,
+  type PagarPixDestinatario,
   type PagarPixInput,
   type PagarPixOutcome,
   TransferenciaAmbiguaError,
@@ -126,6 +129,13 @@ const FIELD_CLASSIFICATIONS = new Map<
   ['valor', 'amount'],
   ['descricao', 'description'],
   ['destinatario', 'recipient'],
+  ['destinatario.agencia', 'recipient'],
+  ['destinatario.contaCorrente', 'recipient'],
+  ['destinatario.cpfCnpj', 'recipient'],
+  ['destinatario.nome', 'recipient'],
+  ['destinatario.tipoConta', 'recipient'],
+  ['destinatario.instituicaoFinanceira', 'recipient'],
+  ['destinatario.instituicaoFinanceira.ispb', 'recipient'],
 ]);
 
 const CODE_CLASSIFICATIONS = new Map<string, TransferenciaProviderDiagnostics['diagnosticCode']>([
@@ -287,6 +297,56 @@ interface InterExtratoResponse {
   readonly totalPaginas?: number;
 }
 
+/**
+ * Deterministic `x-id-idempotente` (UUID-shaped) from the stable referencia and
+ * the fresh-claim attempt number. NEVER random: a re-sent request for the same
+ * possibly-created payment must be recognised by Inter as the same one.
+ */
+export function idempotencyKey(referencia: string, tentativa: number): string {
+  const hex = createHash('sha256').update(`${referencia}:${tentativa}`).digest('hex');
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-5${hex.slice(13, 16)}-a${hex.slice(17, 20)}-${hex.slice(20, 32)}`;
+}
+
+/** Pre-flight: an empty destination means no request was built → safe-to-retry class. */
+function assertDestinatarioPreenchido(d: PagarPixDestinatario): void {
+  if (d.tipo === 'CHAVE' && !d.chave) {
+    throw new TransferenciaTransitoriaError('pagarPix: chave ausente (pre-flight)', {
+      diagnostics: baseDiagnostics('local_rejection', {
+        diagnosticCode: 'invalid_pix_key',
+        diagnosticField: 'pix_key',
+        diagnosticReason: 'required',
+      }),
+    });
+  }
+  if (d.tipo === 'DADOS_BANCARIOS' && !dadosBancariosCompletos(d)) {
+    throw new TransferenciaTransitoriaError('pagarPix: dados bancários incompletos (pre-flight)', {
+      diagnostics: baseDiagnostics('local_rejection', {
+        diagnosticCode: 'invalid_recipient',
+        diagnosticField: 'recipient',
+        diagnosticReason: 'required',
+      }),
+    });
+  }
+}
+
+function dadosBancariosCompletos(d: DestinatarioDadosBancarios): boolean {
+  return Boolean(d.nome && d.cpfCnpj && d.ispb && d.agencia && d.conta && d.tipoConta);
+}
+
+/** Inter wire shape for the recipient (1.0 `requestInterPayment` proved shape for DADOS_BANCARIOS). */
+function destinatarioPayload(d: PagarPixDestinatario): Record<string, unknown> {
+  if (d.tipo === 'CHAVE') return { tipo: 'CHAVE', chave: d.chave };
+  return {
+    tipo: 'DADOS_BANCARIOS',
+    nome: d.nome,
+    cpfCnpj: d.cpfCnpj,
+    agencia: d.agencia,
+    contaCorrente: d.conta,
+    tipoConta: d.tipoConta,
+    instituicaoFinanceira: { ispb: d.ispb },
+  };
+}
+
 export class TransferenciaProviderInter implements TransferenciaProvider {
   /**
    * The shared Inter HTTP core: mTLS agent + OAuth token cache + transport,
@@ -303,20 +363,13 @@ export class TransferenciaProviderInter implements TransferenciaProvider {
       span.setAttribute('transferencia.referencia', input.referencia);
       span.setAttribute('transferencia.valor_cents', input.valorCents);
       // NEVER the chave value — only a boolean presence flag.
-      span.setAttribute('transferencia.tem_chave', Boolean(input.chave));
+      span.setAttribute('transferencia.destinatario_tipo', input.destinatario.tipo);
+      span.setAttribute('transferencia.tem_chave', input.destinatario.tipo === 'CHAVE');
 
       try {
         // Pre-flight (local) validation. A failure here means we never even
         // built a request, so NO payment can exist → safe-to-retry class.
-        if (!input.chave) {
-          throw new TransferenciaTransitoriaError('pagarPix: chave ausente (pre-flight)', {
-            diagnostics: baseDiagnostics('local_rejection', {
-              diagnosticCode: 'invalid_pix_key',
-              diagnosticField: 'pix_key',
-              diagnosticReason: 'required',
-            }),
-          });
-        }
+        assertDestinatarioPreenchido(input.destinatario);
         if (!Number.isInteger(input.valorCents) || input.valorCents <= 0) {
           throw new TransferenciaTransitoriaError('pagarPix: valorCents inválido (pre-flight)', {
             diagnostics: baseDiagnostics('local_rejection', {
@@ -333,7 +386,7 @@ export class TransferenciaProviderInter implements TransferenciaProvider {
 
         const requestBody = JSON.stringify({
           valor: centsToReais(input.valorCents),
-          destinatario: { tipo: 'CHAVE', chave: input.chave },
+          destinatario: destinatarioPayload(input.destinatario),
           descricao: input.descricao.slice(0, DESCRICAO_MAX_LEN),
         });
 
@@ -343,7 +396,10 @@ export class TransferenciaProviderInter implements TransferenciaProvider {
           response = await this.http.request(
             'POST',
             '/banking/v2/pix',
-            this.http.jsonHeaders(token),
+            {
+              ...this.http.jsonHeaders(token),
+              'x-id-idempotente': idempotencyKey(input.referencia, input.tentativa),
+            },
             requestBody,
           );
         } catch (err: unknown) {
@@ -428,7 +484,16 @@ export class TransferenciaProviderInter implements TransferenciaProvider {
 
         const resultados: PagamentoEncontrado[] = [];
         for (const transacao of transacoes) {
-          const encontrado = mapPixOutTransacao(transacao);
+          const encontrado = mapPixOutTransacao(transacao, input.incluirTodosDebitos === true);
+          // The resend guard must not silently skip a debit it cannot read:
+          // an unreadable amount is inconclusive evidence (caller refuses).
+          if (
+            encontrado === null &&
+            input.incluirTodosDebitos === true &&
+            transacao.tipoOperacao === 'D'
+          ) {
+            throw new Error('buscarPagamentos: débito com valor ilegível (extrato inconclusivo)');
+          }
           if (encontrado !== null) {
             resultados.push(encontrado);
           }
@@ -690,12 +755,15 @@ function mapConsultStatus(status: string | undefined): ConsultarPagamentoStatus 
  * adapter surfaces exactly what Inter returns and never fabricates a
  * reference — the caller owns the matching policy.
  */
-function mapPixOutTransacao(transacao: InterExtratoTransacao): PagamentoEncontrado | null {
+function mapPixOutTransacao(
+  transacao: InterExtratoTransacao,
+  todosDebitos = false,
+): PagamentoEncontrado | null {
   const isDebit = transacao.tipoOperacao === 'D';
   const isPix = transacao.tipoTransacao === 'PIX';
   const detalhes = transacao.detalhes;
   const codigoSolicitacao = detalhes?.codigoSolicitacao;
-  if (!isDebit || !isPix) {
+  if (!isDebit || (!isPix && !todosDebitos)) {
     return null;
   }
   if (transacao.valor === undefined) {

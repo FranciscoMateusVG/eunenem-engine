@@ -148,7 +148,7 @@ export type RepasseTransferAttempt = {
   codigoSolicitacao: string | null;
   /** Inter error code only, never PII. */
   error: string | null;
-  operation: "pagar_pix" | "cancelar" | "resolver_manual" | null;
+  operation: "pagar_pix" | "cancelar" | "resolver_manual" | "reenvio_inter" | null;
   httpStatus: number | null;
   providerRequestId: string | null;
   responseClass:

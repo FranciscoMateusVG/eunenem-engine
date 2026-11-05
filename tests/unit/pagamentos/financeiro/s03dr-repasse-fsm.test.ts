@@ -23,6 +23,7 @@ import {
   aprovarRepasse,
   criarRepasseRecebedorSolicitado,
 } from '../../../../src/domain/pagamentos/financeiro/entities/repasse-recebedor.js';
+import { FinanceiroInputInvalidoError } from '../../../../src/errors/pagamentos/financeiro/input-invalido.error.js';
 import { FinanceiroRepasseJaPendenteError } from '../../../../src/errors/pagamentos/financeiro/repasse-ja-pendente.error.js';
 import { FinanceiroRepasseNaoEncontradoError } from '../../../../src/errors/pagamentos/financeiro/repasse-nao-encontrado.error.js';
 import { FinanceiroRepasseStatusInvalidoError } from '../../../../src/errors/pagamentos/financeiro/repasse-status-invalido.error.js';
@@ -438,14 +439,16 @@ describe('aprovarRepasseRecebedor — admin path', () => {
     expect(result.lancamentosAfetados).toBe(2);
   });
 
-  it('accepts a null bankTransferRef (default when admin omits)', async () => {
+  it('refuses to mark transferido when no automatic payout exists and no bank reference was recorded', async () => {
     const { livro, idRepasse } = await setupPending();
-    const result = await aprovarRepasseRecebedor(
-      { livroFinanceiroRepository: livro, clock: clockAt(T1), observability },
-      { idRepasse, bankTransferRef: null },
-    );
-    expect(result.repasse.bankTransferRef).toBeNull();
-    expect(result.repasse.status).toBe('aprovado');
+    await expect(
+      aprovarRepasseRecebedor(
+        { livroFinanceiroRepository: livro, clock: clockAt(T1), observability },
+        { idRepasse, bankTransferRef: null },
+      ),
+    ).rejects.toBeInstanceOf(FinanceiroInputInvalidoError);
+    // Nothing was approved or stamped.
+    expect((await livro.findRepasseById(idRepasse as never))?.status).toBe('solicitado');
   });
 
   it('is idempotent on re-approval with the same bankTransferRef', async () => {

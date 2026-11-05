@@ -110,6 +110,10 @@ const E2E_CONSULT_CODIGO_PREFIX = 'inter_fake_e2ec-';
  * carries no valid marker. Pure — no side effects. The consult token is echoed
  * into the generated codigoSolicitacao and decoded by {@link decodeE2eConsult}.
  */
+function chaveDe(input: PagarPixInput): string | undefined {
+  return input.destinatario.tipo === 'CHAVE' ? input.destinatario.chave : undefined;
+}
+
 export function parseE2eMagicChave(chave: string | undefined): {
   readonly outcome: PagarPixFakeOutcome;
   readonly consultToken: string;
@@ -170,6 +174,7 @@ export class TransferenciaProviderFake implements TransferenciaProvider {
   private readonly consultQueue: ConsultarPagamentoStatus[];
 
   private _pagarPixCalls = 0;
+  private readonly _pagarPixInputs: PagarPixInput[] = [];
   private _consultarPagamentoCalls = 0;
 
   constructor(options: TransferenciaProviderFakeOptions = {}) {
@@ -185,6 +190,11 @@ export class TransferenciaProviderFake implements TransferenciaProvider {
   }
 
   /** Times `pagarPix` was invoked — for idempotency assertions (exactly once / never). */
+  /** Every `pagarPix` input received, in order — lets tests assert the recipient sent. */
+  get pagarPixInputs(): readonly PagarPixInput[] {
+    return this._pagarPixInputs;
+  }
+
   get pagarPixCalls(): number {
     return this._pagarPixCalls;
   }
@@ -205,7 +215,7 @@ export class TransferenciaProviderFake implements TransferenciaProvider {
     input: PagarPixInput,
     span: { setAttribute: (k: string, v: string | number | boolean) => void },
   ): { effectiveOutcome: PagarPixFakeOutcome; mintCodigo: () => string } {
-    const magic = this.e2eMagicOutcomes ? parseE2eMagicChave(input.chave) : null;
+    const magic = this.e2eMagicOutcomes ? parseE2eMagicChave(chaveDe(input)) : null;
     const effectiveOutcome: PagarPixFakeOutcome = magic ? magic.outcome : this.pagarPixOutcome;
     const mintCodigo = (): string =>
       magic
@@ -219,12 +229,13 @@ export class TransferenciaProviderFake implements TransferenciaProvider {
     // valorCents matches this repasse so confirmar's valor-guard adopts it;
     // chave is carried for its chave-guard.
     if (magic?.searchHit) {
+      const chave = chaveDe(input);
       this.e2eSearchHits.push({
         codigoSolicitacao: mintCodigo(),
         valorCents: input.valorCents,
         referencia: input.referencia,
         status: 'pago',
-        ...(input.chave ? { chave: input.chave } : {}),
+        ...(chave ? { chave } : {}),
       });
     }
     return { effectiveOutcome, mintCodigo };
@@ -236,7 +247,8 @@ export class TransferenciaProviderFake implements TransferenciaProvider {
       span.setAttribute('transferencia.referencia', input.referencia);
       span.setAttribute('transferencia.valor_cents', input.valorCents);
       // NEVER set the chave PIX as a span attribute — only a boolean flag.
-      span.setAttribute('transferencia.tem_chave', Boolean(input.chave));
+      span.setAttribute('transferencia.tem_chave', Boolean(chaveDe(input)));
+      this._pagarPixInputs.push(input);
 
       const { effectiveOutcome, mintCodigo } = this.resolveE2eOutcome(input, span);
 

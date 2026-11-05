@@ -18,6 +18,7 @@ import {
   marcarRepasseNeedsManualResolution,
   marcarRepassePago,
   marcarRepasseVerificando,
+  motivoReenvioInelegivel,
   type RepasseRecebedor,
   RepasseRecebedorSchema,
   resolverManualFalhou,
@@ -34,6 +35,7 @@ import type {
 import { FinanceiroPagamentoJaRegistradoError } from '../../../errors/pagamentos/financeiro/pagamento-ja-registrado.error.js';
 import { FinanceiroRepasseJaPendenteError } from '../../../errors/pagamentos/financeiro/repasse-ja-pendente.error.js';
 import { FinanceiroRepasseNaoEncontradoError } from '../../../errors/pagamentos/financeiro/repasse-nao-encontrado.error.js';
+import { FinanceiroRepasseReenvioInelegivelError } from '../../../errors/pagamentos/financeiro/repasse-reenvio-inelegivel.error.js';
 import { FinanceiroRepasseStatusInvalidoError } from '../../../errors/pagamentos/financeiro/repasse-status-invalido.error.js';
 import type { RecebedorRepository } from '../../arrecadacao/recebedor-repository.js';
 import type { Database } from '../../database.js';
@@ -942,6 +944,97 @@ export class LivroFinanceiroRepositoryPostgres implements LivroFinanceiroReposit
             await enqueueDentroDaTransacao(buildRepasseExecutor(tx));
 
             return { repasse: updated };
+          });
+          span.setStatus({ code: SpanStatusCode.OK });
+          return result;
+        } catch (error: unknown) {
+          span.recordException(error as Error);
+          span.setStatus({ code: SpanStatusCode.ERROR });
+          throw error;
+        } finally {
+          span.end();
+        }
+      },
+    );
+  }
+
+  async reenviarRepasseContaPeloInterTransaction(
+    input: {
+      readonly idRepasse: IdRepasse;
+      readonly transferReferencia: string;
+      readonly solicitadoPor: string;
+      readonly motivo: string;
+      readonly agora: Date;
+    },
+    enqueueDentroDaTransacao: (executor: RepasseTransactionExecutor) => Promise<void>,
+  ): Promise<{ readonly repasse: RepasseRecebedor; readonly lancamentosDesmarcados: number }> {
+    return tracer.startActiveSpan(
+      'db.financeiro_livro.repasses.reenviarContaPeloInterTransaction',
+      async (span) => {
+        span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'UPDATE' });
+        try {
+          // biome-ignore lint/suspicious/noExplicitAny: see aprovarRepasseTransaction
+          const result = await (this.db as any).transaction().execute(async (tx: any) => {
+            const idsPagamento = await findPaymentIdsForRepasse(tx, input.idRepasse);
+            const lockedIds = await acquirePaymentMoneyMovementLocks(tx, idsPagamento);
+            await assertTransfersAllowed(tx, lockedIds);
+            await assertMedTransfersAllowed(tx, lockedIds);
+
+            const lockedRows = (await sql<RepasseRow>`
+              SELECT * FROM repasses_recebedor WHERE id = ${input.idRepasse} FOR UPDATE
+            `.execute(tx)) as unknown as { rows: RepasseRow[] };
+            const existing = lockedRows.rows[0];
+            if (!existing) {
+              throw new FinanceiroRepasseNaoEncontradoError(input.idRepasse);
+            }
+            const existingRepasse = repasseFromRow(existing);
+
+            const attemptRows = (await sql<{ cnt: number }>`
+              SELECT count(*)::int AS cnt FROM repasse_transfer_attempts
+                WHERE repasse_id = ${input.idRepasse} AND operation = 'pagar_pix'
+            `.execute(tx)) as unknown as { rows: Array<{ cnt: number }> };
+            const motivoInelegivel = motivoReenvioInelegivel(
+              existingRepasse,
+              attemptRows.rows[0]?.cnt ?? 0,
+            );
+            if (motivoInelegivel) {
+              throw new FinanceiroRepasseReenvioInelegivelError(input.idRepasse, motivoInelegivel);
+            }
+
+            await sql`
+              UPDATE repasses_recebedor
+                SET transfer_referencia = ${input.transferReferencia}
+                WHERE id = ${input.idRepasse}
+            `.execute(tx);
+            const unstamp = await sql`
+              UPDATE lancamentos_financeiros
+                SET transferido_em = NULL
+                WHERE id_repasse = ${input.idRepasse}
+                  AND transferido_em IS NOT NULL
+                  AND cancelado_em IS NULL
+            `.execute(tx);
+
+            await sql`
+              INSERT INTO repasse_transfer_attempts
+                (id, repasse_id, attempt_no, referencia, started_at,
+                 request_summary, outcome, finished_at, operation,
+                 state_before, state_after)
+                SELECT ${randomUUID()}, ${input.idRepasse},
+                       COALESCE(MAX(attempt_no), 0) + 1,
+                       ${input.transferReferencia}, ${input.agora},
+                       ${`reenvio_inter_por:${input.solicitadoPor};motivo:${input.motivo}`},
+                       ${'reenvio_autorizado'}, ${input.agora}, 'reenvio_inter',
+                       ${existingRepasse.status}, ${existingRepasse.status}
+                  FROM repasse_transfer_attempts
+                  WHERE repasse_id = ${input.idRepasse}
+            `.execute(tx);
+
+            await enqueueDentroDaTransacao(buildRepasseExecutor(tx));
+
+            return {
+              repasse: { ...existingRepasse, transferReferencia: input.transferReferencia },
+              lancamentosDesmarcados: Number(unstamp.numAffectedRows ?? 0n),
+            };
           });
           span.setStatus({ code: SpanStatusCode.OK });
           return result;
