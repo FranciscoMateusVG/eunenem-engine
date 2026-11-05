@@ -99,9 +99,10 @@ export async function aprovarRepasseRecebedor(
         repasse.idCampanha,
       );
 
-      // A conta approval that carries a bank reference means the operator already
-      // paid it by hand: that is the only way a conta repasse is stamped transferido.
-      const pagoManualmente = recebedor?.metodo === 'conta' && bankTransferRef !== null;
+      // A bank reference means the operator already paid it by hand (any metodo):
+      // never auto-send on top of it, or the recebedor is paid twice. A recorded
+      // reference is the only way approval stamps a repasse transferido.
+      const pagoManualmente = bankTransferRef !== null;
       if (recebedor && !pagoManualmente) {
         const transferReferencia = gerarTransferReferencia(idRepasse);
         span.setAttribute('financeiro.repasse.metodo', recebedor.metodo);

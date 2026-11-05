@@ -130,6 +130,12 @@ export interface PagarPixInput {
   readonly descricao: string;
   /** Stable per-repasse reference. NEVER regenerated on retry. */
   readonly referencia: string;
+  /**
+   * Fresh-claim attempt number of this repasse. Together with `referencia` it
+   * derives Inter's `x-id-idempotente`: stable for the same (possibly created)
+   * payment, new only after a claim that definitively created none.
+   */
+  readonly tentativa: number;
 }
 
 /** Legacy query result retained for the disabled confirmation adapter surface. */

@@ -1,4 +1,5 @@
 import { Buffer } from 'node:buffer';
+import { createHash } from 'node:crypto';
 import { type Span, SpanStatusCode, trace } from '@opentelemetry/api';
 import { type MoneyCents, MoneyCentsSchema } from '../../domain/money.js';
 import {
@@ -296,6 +297,16 @@ interface InterExtratoResponse {
   readonly totalPaginas?: number;
 }
 
+/**
+ * Deterministic `x-id-idempotente` (UUID-shaped) from the stable referencia and
+ * the fresh-claim attempt number. NEVER random: a re-sent request for the same
+ * possibly-created payment must be recognised by Inter as the same one.
+ */
+export function idempotencyKey(referencia: string, tentativa: number): string {
+  const hex = createHash('sha256').update(`${referencia}:${tentativa}`).digest('hex');
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-5${hex.slice(13, 16)}-a${hex.slice(17, 20)}-${hex.slice(20, 32)}`;
+}
+
 /** Pre-flight: an empty destination means no request was built → safe-to-retry class. */
 function assertDestinatarioPreenchido(d: PagarPixDestinatario): void {
   if (d.tipo === 'CHAVE' && !d.chave) {
@@ -385,7 +396,10 @@ export class TransferenciaProviderInter implements TransferenciaProvider {
           response = await this.http.request(
             'POST',
             '/banking/v2/pix',
-            this.http.jsonHeaders(token),
+            {
+              ...this.http.jsonHeaders(token),
+              'x-id-idempotente': idempotencyKey(input.referencia, input.tentativa),
+            },
             requestBody,
           );
         } catch (err: unknown) {

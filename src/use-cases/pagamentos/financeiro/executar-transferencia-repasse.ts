@@ -94,10 +94,18 @@ const TIPO_CONTA_INTER = {
  */
 function montarDestinatario(
   recebedor: DadosRecebedorAtivo,
-): PagarPixDestinatario | { readonly erro: 'BANCO_DESCONHECIDO' } {
+): PagarPixDestinatario | { readonly erro: 'BANCO_DESCONHECIDO' | 'DADOS_BANCARIOS_INVALIDOS' } {
   if (recebedor.metodo === 'pix') return { tipo: 'CHAVE', chave: recebedor.chavePix };
   const ispb = ispbPorCodigoCompe(recebedor.codigoBanco);
   if (ispb === undefined) return { erro: 'BANCO_DESCONHECIDO' };
+  // Inter takes a 4-digit agência and a numeric account (digit appended). The
+  // schema allows more (agência up to 10 digits, check digit of any char, e.g.
+  // 'X' at BB/Caixa); anything Inter cannot be proven to accept fails closed.
+  if (
+    !/^\d{1,4}$/.test(recebedor.agencia) ||
+    !/^\d+$/.test(`${recebedor.conta}${recebedor.contaDigito}`)
+  )
+    return { erro: 'DADOS_BANCARIOS_INVALIDOS' };
   return {
     tipo: 'DADOS_BANCARIOS',
     nome: recebedor.nomeTitular,
@@ -154,7 +162,7 @@ export async function executarTransferenciaRepasse(
                 ...diagnosticsFallback('local_rejection'),
                 diagnosticCode: 'invalid_recipient',
                 diagnosticField: 'recipient',
-                diagnosticReason: erro === 'BANCO_DESCONHECIDO' ? 'unsupported' : 'required',
+                diagnosticReason: erro === 'RECEBEDOR_SEM_DESTINO' ? 'required' : 'unsupported',
                 durationMs: 0,
               },
             },
@@ -237,6 +245,7 @@ export async function executarTransferenciaRepasse(
           valorCents: repasse.amountCents,
           descricao: `EuNeném — repasse ${shortId}`,
           referencia,
+          tentativa: iniciado.attemptNo,
         });
       } catch (err: unknown) {
         // NB: call finalizarTentativaTransferencia directly on the repository —

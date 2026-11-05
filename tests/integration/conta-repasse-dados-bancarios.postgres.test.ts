@@ -223,6 +223,78 @@ describe('conta recebedor — pago automaticamente via DADOS_BANCARIOS', () => {
   });
 });
 
+describe('aprovado ≠ transferido (aperture-mno2s)', () => {
+  const deps = (enqueuer: RepasseJobEnqueuer) => ({
+    livroFinanceiroRepository: repo,
+    repasseJobEnqueuer: enqueuer,
+    clock: () => new Date(),
+    observability,
+  });
+
+  it('referência bancária informada ⇒ pagamento manual para QUALQUER método: não envia PIX por cima', async () => {
+    recebedorAtual = {
+      metodo: 'pix',
+      nomeTitular: 'Bia',
+      cpfTitular: '52998224725',
+      tipoChavePix: 'email',
+      chavePix: 'bia@example.com',
+    };
+    const { idRepasse } = await seedRepasseComLancamento();
+    const spy = spyEnqueuer();
+    const { repasse } = await aprovarRepasseRecebedor(deps(spy.enqueuer), {
+      idRepasse,
+      bankTransferRef: 'E2E-PAGO-A-MAO',
+    });
+    expect(spy.executar).toHaveLength(0);
+    expect(repasse.bankTransferRef).toBe('E2E-PAGO-A-MAO');
+    expect(await stamped(idRepasse)).toBe(1);
+  });
+
+  it('sem recebedor ativo e sem referência: rejeita, nada é marcado transferido', async () => {
+    recebedorAtual = undefined as never;
+    const noRecebedor = new LivroFinanceiroRepositoryPostgres(testDb.db, {
+      async findAtivoByCampanhaId() {
+        return undefined;
+      },
+    } as unknown as RecebedorRepository);
+    const { idRepasse } = await seedRepasseComLancamento();
+    await expect(
+      aprovarRepasseRecebedor(
+        { ...deps(spyEnqueuer().enqueuer), livroFinanceiroRepository: noRecebedor },
+        { idRepasse, bankTransferRef: null },
+      ),
+    ).rejects.toThrow();
+    expect(await stamped(idRepasse)).toBe(0);
+    expect((await repo.findRepasseById(idRepasse))?.status).toBe('solicitado');
+  });
+
+  it.each([
+    ['agência com mais de 4 dígitos', { agencia: '12345' }],
+    ['dígito da conta não numérico', { contaDigito: 'X' }],
+  ])('conta com %s: falha fechada antes de chamar o provider', async (_n, override) => {
+    recebedorAtual = { ...CONTA_RECEBEDOR, ...override };
+    const { idRepasse } = await seedRepasseComLancamento();
+    await aprovarRepasseRecebedor(deps(spyEnqueuer().enqueuer), {
+      idRepasse,
+      bankTransferRef: null,
+    });
+    const fake = new TransferenciaProviderFake({ pagarPixOutcome: 'pago' });
+    await executarTransferenciaRepasse(
+      {
+        livroFinanceiroRepository: repo,
+        transferenciaProvider: fake,
+        clock: () => new Date(),
+        observability,
+      },
+      { idRepasse },
+    );
+    expect(fake.pagarPixCalls).toBe(0);
+    expect((await repo.findRepasseById(idRepasse))?.lastTransferError).toBe(
+      'DADOS_BANCARIOS_INVALIDOS',
+    );
+  });
+});
+
 describe('conta já aprovada e marcada transferida sem envio — "Enviar pelo Inter agora"', () => {
   const APROVADA_SEM_ENVIO = { status: 'aprovado', aprovadoEm: T0 } as const;
 
