@@ -3,9 +3,15 @@
  * generic globe: the title was the raw pathname and no icons/site name existed.
  * seoHead() is the pure per-route head that server.tsx interpolates.
  */
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { resolveRoute } from '../../../apps/eunenem-server/pages/App.js';
-import { SITE_NAME, seoHead, seoMetaForRoute } from '../../../apps/eunenem-server/server/seo.js';
+import {
+  SITE_NAME,
+  seoHead,
+  seoMetaForRoute,
+  WEB_MANIFEST,
+} from '../../../apps/eunenem-server/server/seo.js';
 
 const SITE = 'https://eunenem.com';
 
@@ -106,4 +112,56 @@ describe('seoHead', () => {
       'href="https://eunenem.com/faq"',
     );
   });
+});
+
+describe('gil3l public-list metadata and PNGs', () => {
+  it('uses the public baby name in SSR title/description, escaped', () => {
+    const html = seoHead(resolveRoute('/pagina/maria'), '/pagina/maria', SITE, {
+      nomeBebe: 'Lia & <Lua>',
+      creatorName: 'Maria',
+    });
+    expect(html).toContain('<title>Lista de presentes de Lia &amp; &lt;Lua&gt; · EuNeném</title>');
+    expect(html).toContain(
+      'content="Presenteie Lia &amp; &lt;Lua&gt; pela lista de chá de bebê no EuNeném. Escolha um mimo e pague com Pix ou cartão."',
+    );
+    expect(html).not.toContain('<Lua>');
+  });
+  it('falls back to the public creator name, never the URL slug', () => {
+    expect(
+      seoHead(resolveRoute('/pagina/private-slug'), '/pagina/private-slug', SITE, {
+        nomeBebe: '  ',
+        creatorName: 'Maria',
+      }),
+    ).toContain('<title>Lista de presentes de Maria · EuNeném</title>');
+  });
+  it('does not personalize private routes or produce an empty name', () => {
+    expect(
+      seoHead(resolveRoute('/faq'), '/faq', SITE, { nomeBebe: 'Lia', creatorName: 'Maria' }),
+    ).not.toContain('Lia');
+    expect(
+      seoHead(resolveRoute('/pagina/maria'), '/pagina/maria', SITE, {
+        nomeBebe: null,
+        creatorName: ' ',
+      }),
+    ).toContain('<title>Lista de presentes · EuNeném</title>');
+  });
+  for (const size of [48, 96, 192]) {
+    it(`links a real ${size}px PNG on public pages and in the manifest`, () => {
+      const src = `/favicon-${size}.png`;
+      for (const path of ['/', '/faq', '/pagina/maria']) {
+        expect(head(path)).toContain(
+          `<link rel="icon" href="${src}" type="image/png" sizes="${size}x${size}" />`,
+        );
+      }
+      expect(WEB_MANIFEST.icons).toContainEqual({
+        src,
+        sizes: `${size}x${size}`,
+        type: 'image/png',
+      });
+      const png = readFileSync(`apps/eunenem-server/public${src}`);
+      expect(png.subarray(0, 8).toString('hex')).toBe('89504e470d0a1a0a');
+      expect(png.readUInt32BE(16)).toBe(size);
+      expect(png.readUInt32BE(20)).toBe(size);
+    });
+  }
 });

@@ -795,11 +795,15 @@ test.describe('multicampanha isolation gates (aperture-llol4 / fblrt W1c)', () =
         `/pagina/${slug}/${SLUG_CAMP_B} must render campanha B's baby name — the pretty ` +
           'slug resolved the wrong campanha (or oldest) if this shows anything else',
       ).toHaveText(BEBE_B, { timeout: 15_000 });
-      // An unknown campanha-slug renders the not-found body (200 SSR).
+      // An unknown campanha-slug renders the not-found body with honest 404/noindex.
       const bad = await page.goto(`/pagina/${slug}/no-such-camp`, {
         waitUntil: 'domcontentloaded',
       });
-      expect(bad?.status(), 'unknown campanha-slug → 200 SSR (not-found body)').toBe(200);
+      expect(bad?.status(), 'unknown campanha-slug → honest SSR 404').toBe(404);
+      await expect(page.locator('meta[name="robots"]')).toHaveAttribute(
+        'content',
+        'noindex, nofollow',
+      );
       await expect(page.getByTestId('pagina-baby-name')).toHaveCount(0);
     } finally {
       await page.close();

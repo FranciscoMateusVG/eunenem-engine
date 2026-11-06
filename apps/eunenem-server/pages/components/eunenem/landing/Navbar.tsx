@@ -47,7 +47,7 @@ export function Navbar() {
           : 'bg-cream/50 border-transparent'
       }`}
     >
-      <div className="mx-auto max-w-[1200px] px-6 py-3.5 flex items-center justify-between gap-6">
+      <div data-nosnippet="" className="mx-auto max-w-[1200px] px-6 py-3.5 flex items-center justify-between gap-6">
         <a href="#" aria-label="EuNeném" className="flex items-center">
           <img
             src="/public/logo-landing.png"

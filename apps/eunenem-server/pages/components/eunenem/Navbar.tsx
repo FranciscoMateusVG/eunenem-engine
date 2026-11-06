@@ -153,7 +153,7 @@ export function Navbar({ slug }: { slug?: string } = {}) {
           : "1px solid transparent",
       }}
     >
-      <div className="eu-container flex items-center justify-between py-4">
+      <div data-nosnippet="" className="eu-container flex items-center justify-between py-4">
         <a
           // aperture-2v91z — brand link keeps the CAMPANHA context (a guest on
           // /pagina/x/c/<id> or /pagina/x/<slug> stays on that campanha).

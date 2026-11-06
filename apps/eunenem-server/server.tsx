@@ -48,7 +48,8 @@ import {
 } from './server/request-observability.js';
 import { appRouter } from './server/trpc/router.js';
 import { resolverUsuarioAutenticadoOuNull } from './server/trpc/session-resolver.js';
-import { seoHead, WEB_MANIFEST } from './server/seo.js';
+import { TRPCError } from '@trpc/server';
+import { seoHead, WEB_MANIFEST, type PublicListSeoProfile } from './server/seo.js';
 import { createSeoDiscoveryRoutes } from './server/seo-discovery.js';
 import { createStripeWebhookHandler } from './server/webhooks/stripe-webhook.js';
 import { mountInterPixWebhookRoutesWhenBound } from './server/webhooks/inter-pix-webhook.js';
@@ -205,6 +206,9 @@ app.use('/listas-prontas/*', serveStatic({ root: './public' }));
 for (const icon of [
   '/favicon.ico',
   '/favicon.svg',
+  '/favicon-48.png',
+  '/favicon-96.png',
+  '/favicon-192.png',
   '/apple-touch-icon.png',
   '/icon-192.png',
   '/icon-512.png',
@@ -377,6 +381,32 @@ app.get('*', async (c) => {
   const route = resolveRoute(url.pathname);
 
   let status = route.kind === 'not-found' ? 404 : 200;
+  let seoRoute = route;
+  let profile: PublicListSeoProfile | undefined;
+  if (route.kind === 'pagina') {
+    // Reuse the public boundary (active owner + campaign ownership). Empty
+    // headers deliberately keep this anonymous, even for a signed-in visitor.
+    const caller = appRouter.createCaller({
+      deps, headers: new Headers(), resHeaders: new Headers(),
+    });
+    try {
+      const idCampanha = route.campanhaSlug
+        ? (await caller.pagina.resolverCampanhaSlug({
+            slug: route.slug, campanhaSlug: route.campanhaSlug,
+          })).idCampanha
+        : route.idCampanha;
+      profile = await caller.perfil.getPerfilPublicoBySlug({ slug: route.slug, idCampanha });
+    } catch (error) {
+      if (error instanceof TRPCError && (error.code === 'NOT_FOUND' || error.code === 'BAD_REQUEST')) {
+        status = 404;
+        seoRoute = { kind: 'not-found' };
+      } else {
+        // A database outage is not a missing/private list: preserve the real
+        // server error instead of caching a fabricated 404 or generic profile.
+        throw error;
+      }
+    }
+  }
 
   const ssrHtml = renderToString(
     <StrictMode>
@@ -384,7 +414,9 @@ app.get('*', async (c) => {
     </StrictMode>,
   );
   c.status(status as 200 | 404);
-  return c.html(envelope(ssrHtml, url.pathname, seoHead(route, url.pathname, env.BETTER_AUTH_URL)));
+  return c.html(envelope(
+    ssrHtml, url.pathname, seoHead(seoRoute, url.pathname, env.BETTER_AUTH_URL, profile),
+  ));
 });
 
 // aperture-ga4gtm: GA4 measurement IDs are "G-XXXXXXXXXX", GTM container IDs
