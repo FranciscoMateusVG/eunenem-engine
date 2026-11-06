@@ -87,7 +87,9 @@ test('robots and sitemap expose institutional pages without changing existing in
           ['/', '/faq', '/taxas-e-prazos', '/termos-de-uso'].includes(new URL(location).pathname)),
     ),
   ).toBe(true);
-  // The sitemap is not a new privacy/indexing policy for existing family pages.
-  const familyHtml = await (await request.get('/pagina/maria')).text();
-  expect(familyHtml).not.toContain('name="robots" content="noindex');
+  // Nonexistent families now return an honest 404, not a generic indexable list.
+  // Valid family metadata is covered with real fixtures in gil3l-public-seo.
+  const missing = await request.get('/pagina/seo-missing-family-7c98bafa');
+  expect(missing.status()).toBe(404);
+  expect(await missing.text()).toContain('name="robots" content="noindex');
 });

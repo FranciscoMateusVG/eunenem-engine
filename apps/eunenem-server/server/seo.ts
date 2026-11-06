@@ -1,9 +1,7 @@
 import type { resolveRoute } from '../pages/App.js';
 
-// aperture-4nnys — per-route <head> for SEO/branding. Everything here is in
-// the server HTML so crawlers see it without running JS. Titles are static per
-// route kind: the SSR catch-all does not load campaign data, so guest pages get
-// a generic title rather than the baby's name.
+// Render metadata in the initial HTML; list names come only from the existing
+// anonymous public-profile boundary, never a private owner/admin projection.
 
 type Route = ReturnType<typeof resolveRoute>;
 
@@ -23,7 +21,12 @@ function page(label: string, description = HOME_DESCRIPTION, noindex = false): S
   return { title: `${label} · ${SITE_NAME}`, description, noindex };
 }
 
-export function seoMetaForRoute(route: Route): SeoMeta {
+export interface PublicListSeoProfile {
+  nomeBebe: string | null;
+  creatorName: string;
+}
+
+export function seoMetaForRoute(route: Route, profile?: PublicListSeoProfile): SeoMeta {
   switch (route.kind) {
     case 'landing':
       return { title: HOME_TITLE, description: HOME_DESCRIPTION, noindex: false };
@@ -39,11 +42,21 @@ export function seoMetaForRoute(route: Route): SeoMeta {
       );
     case 'termos-de-uso':
       return page('Termos de uso', 'Termos de uso do EuNeném, a lista de chá de bebê online.');
-    case 'pagina':
+    case 'pagina': {
+      const name = (profile?.nomeBebe?.trim() || profile?.creatorName.trim() || '')
+        .replace(/\s+/g, ' ')
+        .slice(0, 100);
+      if (name) {
+        return page(
+          `Lista de presentes de ${name}`,
+          `Presenteie ${name} pela lista de chá de bebê no EuNeném. Escolha um mimo e pague com Pix ou cartão.`,
+        );
+      }
       return page(
         'Lista de presentes',
         'Escolha um mimo da lista de chá de bebê e presenteie com Pix ou cartão pelo EuNeném.',
       );
+    }
     case 'pagina-sucesso':
       return page('Obrigado pelo mimo', HOME_DESCRIPTION, true);
     case 'confirmar-presenca':
@@ -73,8 +86,13 @@ function escapeAttr(s: string): string {
 }
 
 /** The <head> fragment for one request. `siteUrl` is the canonical public origin. */
-export function seoHead(route: Route, pathname: string, siteUrl: string): string {
-  const meta = seoMetaForRoute(route);
+export function seoHead(
+  route: Route,
+  pathname: string,
+  siteUrl: string,
+  profile?: PublicListSeoProfile,
+): string {
+  const meta = seoMetaForRoute(route, profile);
   const origin = siteUrl.replace(/\/+$/, '');
   const url = escapeAttr(`${origin}${pathname}`);
   const title = escapeAttr(meta.title);
@@ -96,6 +114,9 @@ export function seoHead(route: Route, pathname: string, siteUrl: string): string
     '<meta name="theme-color" content="#a769a8" />',
     '<link rel="icon" href="/favicon.ico" sizes="32x32" />',
     '<link rel="icon" href="/favicon.svg" type="image/svg+xml" />',
+    ...[48, 96, 192].map(
+      (size) => `<link rel="icon" href="/favicon-${size}.png" type="image/png" sizes="${size}x${size}" />`,
+    ),
     '<link rel="apple-touch-icon" href="/apple-touch-icon.png" />',
     '<link rel="manifest" href="/site.webmanifest" />',
   ];
@@ -126,6 +147,9 @@ export const WEB_MANIFEST = {
   background_color: '#f8f7f6',
   theme_color: '#a769a8',
   icons: [
+    ...[48, 96, 192].map((size) => ({
+      src: `/favicon-${size}.png`, sizes: `${size}x${size}`, type: 'image/png',
+    })),
     { src: '/icon-192.png', sizes: '192x192', type: 'image/png' },
     { src: '/icon-512.png', sizes: '512x512', type: 'image/png' },
     { src: '/icon-maskable-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
