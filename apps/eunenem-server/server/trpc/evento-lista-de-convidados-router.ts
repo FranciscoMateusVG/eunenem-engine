@@ -3,7 +3,6 @@ import { initTRPC, TRPCError } from '@trpc/server';
 import { z } from 'zod';
 import {
   alterarPresencaConvidado,
-  atualizarListaDeConvidados,
   type Campanha,
   type Convidado,
   ConvidadoNaoEncontradoError,
@@ -188,6 +187,48 @@ const AdicionarConvidadoInputSchema = z.object({
   numeroCelular: NumeroCelularConvidadoSchema,
 });
 
+const ConvidadoAlvoInputSchema = z.object({
+  idCampanha: z.string().uuid(),
+  idConvidado: z.string().uuid(),
+});
+
+async function atualizarListaExistente(
+  ctx: TrpcContext,
+  id: IdListaDeConvidados,
+  transformar: (lista: ListaDeConvidados) => ListaDeConvidados,
+): Promise<ListaDeConvidados> {
+  const lista = await ctx.deps.listaDeConvidadosRepository.atualizar(id, transformar);
+  if (!lista) throw new ListaDeConvidadosNaoEncontradaError(id);
+  return lista;
+}
+
+async function alterarConvidado(
+  ctx: TrpcContext,
+  input: z.infer<typeof ConvidadoAlvoInputSchema>,
+  novosDados: Pick<Convidado, 'nome' | 'numeroCelular'> | null,
+) {
+  const { campanha } = await resolveCallerCampanha(ctx, input.idCampanha, 'convite:editar');
+  const evento = await resolveCallerEvento(ctx, campanha);
+  const lista = evento && await ctx.deps.listaDeConvidadosRepository.findByIdEvento(evento.id);
+  if (!lista) throw new ListaDeConvidadosNaoEncontradaError();
+
+  const atualizada = await atualizarListaExistente(ctx, lista.id, (atual) => {
+    if (!atual.convidados.some((convidado) => convidado.id === input.idConvidado)) {
+      throw new ConvidadoNaoEncontradoError(input.idConvidado as IdConvidado, atual.id);
+    }
+    return {
+      ...atual,
+      atualizadoEm: ctx.deps.clock(),
+      convidados: novosDados
+        ? atual.convidados.map((convidado) =>
+            convidado.id === input.idConvidado ? { ...convidado, ...novosDados } : convidado,
+          )
+        : atual.convidados.filter((convidado) => convidado.id !== input.idConvidado),
+    };
+  });
+  return toSnapshot(atualizada);
+}
+
 /** Resolves a convidado from public route params (slug + idConvidado), with
  *  no session — used by the /confirmar-presenca page.
  *
@@ -348,18 +389,11 @@ export const eventoListaDeConvidadosRouter = t.router({
         );
 
         const updated = existing
-          ? await atualizarListaDeConvidados(
-              {
-                listaDeConvidadosRepository: ctx.deps.listaDeConvidadosRepository,
-                clock: ctx.deps.clock,
-                observability: ctx.deps.observability,
-              },
-              {
-                id: existing.id,
-                formatoMensagemConvite: existing.formatoMensagemConvite,
-                convidados: [...existing.convidados, novoConvidado],
-              },
-            )
+          ? await atualizarListaExistente(ctx, existing.id, (lista) => ({
+              ...lista,
+              atualizadoEm: ctx.deps.clock(),
+              convidados: [...lista.convidados, novoConvidado],
+            }))
           : await criarListaDeConvidados(
               {
                 listaDeConvidadosRepository: ctx.deps.listaDeConvidadosRepository,
@@ -395,6 +429,34 @@ export const eventoListaDeConvidadosRouter = t.router({
       }
     }),
 
+  editarConvidado: t.procedure
+    .input(ConvidadoAlvoInputSchema.extend(AdicionarConvidadoInputSchema.pick({
+      nome: true,
+      numeroCelular: true,
+    }).shape))
+    .output(GetListaDeConvidadosOutputSchema)
+    .mutation(async ({ ctx, input }) => {
+      try {
+        return await alterarConvidado(ctx, input, {
+          nome: input.nome,
+          numeroCelular: input.numeroCelular,
+        });
+      } catch (err) {
+        throw toTRPCError(err);
+      }
+    }),
+
+  excluirConvidado: t.procedure
+    .input(ConvidadoAlvoInputSchema)
+    .output(GetListaDeConvidadosOutputSchema)
+    .mutation(async ({ ctx, input }) => {
+      try {
+        return await alterarConvidado(ctx, input, null);
+      } catch (err) {
+        throw toTRPCError(err);
+      }
+    }),
+
   salvarFormatoMensagem: t.procedure
     .input(
       z.object({
@@ -417,18 +479,11 @@ export const eventoListaDeConvidadosRouter = t.router({
         );
 
         const updated = existing
-          ? await atualizarListaDeConvidados(
-              {
-                listaDeConvidadosRepository: ctx.deps.listaDeConvidadosRepository,
-                clock: ctx.deps.clock,
-                observability: ctx.deps.observability,
-              },
-              {
-                id: existing.id,
-                formatoMensagemConvite: input.formatoMensagemConvite,
-                convidados: [...existing.convidados],
-              },
-            )
+          ? await atualizarListaExistente(ctx, existing.id, (lista) => ({
+              ...lista,
+              atualizadoEm: ctx.deps.clock(),
+              formatoMensagemConvite: input.formatoMensagemConvite,
+            }))
           : await criarListaDeConvidados(
               {
                 listaDeConvidadosRepository: ctx.deps.listaDeConvidadosRepository,

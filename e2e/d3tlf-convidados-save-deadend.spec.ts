@@ -46,7 +46,7 @@ async function openCompositor(page: import('@playwright/test').Page, slug: strin
 }
 
 test.describe('aperture-d3tlf — convidados compositor save is never a dead end', () => {
-  test('texto mode: blocked save surfaces inline fixable errors, then saves once filled', async ({
+  test('texto mode: saves the convite and manages a guest on desktop and mobile', async ({
     authenticatedPage: page,
     seededData,
   }) => {
@@ -96,6 +96,37 @@ test.describe('aperture-d3tlf — convidados compositor save is never a dead end
     await openCompositor(page, seededData.slug);
     await expect(page.getByPlaceholder('Maria Helena')).toHaveValue('Aurora');
     await expect(page.getByPlaceholder('Mariana & Tiago')).toHaveValue('Ana & João');
+
+    await page.getByRole('button', { name: 'adicionar convidado', exact: true }).click();
+    const add = page.getByRole('dialog', { name: 'adicionar convidado' });
+    await add.locator('#convidado-name').fill('Convidada original');
+    await add.locator('#convidado-phone').fill('31999990000');
+    await add.getByRole('button', { name: 'Adicionar à lista' }).click();
+
+    const original = page.getByTestId('convidado-row').filter({ hasText: 'Convidada original' });
+    await original.getByRole('button', { name: 'Editar', exact: true }).click();
+    const edit = page.getByRole('dialog', { name: 'Editar convidado' });
+    await edit.getByLabel('Nome', { exact: true }).fill('Convidada atualizada');
+    await edit.getByLabel('Telefone com DDI').fill('+55 (31) 99999-0001');
+    await edit.getByRole('button', { name: 'Salvar alterações' }).click();
+    await expect(edit).toHaveCount(0);
+
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.reload();
+    const updated = page.getByTestId('convidado-row').filter({ hasText: 'Convidada atualizada' });
+    await expect(updated.getByText('+55 (31) 99999-0001', { exact: true })).toBeVisible();
+    await updated.getByRole('button', { name: 'Excluir', exact: true }).click();
+    const remove = page.getByRole('dialog', { name: 'Excluir convidado' });
+    await remove.getByRole('button', { name: 'Cancelar' }).click();
+    await expect(updated).toBeVisible();
+    await updated.getByRole('button', { name: 'Excluir', exact: true }).click();
+    await remove.getByRole('button', { name: 'Excluir convidado' }).click();
+    await expect(updated).toHaveCount(0);
+    await page.reload();
+    await expect(
+      page.getByRole('button', { name: 'adicionar convidado', exact: true }),
+    ).toBeVisible();
+    await expect(updated).toHaveCount(0);
   });
 
   test('convite_virtual mode with no saved convite: save points at the Criar convite CTA', async ({
