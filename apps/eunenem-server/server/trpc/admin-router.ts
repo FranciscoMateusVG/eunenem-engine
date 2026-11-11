@@ -104,6 +104,10 @@ import {
   localDateInSaoPaulo,
 } from "../../pages/lib/receitaPeriodo.js";
 import { type CoberturaDespesas, loadDespesasPainel } from "../admin-despesas.js";
+import type { Database } from "../../../../src/adapters/database.js";
+import { InvalidCaixaPeriodoError, loadCaixaPainel } from "../admin-caixa.js";
+import { caixaParaCsv, nomeArquivoCaixa } from "../../pages/lib/caixaCsv.js";
+import { CAIXA_GRANULARIDADES } from "../../pages/lib/caixaPeriodo.js";
 import {
   alterarValorDespesaManual,
   criarDespesaManual,
@@ -4986,6 +4990,129 @@ const despesasRouter = t.router({
   }),
 });
 
+/* ─────────────────────────────────────────────────────────────────────────
+ * caixa.* — Fluxo de caixa (aperture-zoxel). LEITURA PURA: entradas
+ * (pagamentos aprovados no livro) × saídas (repasses com transferido_em),
+ * pendentes à parte. Ver server/admin-caixa.ts.
+ * ──────────────────────────────────────────────────────────────────────── */
+
+const CaixaEntradaValoresSchema = z.object({
+  presenteCents: z.number().int(),
+  taxaCents: z.number().int(),
+  adicionalCartaoCents: z.number().int(),
+  brutoCents: z.number().int(),
+  estornosCents: z.number().int(),
+  liquidoCents: z.number().int(),
+});
+const CaixaSaidaMetodoSchema = z.object({
+  cents: z.number().int(),
+  repasses: z.number().int(),
+});
+const CaixaPendenteSchema = z.object({
+  cents: z.number().int(),
+  repasses: z.number().int(),
+});
+const CaixaSomaSchema = z.object({
+  entradasBrutasCents: z.number().int(),
+  estornosCents: z.number().int(),
+  saidasCents: z.number().int(),
+});
+const CaixaPainelSchema = z.object({
+  snapshotAt: z.string().datetime(),
+  timezone: z.literal("America/Sao_Paulo"),
+  hoje: LocalDateSchema,
+  periodo: z.object({
+    de: LocalDateSchema,
+    ate: LocalDateSchema,
+    granularidade: z.enum(CAIXA_GRANULARIDADES),
+  }),
+  entradas: CaixaEntradaValoresSchema.extend({
+    pagamentos: z.number().int(),
+    porMetodo: z.object({
+      pix: CaixaEntradaValoresSchema,
+      credit_card: CaixaEntradaValoresSchema,
+      nao_registrado: CaixaEntradaValoresSchema,
+    }),
+  }),
+  saidas: z.object({
+    totalCents: z.number().int(),
+    repasses: z.number().int(),
+    porMetodo: z.object({ inter: CaixaSaidaMetodoSchema, manual: CaixaSaidaMetodoSchema }),
+  }),
+  pendentes: z.object({
+    aprovadosNaoTransferidos: CaixaPendenteSchema,
+    emVerificacao: CaixaPendenteSchema,
+    semComprovante: CaixaPendenteSchema,
+  }),
+  saldoCents: z.number().int(),
+  serie: z.array(
+    z.object({
+      inicio: LocalDateSchema,
+      fim: LocalDateSchema,
+      parcial: z.boolean(),
+      entradasBrutasCents: z.number().int(),
+      estornosCents: z.number().int(),
+      entradasLiquidasCents: z.number().int(),
+      saidasCents: z.number().int(),
+      saldoCents: z.number().int(),
+    }),
+  ),
+  conciliacao: z.object({
+    totalIndependente: CaixaSomaSchema,
+    somaSerie: CaixaSomaSchema,
+    totalPagoDosPagamentosCents: z.number().int(),
+    totalDosRepassesCents: z.number().int(),
+    diferencas: z.object({
+      entradasBrutasCents: z.number().int(),
+      estornosCents: z.number().int(),
+      saidasCents: z.number().int(),
+      totalPagoCents: z.number().int(),
+      repassesCents: z.number().int(),
+    }),
+  }),
+});
+
+const CaixaPeriodoInputSchema = z.object({
+  de: LocalDateSchema,
+  ate: LocalDateSchema,
+  granularidade: z.enum(CAIXA_GRANULARIDADES),
+});
+
+async function lerCaixa(
+  ctx: { deps: { db: Database; clock: () => Date } },
+  input: z.infer<typeof CaixaPeriodoInputSchema>,
+) {
+  try {
+    return await loadCaixaPainel(ctx.deps.db, {
+      platformId: ID_PLATAFORMA_EUNENEM,
+      periodo: input,
+      now: ctx.deps.clock(),
+    });
+  } catch (error: unknown) {
+    if (error instanceof InvalidCaixaPeriodoError) {
+      throw new TRPCError({ code: "BAD_REQUEST", message: error.message });
+    }
+    throw error;
+  }
+}
+
+const caixaRouter = t.router({
+  painel: adminProcedure
+    .input(CaixaPeriodoInputSchema)
+    .output(CaixaPainelSchema)
+    .query(async ({ ctx, input }) => {
+      const painel = await lerCaixa(ctx, input);
+      return { ...painel, snapshotAt: painel.snapshotAt.toISOString(), serie: [...painel.serie] };
+    }),
+  csv: adminProcedure
+    .input(CaixaPeriodoInputSchema)
+    .output(z.object({ nomeArquivo: z.string(), conteudo: z.string() }))
+    .query(async ({ ctx, input }) => {
+      const painel = await lerCaixa(ctx, input);
+      return { nomeArquivo: nomeArquivoCaixa(painel.periodo), conteudo: caixaParaCsv(painel) };
+    }),
+});
+
 function mensagemReenvioInelegivel(error: FinanceiroRepasseReenvioInelegivelError): string {
   if (error.motivo === "possivel_pagamento_manual") {
     const lista = error.candidatos
@@ -5130,6 +5257,7 @@ export const adminRouter = t.router({
   estatisticas: adminProcedure.query(({ctx}) => loadEstatisticas(ctx.deps.db, ID_PLATAFORMA_EUNENEM, ctx.deps.clock())),
   receita: receitaRouter,
   despesas: despesasRouter,
+  caixa: caixaRouter,
 
   /** Prévia (dry run, sem envio) da NFS-e mensal da EuNeném (aperture-dh1k7). */
   notaFiscal: notaFiscalRouter,

@@ -8,6 +8,7 @@ import { AdminPagamentoPage } from './AdminPagamentoPage.js';
 import { AdminPagamentosPage } from './AdminPagamentosPage.js';
 import { AdminNotaFiscalPage } from './AdminNotaFiscalPage.js';
 import { AdminReceitaPage } from './AdminReceitaPage.js';
+import { AdminCaixaPage } from './AdminCaixaPage.js';
 import { AdminDespesasPage } from './AdminDespesasPage.js';
 import { AdminRepasseDetailPage } from './AdminRepasseDetailPage.js';
 import { AdminCatalogoPage } from './AdminCatalogoPage.js';
@@ -79,6 +80,7 @@ export function resolveRoute(pathname: string):
   | { kind: 'admin-pagamentos' }
   | { kind: 'admin-pagamentos-receita' }
   | { kind: 'admin-pagamentos-despesas' }
+  | { kind: 'admin-pagamentos-caixa' }
   | { kind: 'admin-pagamentos-nota-fiscal' }
   | { kind: 'admin-repasses' }
   | { kind: 'admin-catalogo' }
@@ -189,6 +191,13 @@ export function resolveRoute(pathname: string):
     pathname === '/admin/pagamentos/despesas/'
   ) {
     return { kind: 'admin-pagamentos-despesas' };
+  }
+  // /admin/pagamentos/caixa (aperture-zoxel) — aba Fluxo de caixa.
+  if (
+    pathname === '/admin/pagamentos/caixa' ||
+    pathname === '/admin/pagamentos/caixa/'
+  ) {
+    return { kind: 'admin-pagamentos-caixa' };
   }
   // /admin/pagamentos/nota-fiscal (aperture-dh1k7) — prévia da NFS-e mensal.
   if (
@@ -470,6 +479,7 @@ function pickPage(route: ReturnType<typeof resolveRoute>, pathname: string) {
   if (route.kind === 'admin-pagamentos') return <AdminPagamentosPage />;
   if (route.kind === 'admin-pagamentos-receita') return <AdminReceitaPage />;
   if (route.kind === 'admin-pagamentos-despesas') return <AdminDespesasPage />;
+  if (route.kind === 'admin-pagamentos-caixa') return <AdminCaixaPage />;
   if (route.kind === 'admin-pagamentos-nota-fiscal') return <AdminNotaFiscalPage />;
   if (route.kind === 'admin-repasses') return <AdminRepassesPage />;
   if (route.kind === 'admin-catalogo') return <AdminCatalogoPage />;
