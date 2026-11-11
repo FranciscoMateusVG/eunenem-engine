@@ -43,6 +43,17 @@ export class ListaDeConvidadosRepositoryMemory implements ListaDeConvidadosRepos
     });
   }
 
+  async atualizar(
+    id: IdListaDeConvidados,
+    transformar: (lista: ListaDeConvidados) => ListaDeConvidados,
+  ): Promise<ListaDeConvidados | undefined> {
+    const lista = this.byId.get(id);
+    if (!lista) return undefined;
+    const atualizada = transformar(lista);
+    await this.save(atualizada);
+    return atualizada;
+  }
+
   async findById(id: IdListaDeConvidados): Promise<ListaDeConvidados | undefined> {
     return tracer.startActiveSpan('db.listasDeConvidados.findById', async (span) => {
       span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'SELECT' });

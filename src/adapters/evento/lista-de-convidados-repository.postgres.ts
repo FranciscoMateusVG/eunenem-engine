@@ -66,22 +66,7 @@ export class ListaDeConvidadosRepositoryPostgres implements ListaDeConvidadosRep
             )
             .execute();
 
-          await trx.deleteFrom('convidados').where('lista_id', '=', listaDeConvidados.id).execute();
-
-          if (listaDeConvidados.convidados.length > 0) {
-            await trx
-              .insertInto('convidados')
-              .values(
-                listaDeConvidados.convidados.map((convidado) => ({
-                  id: convidado.id,
-                  lista_id: listaDeConvidados.id,
-                  nome: convidado.nome,
-                  numero_celular: convidado.numeroCelular,
-                  presenca: convidado.presenca,
-                })),
-              )
-              .execute();
-          }
+          await this.salvarConvidados(trx, listaDeConvidados);
         });
         span.setStatus({ code: SpanStatusCode.OK });
       } catch (error: unknown) {
@@ -92,6 +77,54 @@ export class ListaDeConvidadosRepositoryPostgres implements ListaDeConvidadosRep
         span.end();
       }
     });
+  }
+
+  async atualizar(
+    id: IdListaDeConvidados,
+    transformar: (lista: ListaDeConvidados) => ListaDeConvidados,
+  ): Promise<ListaDeConvidados | undefined> {
+    return this.db.transaction().execute(async (trx) => {
+      const bloqueada = await trx
+        .selectFrom('listas_de_convidados')
+        .select('id')
+        .where('id', '=', id)
+        .forUpdate()
+        .executeTakeFirst();
+      if (!bloqueada) return undefined;
+
+      const lista = await this.findHydratedBy('id', id, trx);
+      if (!lista) return undefined;
+      const atualizada = transformar(lista);
+      await trx
+        .updateTable('listas_de_convidados')
+        .set({
+          atualizado_em: atualizada.atualizadoEm,
+          formato_mensagem_convite: atualizada.formatoMensagemConvite,
+        })
+        .where('id', '=', id)
+        .execute();
+      await this.salvarConvidados(trx, atualizada);
+      return atualizada;
+    });
+  }
+
+  private async salvarConvidados(trx: Transaction<DB>, listaDeConvidados: ListaDeConvidados) {
+    await trx.deleteFrom('convidados').where('lista_id', '=', listaDeConvidados.id).execute();
+
+    if (listaDeConvidados.convidados.length > 0) {
+      await trx
+        .insertInto('convidados')
+        .values(
+          listaDeConvidados.convidados.map((convidado) => ({
+            id: convidado.id,
+            lista_id: listaDeConvidados.id,
+            nome: convidado.nome,
+            numero_celular: convidado.numeroCelular,
+            presenca: convidado.presenca,
+          })),
+        )
+        .execute();
+    }
   }
 
   async findById(id: IdListaDeConvidados): Promise<ListaDeConvidados | undefined> {
@@ -174,6 +207,7 @@ export class ListaDeConvidadosRepositoryPostgres implements ListaDeConvidadosRep
               .selectFrom('listas_de_convidados')
               .select('id')
               .where('id', '=', id)
+              .forUpdate()
               .executeTakeFirst();
 
             if (!existing) {

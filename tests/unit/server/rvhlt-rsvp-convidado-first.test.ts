@@ -411,3 +411,58 @@ describe('public RSVP convidado-first resolution (aperture-rvhlt)', () => {
     ).rejects.toMatchObject({ code: 'NOT_FOUND' });
   });
 });
+
+describe('gerenciamento de convidados', () => {
+  it('edita sem perder o RSVP e exclui somente da campanha selecionada', async () => {
+    const rig = await buildRig();
+    const owner = await rig.addUser(`guest-management-${randomUUID()}@example.com`);
+    const principal = await owner.caller.campanhas.criar({ titulo: 'Lista principal' });
+    const outra = await owner.caller.campanhas.criar({ titulo: 'Outra lista' });
+    const convidado = { ...makeConvidado('Nome original'), presenca: 'sim' as const };
+    const outro = makeConvidado('Outro convidado');
+    await rig.seedListaParaCampanha(principal.id, [convidado, outro]);
+    await rig.seedListaParaCampanha(outra.id, []);
+
+    const api = owner.caller.eventoListaDeConvidados;
+    const alvo = { idCampanha: principal.id, idConvidado: convidado.id };
+    const dados = { nome: 'Nome atualizado', numeroCelular: '+55 (11) 99999-8888' };
+    await expect(
+      api.editarConvidado({ ...alvo, ...dados, idCampanha: outra.id }),
+    ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    await expect(api.excluirConvidado({ ...alvo, idCampanha: outra.id })).rejects.toMatchObject({
+      code: 'NOT_FOUND',
+    });
+    await expect(
+      rig.anonCaller.eventoListaDeConvidados.excluirConvidado(alvo),
+    ).rejects.toMatchObject({ code: 'UNAUTHORIZED' });
+
+    await api.editarConvidado({ ...alvo, ...dados });
+    const link = { slug: owner.slug, idConvidado: convidado.id };
+    await expect(
+      rig.anonCaller.eventoListaDeConvidados.getParaConfirmar(link),
+    ).resolves.toMatchObject({
+      nome: dados.nome,
+      presenca: 'sim',
+    });
+    expect((await api.get({ idCampanha: principal.id })).lista?.convidados).toContainEqual({
+      ...convidado,
+      ...dados,
+    });
+
+    await Promise.all([
+      api.excluirConvidado(alvo),
+      api.salvarFormatoMensagem({
+        idCampanha: principal.id,
+        formatoMensagemConvite: 'convite_virtual',
+      }),
+    ]);
+    const { lista } = await api.get({ idCampanha: principal.id });
+    expect(lista?.convidados).toEqual([outro]);
+    expect(lista?.formatoMensagemConvite).toBe('convite_virtual');
+    await expect(
+      rig.anonCaller.eventoListaDeConvidados.getParaConfirmar(link),
+    ).rejects.toMatchObject({
+      code: 'NOT_FOUND',
+    });
+  });
+});

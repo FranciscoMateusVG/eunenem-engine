@@ -12,6 +12,10 @@ import type { StatusPresencaConvidado } from '../../domain/evento/value-objects/
  */
 export interface ListaDeConvidadosRepository {
   save(listaDeConvidados: ListaDeConvidados): Promise<void>;
+  atualizar(
+    id: IdListaDeConvidados,
+    transformar: (lista: ListaDeConvidados) => ListaDeConvidados,
+  ): Promise<ListaDeConvidados | undefined>;
   findById(id: IdListaDeConvidados): Promise<ListaDeConvidados | undefined>;
   findByIdEvento(idEvento: IdEvento): Promise<ListaDeConvidados | undefined>;
   /**
