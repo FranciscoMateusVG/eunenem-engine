@@ -36,7 +36,7 @@ concurrency:
 jobs:
   typecheck:
     name: typecheck
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
@@ -73,7 +73,7 @@ jobs:
 
   lint:
     name: lint (biome)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
@@ -96,7 +96,7 @@ jobs:
 
   test:
     name: test (vitest)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
@@ -132,7 +132,7 @@ jobs:
 
   build:
     name: build (client bundle — #223 gate)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
@@ -184,7 +184,7 @@ jobs:
 
   migrate:
     name: migrate (ordering — 1bo61 gate)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     services:
       postgres:
@@ -251,7 +251,7 @@ jobs:
   # adapter) and :3003 (real STRIPE_WEBHOOK_SECRET → webhook signature specs).
   e2e:
     name: e2e (playwright)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     services:
       postgres:
