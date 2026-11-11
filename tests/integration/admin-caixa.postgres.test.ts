@@ -430,6 +430,8 @@ describe('Fluxo de caixa — contra Postgres real', () => {
     const verificando = await mk('verificando', {}, 7_000);
     const solicitado = await mk('solicitado', {}, 8_000);
     const cancelado = await mk('cancelado', {}, 9_000);
+    // #284: conta aprovada, carimbada transferido_em SEM envio e SEM referência.
+    const semComprovante = await mk('aprovado', {}, 1_500);
 
     const plan: Array<[string, number, Date | null]> = [
       [pago, 1_000, new Date('2033-08-12T15:00:00Z')],
@@ -440,6 +442,7 @@ describe('Fluxo de caixa — contra Postgres real', () => {
       [falhou, 6_000, null],
       [verificando, 7_000, null],
       [solicitado, 8_000, null],
+      [semComprovante, 1_500, new Date('2033-08-12T17:00:00Z')],
     ];
     for (const [idRepasse, presente, transferidoEm] of plan) {
       await seedPagamento({
@@ -464,6 +467,8 @@ describe('Fluxo de caixa — contra Postgres real', () => {
       repasses: 4,
     });
     expect(painel.pendentes.emVerificacao).toEqual({ cents: 7_000, repasses: 1 });
+    // Marcado como transferido sem comprovante: pendente, NUNCA saída.
+    expect(painel.pendentes.semComprovante).toEqual({ cents: 1_500, repasses: 1 });
     // Pendente nunca entra no saldo.
     expect(painel.saldoCents).toBe(painel.entradas.liquidoCents - 3_000);
     expect(painel.conciliacao.diferencas.repassesCents).toBe(0);
@@ -532,6 +537,7 @@ describe('Fluxo de caixa — contra Postgres real', () => {
     expect(painel.entradas.brutoCents).toBe(1_070);
     expect(painel.saidas.totalCents).toBe(0);
     expect(painel.pendentes.emVerificacao).toEqual({ cents: 0, repasses: 0 });
+    expect(painel.pendentes.semComprovante).toEqual({ cents: 0, repasses: 0 });
   });
 
   it('C7: leitura pura — nenhuma linha de pagamento/repasse/lançamento muda', async () => {
@@ -601,6 +607,24 @@ describe('Fluxo de caixa — contra Postgres real', () => {
     expect(linhas).toContain('entradas,bruto,10705,"107,05"');
     expect(linhas).toContain('saldo,saldo_do_periodo,10705,"107,05"');
     expect(linhas.some((l) => l.startsWith('serie,2033-08-01|2033-09-01|'))).toBe(true);
+    // CSV = tela: contagens e conferência também vão no arquivo.
+    expect(linhas).toContain('contagens,pagamentos_aprovados,1,');
+    expect(linhas).toContain('contagens,repasses_transferidos,0,');
+    expect(linhas).toContain('contagens,repasses_inter_automatico,0,');
+    expect(linhas).toContain('contagens,repasses_manual,0,');
+    expect(linhas).toContain('contagens,pendentes_aprovados_nao_transferidos_repasses,0,');
+    expect(linhas).toContain('contagens,pendentes_em_verificacao_repasses,0,');
+    expect(linhas).toContain('contagens,pendentes_sem_comprovante_repasses,0,');
+    expect(linhas).toContain('conciliacao,total_pago_dos_pagamentos,10705,"107,05"');
+    expect(linhas).toContain('conciliacao,total_dos_repasses,0,"0,00"');
+    expect(linhas).toContain('conciliacao,diferenca_entradas_brutas,0,"0,00"');
+    expect(linhas).toContain('conciliacao,diferenca_estornos,0,"0,00"');
+    expect(linhas).toContain('conciliacao,diferenca_saidas,0,"0,00"');
+    expect(linhas).toContain('conciliacao,diferenca_total_pago,0,"0,00"');
+    expect(linhas).toContain('conciliacao,diferenca_repasses,0,"0,00"');
+    expect(linhas).toContain(
+      'pendentes_nao_contam_como_saida,marcados_transferidos_sem_comprovante,0,"0,00"',
+    );
   });
 
   it('C9: tRPC admin.caixa.painel/csv atrás do gate; período inválido ⇒ BAD_REQUEST', async () => {
@@ -630,6 +654,18 @@ describe('Fluxo de caixa — contra Postgres real', () => {
     const csv = await admin.admin.caixa.csv(periodo('2033-08-01', '2033-09-01', 'mes'));
     expect(csv.nomeArquivo).toBe('fluxo-de-caixa_2033-08-01_a_2033-08-31.csv');
     expect(csv.conteudo).toContain('entradas,bruto,1070,"10,70"');
+    // Sem credencial de admin na allowlist: FORBIDDEN (logado, mas não admin).
+    const naoAdmin = appRouter.createCaller({
+      deps: { ...deps, adminAllowedEmails: new Set() },
+      headers: auth.headers,
+      resHeaders: new Headers(),
+    } as unknown as TrpcContext);
+    await expect(
+      naoAdmin.admin.caixa.painel(periodo('2033-08-01', '2033-09-01', 'mes')),
+    ).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    await expect(
+      naoAdmin.admin.caixa.csv(periodo('2033-08-01', '2033-09-01', 'mes')),
+    ).rejects.toMatchObject({ code: 'FORBIDDEN' });
     await expect(
       admin.admin.caixa.painel(periodo('2033-09-01', '2033-08-01', 'mes')),
     ).rejects.toMatchObject({ code: 'BAD_REQUEST' });

@@ -26,12 +26,12 @@ import { emSnapshotDeLeitura } from "./admin-receita.js";
  *
  * SAÍDAS: lançamento `credito_saldo_recebedor` ligado a repasse com
  * `transferido_em` preenchido — o mesmo predicado que o saldo do recebedor
- * usa (aprovado ≠ transferido). Datada por `transferido_em`. Método: repasse
+ * usa, MAS só se o repasse é `pago` ou `aprovado` com referência bancária (aprovado ≠ transferido). Datada por `transferido_em`. Método: repasse
  * com `inter_codigo_solicitacao` = Inter automático; sem ele = manual
  * (com referência bancária, quando houver).
  *
  * PENDENTE (fotografia de agora, independe do período e NUNCA entra em
- * saída/saldo; repasse já carimbado `transferido_em` não é pendente): repasses `aprovado`/`transferindo`/`enviado_ao_banco`/`falhou`
+ * saída/saldo; aprovado carimbado sem referência/envio FICA pendente): repasses `aprovado`/`transferindo`/`enviado_ao_banco`/`falhou`
  * ("aprovados ainda não transferidos") e `verificando` ("em verificação").
  *
  * ESCOPO: a plataforma vem de pagamento→campanha (entradas) e
@@ -103,6 +103,8 @@ export interface CaixaPainel {
   readonly pendentes: {
     readonly aprovadosNaoTransferidos: PendenteCaixa;
     readonly emVerificacao: PendenteCaixa;
+    /** Aprovado e carimbado transferido SEM envio nem referência (#284): conferir. */
+    readonly semComprovante: PendenteCaixa;
   };
   /** Entradas líquidas − saídas. Pendente não entra. */
   readonly saldoCents: number;
@@ -133,6 +135,16 @@ const TIPO_PRESENTE = "credito_saldo_recebedor";
 const TIPO_TAXA = "credito_receita_plataforma";
 const TIPO_ADICIONAL = "credito_passthrough_surcharge";
 const TIPOS_ENTRADA = [TIPO_PRESENTE, TIPO_TAXA, TIPO_ADICIONAL] as const;
+
+/**
+ * Repasse cujo dinheiro de fato saiu: `pago`, ou `aprovado` manual com
+ * referência bancária. `aprovado` carimbado SEM referência e SEM envio é a
+ * "conta marcada transferida sem envio" (#284): não é saída, é pendente.
+ */
+const REPASSE_TRANSFERIDO = sql`(
+  r.status = 'pago'
+  OR (r.status = 'aprovado' AND r.bank_transfer_ref IS NOT NULL)
+)`;
 
 function corte(data: string) {
   return sql`((${data}::date)::timestamp AT TIME ZONE ${sql.lit(RECEITA_TIMEZONE)})`;
@@ -191,6 +203,7 @@ function eventosSaida(platformId: string, de: string, ate: string) {
     INNER JOIN campanhas c ON c.id = r.id_campanha AND c.id_plataforma = ${platformId}
     WHERE l.tipo = ${sql.lit(TIPO_PRESENTE)}
       AND l.transferido_em >= ${corte(de)} AND l.transferido_em < ${corte(ate)}
+      AND ${REPASSE_TRANSFERIDO}
   )`;
 }
 
@@ -349,17 +362,26 @@ export async function loadCaixaPainel(
     // ── Pendentes: fotografia de agora, independe do período ──────────
     const pendRes = await sql<{ grupo: string; cents: string | number; repasses: string | number }>`
       SELECT
-        CASE WHEN r.status = 'verificando' THEN 'verificacao' ELSE 'aprovado' END AS grupo,
+        CASE
+          WHEN r.status = 'verificando' THEN 'verificacao'
+          WHEN r.status = 'aprovado' AND r.bank_transfer_ref IS NULL
+            AND r.inter_codigo_solicitacao IS NULL AND EXISTS (
+              SELECT 1 FROM lancamentos_financeiros l
+              WHERE l.id_repasse = r.id AND l.transferido_em IS NOT NULL
+            ) THEN 'sem_comprovante'
+          ELSE 'aprovado'
+        END AS grupo,
         COALESCE(SUM(r.amount_cents), 0)::bigint AS cents,
         COUNT(*) AS repasses
       FROM repasses_recebedor r
       INNER JOIN campanhas c ON c.id = r.id_campanha AND c.id_plataforma = ${platformId}
       WHERE r.status IN ('aprovado', 'transferindo', 'enviado_ao_banco', 'falhou', 'verificando')
         -- Repasse manual aprovado já carimbado no livro JÁ foi transferido (é saída).
-        AND NOT EXISTS (
-          SELECT 1 FROM lancamentos_financeiros l
-          WHERE l.id_repasse = r.id AND l.transferido_em IS NOT NULL
-        )
+        AND NOT (r.status = 'aprovado' AND r.bank_transfer_ref IS NOT NULL
+          AND EXISTS (
+            SELECT 1 FROM lancamentos_financeiros l
+            WHERE l.id_repasse = r.id AND l.transferido_em IS NOT NULL
+          ))
       GROUP BY 1
     `.execute(trx);
     const pend = (grupo: string): PendenteCaixa => {
@@ -438,6 +460,7 @@ export async function loadCaixaPainel(
       pendentes: {
         aprovadosNaoTransferidos: pend("aprovado"),
         emVerificacao: pend("verificacao"),
+        semComprovante: pend("sem_comprovante"),
       },
       saldoCents: entradasTotal.liquidoCents - saidasCents,
       serie,

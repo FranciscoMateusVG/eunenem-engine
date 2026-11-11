@@ -91,7 +91,9 @@ export function CaixaPainel({
           <Cartao
             titulo="Ainda a transferir"
             valor={formatBRL(
-              pendentes.aprovadosNaoTransferidos.cents + pendentes.emVerificacao.cents,
+              pendentes.aprovadosNaoTransferidos.cents +
+                pendentes.emVerificacao.cents +
+                pendentes.semComprovante.cents,
             )}
             nota="Foto de agora, não depende do período. Não conta como saída."
           />
@@ -169,7 +171,7 @@ export function CaixaPainel({
             nota={`${saidas.porMetodo.manual.repasses} repasse(s)`}
           />
         </div>
-        <div className="grid gap-3 sm:grid-cols-2" data-testid="caixa-pendentes">
+        <div className="grid gap-3 sm:grid-cols-3" data-testid="caixa-pendentes">
           <Cartao
             titulo="Aprovados, ainda não transferidos"
             valor={formatBRL(pendentes.aprovadosNaoTransferidos.cents)}
@@ -179,6 +181,11 @@ export function CaixaPainel({
             titulo="Em verificação"
             valor={formatBRL(pendentes.emVerificacao.cents)}
             nota={`${pendentes.emVerificacao.repasses} repasse(s) à espera de conferência manual`}
+          />
+          <Cartao
+            titulo="Marcado como transferido sem comprovante — conferir"
+            valor={formatBRL(pendentes.semComprovante.cents)}
+            nota={`${pendentes.semComprovante.repasses} repasse(s) aprovado(s) e marcado(s) como transferido(s), mas sem envio pelo banco nem referência bancária. Não contam como saída.`}
           />
         </div>
       </section>
@@ -265,7 +272,7 @@ function BotaoCsv({
     try {
       await aoBaixar(periodo);
     } catch (e: unknown) {
-      setErro(e instanceof Error ? e.message : "erro desconhecido");
+      setErro("Não foi possível gerar o CSV. Tente de novo.");
     } finally {
       setBaixando(false);
     }
@@ -275,7 +282,7 @@ function BotaoCsv({
     <div className="flex items-center gap-3">
       {erro ? (
         <span role="alert" className="text-[12px] text-red-800">
-          Não foi possível gerar o CSV. {erro}
+          {erro}
         </span>
       ) : null}
       <button

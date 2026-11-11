@@ -5042,6 +5042,7 @@ const CaixaPainelSchema = z.object({
   pendentes: z.object({
     aprovadosNaoTransferidos: CaixaPendenteSchema,
     emVerificacao: CaixaPendenteSchema,
+    semComprovante: CaixaPendenteSchema,
   }),
   saldoCents: z.number().int(),
   serie: z.array(

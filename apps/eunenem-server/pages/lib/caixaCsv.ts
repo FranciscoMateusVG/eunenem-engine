@@ -13,18 +13,37 @@ export interface CaixaCsvEntrada {
   readonly liquidoCents: number;
 }
 
+interface Contagem {
+  readonly cents: number;
+  readonly repasses: number;
+}
+
 export interface CaixaCsvPainel {
   readonly periodo: { readonly de: string; readonly ate: string; readonly granularidade: string };
   readonly entradas: CaixaCsvEntrada & {
+    readonly pagamentos: number;
     readonly porMetodo: Readonly<Record<string, CaixaCsvEntrada>>;
   };
   readonly saidas: {
     readonly totalCents: number;
-    readonly porMetodo: Readonly<Record<string, { readonly cents: number }>>;
+    readonly repasses: number;
+    readonly porMetodo: Readonly<Record<string, { readonly cents: number; readonly repasses: number }>>;
   };
   readonly pendentes: {
-    readonly aprovadosNaoTransferidos: { readonly cents: number };
-    readonly emVerificacao: { readonly cents: number };
+    readonly aprovadosNaoTransferidos: Contagem;
+    readonly emVerificacao: Contagem;
+    readonly semComprovante: Contagem;
+  };
+  readonly conciliacao: {
+    readonly totalPagoDosPagamentosCents: number;
+    readonly totalDosRepassesCents: number;
+    readonly diferencas: {
+      readonly entradasBrutasCents: number;
+      readonly estornosCents: number;
+      readonly saidasCents: number;
+      readonly totalPagoCents: number;
+      readonly repassesCents: number;
+    };
   };
   readonly saldoCents: number;
   readonly serie: ReadonlyArray<{
@@ -102,7 +121,36 @@ export function caixaParaCsv(painel: CaixaCsvPainel): string {
     linha("pendentes_nao_contam_como_saida", "em_verificacao", painel.pendentes.emVerificacao.cents),
   );
 
+  out.push(
+    linha(
+      "pendentes_nao_contam_como_saida",
+      "marcados_transferidos_sem_comprovante",
+      painel.pendentes.semComprovante.cents,
+    ),
+  );
+
   out.push(linha("saldo", "saldo_do_periodo", painel.saldoCents));
+
+  // Mesmas contagens que a tela mostra.
+  const n = (item: string, valor: number) => `contagens,${item},${valor},`;
+  out.push(n("pagamentos_aprovados", e.pagamentos));
+  out.push(n("repasses_transferidos", painel.saidas.repasses));
+  for (const [metodo, m] of Object.entries(painel.saidas.porMetodo)) {
+    out.push(n(`repasses_${NOME_METODO[metodo] ?? metodo}`, m.repasses));
+  }
+  out.push(n("pendentes_aprovados_nao_transferidos_repasses", painel.pendentes.aprovadosNaoTransferidos.repasses));
+  out.push(n("pendentes_em_verificacao_repasses", painel.pendentes.emVerificacao.repasses));
+  out.push(n("pendentes_sem_comprovante_repasses", painel.pendentes.semComprovante.repasses));
+
+  // Conferência com o livro: diferença ≠ 0 nunca fica escondida.
+  const c = painel.conciliacao;
+  out.push(linha("conciliacao", "total_pago_dos_pagamentos", c.totalPagoDosPagamentosCents));
+  out.push(linha("conciliacao", "total_dos_repasses", c.totalDosRepassesCents));
+  out.push(linha("conciliacao", "diferenca_entradas_brutas", c.diferencas.entradasBrutasCents));
+  out.push(linha("conciliacao", "diferenca_estornos", c.diferencas.estornosCents));
+  out.push(linha("conciliacao", "diferenca_saidas", c.diferencas.saidasCents));
+  out.push(linha("conciliacao", "diferenca_total_pago", c.diferencas.totalPagoCents));
+  out.push(linha("conciliacao", "diferenca_repasses", c.diferencas.repassesCents));
 
   for (const b of painel.serie) {
     const chave = `${b.inicio}|${b.fim}`;

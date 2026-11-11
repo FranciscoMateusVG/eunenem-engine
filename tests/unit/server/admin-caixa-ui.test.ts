@@ -64,6 +64,7 @@ function painel(sobre: Record<string, unknown> = {}) {
     pendentes: {
       aprovadosNaoTransferidos: { cents: 3_000, repasses: 1 },
       emVerificacao: { cents: 7_000, repasses: 1 },
+      semComprovante: { cents: 1_500, repasses: 1 },
     },
     saldoCents: 11_233,
     serie: [
@@ -157,6 +158,7 @@ describe('Fluxo de caixa — texto da tela', () => {
     expect(t).toContain('Entrou');
     expect(t).toContain('Aprovados, ainda não transferidos');
     expect(t).toContain('Em verificação');
+    expect(t).toContain('Marcado como transferido sem comprovante — conferir');
     expect(t).toContain('Não conta como saída');
     expect(t).toContain('Fecha ao centavo');
     expect(t).toContain('Período: 01/08/2033 a 31/08/2033');
