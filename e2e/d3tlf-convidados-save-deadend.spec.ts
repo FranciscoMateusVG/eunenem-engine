@@ -114,7 +114,7 @@ test.describe('aperture-d3tlf — convidados compositor save is never a dead end
     await page.setViewportSize({ width: 390, height: 844 });
     await page.reload();
     const updated = page.getByTestId('convidado-row').filter({ hasText: 'Convidada atualizada' });
-    await expect(updated.getByText('+55 (31) 99999-0001', { exact: true })).toBeVisible();
+    await expect(updated.locator('.cv-guest-mobile-phone')).toHaveText('+55 (31) 99999-0001');
     await updated.getByRole('button', { name: 'Excluir', exact: true }).click();
     const remove = page.getByRole('dialog', { name: 'Excluir convidado' });
     await remove.getByRole('button', { name: 'Cancelar' }).click();
