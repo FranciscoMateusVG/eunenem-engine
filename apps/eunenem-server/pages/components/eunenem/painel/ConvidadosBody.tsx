@@ -54,6 +54,8 @@ import {
 // fields the wizard does, instead of dead-ending on the backend 400.
 import { conviteFieldErrors, FieldError, InvitePreview } from "./ConviteBody";
 import { ConfirmarPresencaView } from "@/ConfirmarPresencaPage";
+import { trpc } from "@/lib/trpc";
+import { useAcessoCampanha } from "./useAcessoCampanha";
 import { ComPermissao } from "./ComPermissao";
 
 // aperture-x1b3u — Lista de convidados (RSVP + convites por WhatsApp).
@@ -566,11 +568,19 @@ function GuestCard({
   g,
   onSend,
   onSetRsvp,
+  onManage,
 }: {
   g: Convidado;
   onSend: (id: string, isResend?: boolean) => void;
+  onManage?: (mode: GuestManagementMode) => void;
   onSetRsvp: (id: string, presenca: StatusPresencaConvidado) => void;
 }) {
+  const managementActions = onManage && (
+    <>
+      <Button variant="ghost" size="sm" onClick={() => onManage("edit")}>Editar</Button>
+      <Button variant="ghost" size="sm" onClick={() => onManage("delete")}>Excluir</Button>
+    </>
+  );
   return (
     <div className="cv-guest-card" data-testid="convidado-row">
 
@@ -616,6 +626,7 @@ function GuestCard({
         <div className="cv-guest-desktop-actions">
           <GuestSendActions g={g} onSend={onSend} />
           <RsvpMenu guestId={g.id} onSetRsvp={onSetRsvp} variant="desktop" />
+          {managementActions}
         </div>
       </div>
 
@@ -640,6 +651,7 @@ function GuestCard({
 
         <div className="cv-guest-mobile-row3">
           <GuestMobilePrimaryAction g={g} onSend={onSend} />
+          {onManage && <div className="cv-guest-management">{managementActions}</div>}
         </div>
       </div>
     </div>
@@ -1271,11 +1283,13 @@ function Modal({
   onClose,
   sm,
   xl,
+  labelledBy,
 }: {
   children: React.ReactNode;
   onClose: () => void;
   sm?: boolean;
   xl?: boolean;
+  labelledBy?: string;
 }) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -1295,10 +1309,107 @@ function Modal({
         onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-modal="true"
+        aria-labelledby={labelledBy}
       >
         {children}
       </div>
     </div>
+  );
+}
+
+type GuestManagementMode = "edit" | "delete";
+
+function GuestManagementModal({
+  guest,
+  mode,
+  onSave,
+  onClose,
+}: {
+  guest: Convidado;
+  mode: GuestManagementMode;
+  onSave: (name: string, phone: string) => Promise<void>;
+  onClose: () => void;
+}) {
+  const [name, setName] = useState(guest.name);
+  const [phone, setPhone] = useState(guest.phone);
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const submitting = useRef(false);
+  const editing = mode === "edit";
+  const close = () => {
+    if (!submitting.current) onClose();
+  };
+
+  return (
+    <Modal onClose={close} sm labelledBy="guest-management-title">
+      <form
+        className="cv-guest-management-form"
+        onSubmit={async (event) => {
+          event.preventDefault();
+          if (submitting.current) return;
+          submitting.current = true;
+          setPending(true);
+          setError(null);
+          try {
+            await onSave(name.trim(), phone.trim());
+            onClose();
+          } catch (cause) {
+            setError(convidadosErrorMessage(cause));
+            submitting.current = false;
+            setPending(false);
+          }
+        }}
+      >
+        <div className="lista-modal-head">
+          <h3 id="guest-management-title">{editing ? "Editar convidado" : "Excluir convidado"}</h3>
+        </div>
+        <div className="lista-modal-body">
+          {editing ? (
+            <div className="lista-form">
+              <div className="lista-field lista-field-full">
+                <label htmlFor="editar-convidado-nome">Nome</label>
+                <input
+                  id="editar-convidado-nome"
+                  value={name}
+                  onChange={(event) => setName(event.target.value)}
+                  required
+                  maxLength={120}
+                  disabled={pending}
+                />
+              </div>
+              <div className="lista-field lista-field-full">
+                <label htmlFor="editar-convidado-telefone">Telefone com DDI</label>
+                <input
+                  id="editar-convidado-telefone"
+                  type="tel"
+                  value={phone}
+                  onChange={(event) => setPhone(event.target.value)}
+                  required
+                  minLength={10}
+                  maxLength={20}
+                  disabled={pending}
+                />
+              </div>
+            </div>
+          ) : (
+            <p className="lista-remove-text">
+              Excluir <b>{guest.name}</b> da lista? O link de RSVP desse convidado deixará de funcionar.
+            </p>
+          )}
+          {error && <p role="alert">{error}</p>}
+        </div>
+        <div className="lista-modal-foot">
+          <div className="lista-foot-actions lista-foot-actions-end">
+            <button type="button" className="btn btn-ghost" disabled={pending} onClick={close}>
+              Cancelar
+            </button>
+            <button type="submit" className={editing ? "btn btn-primary" : "btn btn-danger"} disabled={pending}>
+              {editing ? (pending ? "Salvando…" : "Salvar alterações") : (pending ? "Excluindo…" : "Excluir convidado")}
+            </button>
+          </div>
+        </div>
+      </form>
+    </Modal>
   );
 }
 
@@ -1482,6 +1593,15 @@ function ConvidadosBodyConteudo({ slug }: PainelSectionBodyProps) {
   // aperture-7g30v — the campanha id the guest-add mutation addresses (route
   // /c/:id when present, else session default). Only used as an analytics prop.
   const idCampanhaEvento = useCampanhaEscrita();
+  const podeGerenciar = useAcessoCampanha(idCampanhaEvento).pode("convite:editar");
+  const utils = trpc.useUtils();
+  const editarConvidado = trpc.eventoListaDeConvidados.editarConvidado.useMutation();
+  const excluirConvidado = trpc.eventoListaDeConvidados.excluirConvidado.useMutation();
+  const [guestManagement, setGuestManagement] = useState<{
+    guest: Convidado;
+    mode: GuestManagementMode;
+    idCampanha: string;
+  } | null>(null);
 
   const guests = useMemo<Convidado[]>(() => {
     const convidados = listaQuery.data?.lista?.convidados ?? [];
@@ -1683,6 +1803,28 @@ function ConvidadosBodyConteudo({ slug }: PainelSectionBodyProps) {
 
       {showAdd && (
         <AddGuestModal onAdd={addGuest} onClose={() => setShowAdd(false)} />
+      )}
+
+      {guestManagement && guestManagement.idCampanha === idCampanhaEvento && (
+        <GuestManagementModal
+          guest={guestManagement.guest}
+          mode={guestManagement.mode}
+          onClose={() => setGuestManagement(null)}
+          onSave={async (nome, numeroCelular) => {
+            const alvo = {
+              idCampanha: guestManagement.idCampanha,
+              idConvidado: guestManagement.guest.id,
+            };
+            if (guestManagement.mode === "edit") {
+              await editarConvidado.mutateAsync({ ...alvo, nome, numeroCelular });
+              toast.success("Convidado atualizado");
+            } else {
+              await excluirConvidado.mutateAsync(alvo);
+              toast.success("Convidado excluído");
+            }
+            await utils.eventoListaDeConvidados.get.invalidate();
+          }}
+        />
       )}
 
       {/* 3. mensagem padrão (colapsável) */}
@@ -1993,6 +2135,9 @@ function ConvidadosBodyConteudo({ slug }: PainelSectionBodyProps) {
                 g={g}
                 onSend={sendOne}
                 onSetRsvp={setRsvp}
+                onManage={podeGerenciar && idCampanhaEvento
+                  ? (mode) => setGuestManagement({ guest: g, mode, idCampanha: idCampanhaEvento })
+                  : undefined}
               />
             ))
           )}
@@ -2400,6 +2545,15 @@ function ConvidadosBodyConteudo({ slug }: PainelSectionBodyProps) {
             flex-wrap: wrap;
             margin-left: auto;
           }
+        }
+        .cv-guest-management-form {
+          overflow-y: auto;
+        }
+        .cv-guest-management {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 8px;
+          margin-top: 8px;
         }
       `}</style>
 
