@@ -166,7 +166,7 @@ export function CaixaPainel({
             nota={`${saidas.porMetodo.inter.repasses} repasse(s)`}
           />
           <Cartao
-            titulo="Manual (com referência bancária)"
+            titulo="Manual"
             valor={formatBRL(saidas.porMetodo.manual.cents)}
             nota={`${saidas.porMetodo.manual.repasses} repasse(s)`}
           />
