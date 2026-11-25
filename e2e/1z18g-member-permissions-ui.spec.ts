@@ -127,6 +127,27 @@ test.describe('member permissions in the painel UI (aperture-1z18g)', () => {
     }
   });
 
+  test('shows the rename pencil on owned cards but not on a shared list', async () => {
+    await conceder(['perfil:editar']);
+    const page = await context.newPage();
+    try {
+      const acesso = page.waitForResponse(
+        (response) => response.url().includes('campanhaMembros.meuAcesso') && response.ok(),
+      );
+      await page.goto('/campanhas');
+      const cards = page.getByTestId('card-campanha');
+      const compartilhada = cards.filter({
+        has: page.locator(`a[href$="/c/${victimA.idCampanha}"]`),
+      });
+      await expect(compartilhada).toBeVisible();
+      await acesso;
+      await expect(cards.getByRole('button', { name: /^Renomear lista / }).first()).toBeVisible();
+      await expect(compartilhada.getByRole('button', { name: /^Renomear lista / })).toHaveCount(0);
+    } finally {
+      await page.close();
+    }
+  });
+
   test('gift list is read-only without presentes:gerenciar and editable once granted', async () => {
     await conceder([]);
     let page = await abrir('lista');

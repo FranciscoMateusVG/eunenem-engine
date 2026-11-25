@@ -616,7 +616,7 @@ function CardNova({
       <div className="camp-card-body">
         <div className="camp-card-title-row">
           <h3 className="camp-card-name">{campanha.titulo}</h3>
-          {acesso.pode('perfil:editar') && (
+          {acesso.papel === 'owner' && (
             <button
               type="button"
               className="camp-card-rename"
