@@ -31,6 +31,7 @@ import { randomUUID } from 'node:crypto';
 import { initTRPC, TRPCError } from '@trpc/server';
 import { z } from 'zod/v4';
 import {
+  acessoPermite,
   adicionarOpcaoContribuicao,
   ArrecadacaoInputInvalidoError,
   type Campanha,
@@ -123,11 +124,11 @@ const CampanhasListOutputSchema = z.object({
 export type CampanhasListOutput = z.infer<typeof CampanhasListOutputSchema>;
 
 /**
- * `campanhas.criar` input — name-only (aperture-x0unf NOVA LISTA V1). Bounds
+ * Title input shared by `campanhas.criar` and `campanhas.renomear`. Bounds
  * mirror the domain `CriarCampanhaInputSchema.titulo` (trimmed, 1..200) so a
  * bad title is a clean tRPC BAD_REQUEST before the use-case runs.
  */
-const CriarCampanhaInputDTOSchema = z.object({
+const TituloCampanhaInput = z.object({
   titulo: z.string().trim().min(1, 'Titulo nao pode ser vazio').max(200),
 });
 
@@ -312,7 +313,7 @@ export const campanhasRouter = t.router({
    * without its initial 'presente' opção.
    */
   criar: t.procedure
-    .input(CriarCampanhaInputDTOSchema)
+    .input(TituloCampanhaInput)
     .output(CampanhaNovaDTOSchema)
     .mutation(async ({ ctx, input }): Promise<z.infer<typeof CampanhaNovaDTOSchema>> => {
       const { deps, headers } = ctx;
@@ -396,6 +397,45 @@ export const campanhasRouter = t.router({
         throw err instanceof Error
           ? new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: err.message, cause: err })
           : new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'unknown_error' });
+      }
+    }),
+
+  renomear: t.procedure
+    .input(TituloCampanhaInput.extend({ idCampanha: z.string().uuid() }))
+    .mutation(async ({ ctx, input }) => {
+      try {
+        const { usuario, campanha } = await resolverCampanhaAdministrada(ctx, input.idCampanha);
+        const { deps } = ctx;
+        return await deps.db.transaction().execute(async (trx) => {
+          // Serializa com a exclusão e as alterações de acesso da mesma lista.
+          const lista = await trx
+            .selectFrom('campanhas')
+            .select('id')
+            .where('id', '=', campanha.id)
+            .forUpdate()
+            .executeTakeFirst();
+          if (!lista) throw new CampanhaAcessoNegadoError('Lista indisponível.');
+          const acesso = await deps.campanhaMembrosRepository.obterAcesso(
+            campanha.id,
+            usuario.idConta,
+            { trx },
+          );
+          if (!acesso || !acessoPermite(acesso, 'perfil:editar')) {
+            throw new TRPCError({ code: 'FORBIDDEN', message: 'Sem permissão para renomear a lista.' });
+          }
+
+          return await trx
+            .updateTable('campanhas')
+            .set({ titulo: input.titulo })
+            .where('id', '=', campanha.id)
+            .returning(['id', 'titulo'])
+            .executeTakeFirstOrThrow();
+        });
+      } catch (err) {
+        if (err instanceof CampanhaAcessoNegadoError) {
+          throw new TRPCError({ code: 'UNAUTHORIZED', message: 'Lista indisponível.', cause: err });
+        }
+        throw err;
       }
     }),
 

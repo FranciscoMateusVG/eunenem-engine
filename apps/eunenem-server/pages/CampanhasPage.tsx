@@ -27,6 +27,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { SetupCampanhaWizard } from './components/eunenem/campanhas/SetupCampanhaWizard.js';
 import { PainelTopbar } from './components/eunenem/painel/PainelTopbar.js';
+import { useAcessoCampanha } from './components/eunenem/painel/useAcessoCampanha.js';
 import {
   CAMPANHAS_WELCOME_STORAGE_KEY,
   LEGACY_MIGRACAO_URL,
@@ -592,6 +593,8 @@ function CardNova({
   // nomeBebe === null EXACTLY (real DTO field post-#359).
   const precisaCompletar = campanha.nomeBebe === null;
   const perfil = trpc.perfilCampanha.get.useQuery({ idCampanha: campanha.id });
+  const acesso = useAcessoCampanha(campanha.id);
+  const [renomearOpen, setRenomearOpen] = useState(false);
   const foto = perfil.data?.fotoPerfilUrl ?? perfil.data?.fotoCapaUrl;
   const [fotoFalhou, setFotoFalhou] = useState(false);
   useEffect(() => setFotoFalhou(false), [foto]);
@@ -611,7 +614,32 @@ function CardNova({
         )}
       </div>
       <div className="camp-card-body">
-        <h3 className="camp-card-name">{campanha.titulo}</h3>
+        <div className="camp-card-title-row">
+          <h3 className="camp-card-name">{campanha.titulo}</h3>
+          {acesso.pode('perfil:editar') && (
+            <button
+              type="button"
+              className="camp-card-rename"
+              title="Renomear lista"
+              aria-label={`Renomear lista ${campanha.titulo}`}
+              onClick={() => setRenomearOpen(true)}
+            >
+              <svg
+                width="18"
+                height="18"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.8"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M4 20h4L19 9l-4-4L4 16v4zM13.5 6.5l4 4" />
+              </svg>
+            </button>
+          )}
+        </div>
         {campanha.quantidadeMimos !== null && (
           <div className="camp-card-mimos">{mimosLabel(campanha.quantidadeMimos)}</div>
         )}
@@ -631,7 +659,107 @@ function CardNova({
           <span aria-hidden="true">→</span>
         </a>
       </div>
+      {renomearOpen && (
+        <RenomearListaDialog campanha={campanha} onFechar={() => setRenomearOpen(false)} />
+      )}
     </article>
+  );
+}
+
+function RenomearListaDialog({
+  campanha,
+  onFechar,
+}: {
+  campanha: CampanhaNovaDTO;
+  onFechar: () => void;
+}) {
+  const dialog = useRef<HTMLDialogElement>(null);
+  const [titulo, setTitulo] = useState(campanha.titulo);
+  const utils = trpc.useUtils();
+  const fechar = () => {
+    dialog.current?.close();
+    onFechar();
+  };
+  const renomear = trpc.campanhas.renomear.useMutation({
+    onSuccess: ({ id, titulo: tituloSalvo }) => {
+      utils.campanhas.list.setData(undefined, (lista) =>
+        lista && {
+          ...lista,
+          novas: lista.novas.map((card) =>
+            card.id === id ? { ...card, titulo: tituloSalvo } : card,
+          ),
+        },
+      );
+      void utils.campanhas.list.invalidate();
+      fechar();
+    },
+  });
+  const tituloValido = titulo.trim().length > 0 && titulo.trim() !== campanha.titulo;
+
+  useEffect(() => {
+    dialog.current?.showModal();
+  }, []);
+
+  return (
+    <dialog
+      ref={dialog}
+      className="camp-modal camp-modal-nova camp-modal-rename"
+      aria-labelledby="camp-rename-title"
+      onCancel={(e) => {
+        e.preventDefault();
+        if (!renomear.isPending) fechar();
+      }}
+    >
+      <h2 id="camp-rename-title" className="camp-modal-title camp-modal-title-sm">
+        Renomear lista
+      </h2>
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (tituloValido && !renomear.isPending) {
+            renomear.mutate({ idCampanha: campanha.id, titulo });
+          }
+        }}
+      >
+        <input
+          type="text"
+          className="camp-nova-input"
+          aria-label="Nome da lista"
+          value={titulo}
+          maxLength={200}
+          autoFocus
+          disabled={renomear.isPending}
+          onChange={(e) => {
+            setTitulo(e.target.value);
+            if (renomear.isError) renomear.reset();
+          }}
+        />
+        {renomear.isError && (
+          <p role="alert" className="camp-modal-copy">
+            {renomear.error.data?.code === 'FORBIDDEN' || renomear.error.data?.code === 'UNAUTHORIZED'
+              ? renomear.error.message
+              : 'Não conseguimos renomear a lista. Tente de novo.'}
+          </p>
+        )}
+        <div className="camp-modal-actions">
+          <button
+            type="button"
+            className="camp-btn-outline"
+            onClick={fechar}
+            disabled={renomear.isPending}
+          >
+            Cancelar
+          </button>
+          <button
+            type="submit"
+            className="camp-btn-fill"
+            disabled={!tituloValido || renomear.isPending}
+          >
+            {renomear.isPending ? 'Salvando…' : 'Salvar'}
+          </button>
+        </div>
+      </form>
+    </dialog>
   );
 }
 

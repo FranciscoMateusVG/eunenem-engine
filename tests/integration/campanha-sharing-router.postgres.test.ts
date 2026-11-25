@@ -719,3 +719,31 @@ it('aperture-m3vx4: owner-only and unknown actions are rejected on invite and on
       ?.permissoes,
   ).toEqual(PERMISSOES_PADRAO_MEMBRO);
 });
+
+it('renames a list only for the owner or a member who can edit its profile', async () => {
+  const { owner, member, campaign } = await sharedOnlyFixture();
+  const input = { idCampanha: campaign.id, titulo: '  Novo nome  ' };
+  const outsider = await login();
+
+  await expect(outsider.caller.campanhas.renomear(input)).rejects.toMatchObject({
+    code: 'UNAUTHORIZED',
+  });
+  const definirPermissoes = (permissoes: 'perfil:editar'[]) =>
+    owner.caller.campanhaMembros.definirPermissoes({
+      idCampanha: campaign.id,
+      idConta: member.user.id_conta,
+      permissoes,
+    });
+  await definirPermissoes([]);
+  await expect(member.caller.campanhas.renomear(input)).rejects.toMatchObject({
+    code: 'FORBIDDEN',
+  });
+  await definirPermissoes(['perfil:editar']);
+  expect(await member.caller.campanhas.renomear(input)).toEqual({
+    id: campaign.id,
+    titulo: 'Novo nome',
+  });
+  expect(
+    (await owner.caller.campanhas.list()).novas.find(({ id }) => id === campaign.id),
+  ).toMatchObject({ titulo: 'Novo nome', campanhaSlug: 'shared-baby' });
+});
