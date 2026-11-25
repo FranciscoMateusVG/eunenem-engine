@@ -31,7 +31,6 @@ import { randomUUID } from 'node:crypto';
 import { initTRPC, TRPCError } from '@trpc/server';
 import { z } from 'zod/v4';
 import {
-  acessoPermite,
   adicionarOpcaoContribuicao,
   ArrecadacaoInputInvalidoError,
   type Campanha,
@@ -420,8 +419,11 @@ export const campanhasRouter = t.router({
             usuario.idConta,
             { trx },
           );
-          if (!acesso || !acessoPermite(acesso, 'perfil:editar')) {
-            throw new TRPCError({ code: 'FORBIDDEN', message: 'Sem permissão para renomear a lista.' });
+          if (acesso?.papel !== 'owner') {
+            throw new TRPCError({
+              code: 'FORBIDDEN',
+              message: 'Somente quem criou a lista pode renomeá-la.',
+            });
           }
 
           return await trx
