@@ -206,3 +206,51 @@ test('painel compacto e configurações ligadas ao backend', async ({
     await db.destroy();
   }
 });
+
+test('renomeia apenas a lista escolhida e conserva o nome após recarregar', async ({
+  authenticatedPage: page,
+  seededData,
+}) => {
+  const db = createDatabase(databaseUrl);
+  try {
+    await sql`UPDATE usuarios SET onboarding_concluido_em=now(),tutorial_completado_em=now() WHERE id=${seededData.session.userId}`.execute(
+      db,
+    );
+  } finally {
+    await db.destroy();
+  }
+  const titulo = 'Chá da Helena';
+  const created = await page.request.post('/api/trpc/campanhas.criar', { data: { titulo } });
+  expect(created.ok()).toBe(true);
+
+  await page.setViewportSize({ width: 320, height: 800 });
+  await page.goto('/campanhas');
+  const cards = page.getByTestId('card-campanha');
+  await expect(cards).toHaveCount(2);
+  const outraLista = cards.filter({
+    has: page.getByRole('link').and(page.locator(`[href$="/c/${seededData.idCampanha}"]`)),
+  });
+  const outroTitulo = await outraLista.getByRole('heading').innerText();
+  const abrir = page.getByRole('button', { name: `Renomear lista ${titulo}`, exact: true });
+  await abrir.click();
+  const dialog = page.getByRole('dialog', { name: 'Renomear lista' });
+  const input = dialog.getByRole('textbox', { name: 'Nome da lista' });
+  const salvar = dialog.getByRole('button', { name: 'Salvar' });
+  await expect(input).toBeFocused();
+  await expect(input).toHaveValue(titulo);
+  await input.fill('   ');
+  await expect(salvar).toBeDisabled();
+  await input.press('Escape');
+  await expect(dialog).toBeHidden();
+  await expect(abrir).toBeFocused();
+
+  await abrir.click();
+  await input.fill('  Enxoval da Helena  ');
+  await salvar.click();
+  await expect(dialog).toBeHidden();
+  await expect(cards.getByRole('heading', { name: 'Enxoval da Helena' })).toBeVisible();
+  await page.reload();
+  await expect(cards.getByRole('heading', { name: 'Enxoval da Helena' })).toBeVisible();
+  await expect(outraLista.getByRole('heading')).toHaveText(outroTitulo);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+});
