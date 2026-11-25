@@ -239,7 +239,7 @@ describe('configuracoes.privacidade (Exibir recados publicamente)', () => {
     const owner = await login();
     const extra = await owner.caller.campanhas.criar({ titulo: 'Campanha extra' });
     await owner.caller.configuracoes.privacidade({ idCampanha: extra.id, exibirRecados: false });
-    await deps.campanhaRepository.delete(extra.id as never);
+    await owner.caller.configuracoes.excluirLista({ idCampanha: extra.id });
     expect(
       await deps.db
         .selectFrom('campanha_privacidade')
@@ -281,6 +281,48 @@ describe('configuracoes.privacidade (Exibir recados publicamente)', () => {
     expect(
       (await owner.caller.configuracoes.get({ idCampanha: owner.idCampanha })).exibirRecados,
     ).toBe(false);
+  });
+});
+
+describe('configuracoes.excluirLista', () => {
+  it('exclui somente a lista escolhida, preservando a conta e as outras listas', async () => {
+    const owner = await login();
+    const extra = await owner.caller.campanhas.criar({ titulo: 'Lista para excluir' });
+
+    expect(await owner.caller.configuracoes.excluirLista({ idCampanha: extra.id })).toEqual({
+      ok: true,
+    });
+    expect((await owner.caller.campanhas.list()).novas.map((lista) => lista.id)).toEqual([
+      owner.idCampanha,
+    ]);
+    expect(await owner.caller.auth.me()).not.toBeNull();
+    await expect(
+      caller('').pagina.obterMural({ slug: owner.user.slug, idCampanha: extra.id }),
+    ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+  });
+
+  it('bloqueia a exclusão por quem só tem acesso como membro', async () => {
+    const owner = await login();
+    const membro = await login();
+    await deps.campanhaRepository.adicionarAdministrador(
+      owner.idCampanha as never,
+      membro.user.id_conta as never,
+    );
+
+    await expect(
+      membro.caller.configuracoes.excluirLista({ idCampanha: owner.idCampanha }),
+    ).rejects.toMatchObject({ code: 'FORBIDDEN' });
+  });
+
+  it('preserva listas com histórico financeiro', async () => {
+    const owner = await login();
+    await recado(owner.idCampanha);
+    await expect(
+      owner.caller.configuracoes.excluirLista({ idCampanha: owner.idCampanha }),
+    ).rejects.toMatchObject({ code: 'CONFLICT' });
+    expect((await owner.caller.campanhas.list()).novas.map((lista) => lista.id)).toEqual([
+      owner.idCampanha,
+    ]);
   });
 });
 
