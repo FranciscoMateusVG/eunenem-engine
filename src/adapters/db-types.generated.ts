@@ -218,8 +218,19 @@ export interface DespesasManuais {
   id: Generated<string>;
   id_plataforma: string;
   inicio: Timestamp | null;
+  intervalo_meses: Generated<number>;
   nome: string;
   recorrencia: string;
+}
+
+export interface DespesasManuaisAjustes {
+  amount_cents: Int8;
+  competencia: Timestamp;
+  criado_em: Generated<Timestamp>;
+  criado_por: string;
+  despesa_id: string;
+  id: Generated<string>;
+  nota: string;
 }
 
 export interface DespesasManuaisValores {
@@ -740,6 +751,7 @@ export interface DB {
   convidados: Convidados;
   convites: Convites;
   despesas_manuais: DespesasManuais;
+  despesas_manuais_ajustes: DespesasManuaisAjustes;
   despesas_manuais_valores: DespesasManuaisValores;
   email_feedback: EmailFeedback;
   eventos: Eventos;
