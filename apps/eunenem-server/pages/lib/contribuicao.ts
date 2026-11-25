@@ -81,7 +81,10 @@ export function parseValorBRL(input: string): number {
   // thousand separator (those groups are always three digits), so read it as
   // the decimal point: "50.00" → 50, "1234.56" → 1234.56.
   const pontoDecimal = /^(\d+)\.(\d{1,2})$/.exec(trimmed);
-  if (pontoDecimal) return Number(`${pontoDecimal[1]}.${pontoDecimal[2]}`);
+  if (pontoDecimal) {
+    const decimal = Number(`${pontoDecimal[1]}.${pontoDecimal[2]}`);
+    return Number.isFinite(decimal) ? decimal : 0;
+  }
   if (!/^(?:\d+|\d{1,3}(?:\.\d{3})+)(?:,\d{1,2})?$/.test(trimmed)) return 0;
   const parsed = Number(trimmed.replace(/\./g, '').replace(',', '.'));
   return Number.isFinite(parsed) ? parsed : 0;

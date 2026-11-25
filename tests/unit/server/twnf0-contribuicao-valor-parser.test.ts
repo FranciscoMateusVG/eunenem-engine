@@ -175,4 +175,8 @@ describe('aperture-bqvb5 — decimal point typed on a phone keypad', () => {
   it.each(['1.234.56', '1.234.5', '50.', '.50', '50,00.1', '9.99'])('rejects %s', (raw) => {
     expect(valorUnitarioPresenteInputValido(raw)).toBe(false);
   });
+
+  it('an absurdly long dot-decimal input parses to 0, never Infinity', () => {
+    expect(parseValorBRL(`${'9'.repeat(400)}.00`)).toBe(0);
+  });
 });
