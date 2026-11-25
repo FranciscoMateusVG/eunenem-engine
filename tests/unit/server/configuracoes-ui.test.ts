@@ -3,14 +3,8 @@ import { describe, expect, it } from 'vitest';
 import {
   ConfiguracoesView,
   type ConfiguracoesViewProps,
-  DesativarContaDialog,
+  ExcluirListaDialog,
 } from '../../../apps/eunenem-server/pages/components/eunenem/painel/ConfiguracoesBody.js';
-
-/**
- * aperture-851nu — tela de Configurações ligada ao backend: toggles reais
- * para "Presentes recebidos" e "Exibir recados publicamente", e o diálogo de
- * desativação da conta (soft delete) com motivo de bloqueio visível.
- */
 
 const appRequire = createRequire(`${process.cwd()}/apps/eunenem-server/package.json`);
 const React = appRequire('react') as typeof import('react');
@@ -19,20 +13,25 @@ const { renderToStaticMarkup } = appRequire('react-dom/server') as {
 };
 
 const noop = () => undefined;
+const tituloLista = 'Chá da Helena';
 
 function props(over: Partial<ConfiguracoesViewProps> = {}): ConfiguracoesViewProps {
   return {
     slug: 'helena',
     idCampanha: '10000000-0000-4000-8000-000000000001',
     pode: () => true,
-    config: { exibirRecados: true, emails: { presentes: true, recados: true, presencas: true } },
+    config: {
+      tituloLista,
+      exibirRecados: true,
+      emails: { presentes: true, recados: true, presencas: true },
+    },
     carregando: false,
     erroAoCarregar: false,
     onRecarregar: noop,
     salvando: {},
     onEmail: noop,
     onExibirRecados: noop,
-    desativacao: { pendente: false, erro: null, concluida: false, onConfirmar: noop },
+    exclusao: { permitida: true, pendente: false, erro: null, onConfirmar: noop, onFechar: noop },
     ...over,
   };
 }
@@ -51,10 +50,19 @@ function toggle(html: string, label: string): { input: string; bloco: string } {
 }
 
 describe('ConfiguracoesView', () => {
+  it('mostra a exclusão da lista somente para o titular', () => {
+    expect(render(props())).toContain('Excluir Listas');
+    expect(render(props())).toContain(tituloLista);
+    expect(render(props({ exclusao: { ...props().exclusao, permitida: false } }))).not.toContain(
+      'Excluir esta lista',
+    );
+  });
+
   it('liga os toggles de Presentes recebidos e Exibir recados ao estado do servidor', () => {
     const html = render(
       props({
         config: {
+          tituloLista,
           exibirRecados: false,
           emails: { presentes: true, recados: true, presencas: true },
         },
@@ -92,6 +100,7 @@ describe('ConfiguracoesView', () => {
     const html = render(
       props({
         config: {
+          tituloLista,
           exibirRecados: true,
           emails: { presentes: true, recados: false, presencas: true },
         },
@@ -123,39 +132,29 @@ describe('ConfiguracoesView', () => {
   });
 });
 
-describe('DesativarContaDialog', () => {
-  const dialog = (over: Partial<Parameters<typeof DesativarContaDialog>[0]> = {}) =>
+describe('ExcluirListaDialog', () => {
+  const dialog = (over: Partial<Parameters<typeof ExcluirListaDialog>[0]> = {}) =>
     renderToStaticMarkup(
-      React.createElement(DesativarContaDialog, {
+      React.createElement(ExcluirListaDialog, {
         pendente: false,
         erro: null,
-        concluida: false,
+        tituloLista,
         onConfirmar: noop,
         onFechar: noop,
         ...over,
       }),
     );
 
-  it('explica a desativação sem apagar dados e mantém o atendimento', () => {
+  it('nomeia a lista e exige confirmação', () => {
     const html = dialog();
-    expect(html).toContain('desativada');
-    expect(html).toContain('Nada é apagado');
-    expect(html).toContain('única pessoa titular');
+    expect(html).toContain(tituloLista);
     expect(html).toMatch(/href="https:\/\/wa\.me\//);
-    expect(html).toMatch(/<button[^>]*disabled=""[^>]*>Desativar minha conta<\/button>/);
+    expect(html).toMatch(/<button[^>]*disabled=""[^>]*>Excluir lista<\/button>/);
   });
 
   it('mostra o motivo do bloqueio vindo do servidor', () => {
-    const html = dialog({
-      erro: 'Você ainda tem saldo a sacar. Resgate o valor antes de desativar a conta.',
-    });
+    const html = dialog({ erro: 'Esta lista tem histórico financeiro.' });
     expect(html).toContain('role="alert"');
-    expect(html).toContain('Você ainda tem saldo a sacar.');
-  });
-
-  it('confirma ao usuário que a conta foi desativada', () => {
-    const html = dialog({ concluida: true });
-    expect(html).toContain('Sua conta foi desativada');
-    expect(html).not.toContain('Desativar minha conta</button>');
+    expect(html).toContain('Esta lista tem histórico financeiro.');
   });
 });
