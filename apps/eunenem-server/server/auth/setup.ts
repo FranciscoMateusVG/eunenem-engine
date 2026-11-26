@@ -109,6 +109,8 @@ import { RepasseJobEnqueuerPgBoss } from '../jobs/repasse-enqueuer.pgboss.js';
 import { noopTracer } from '../../../../src/observability/tracer.js';
 import { getStripe } from '../../src/lib/stripe/stripe.js';
 import { type NfseConfig, NfseEnvShape, parseNfseConfig } from '../nfse/config.js';
+import type { FabricaClienteSefin } from '../nfse/emissao.js';
+import { criarClienteSefin, HOSTS_SEFIN } from '../nfse/sefin-cliente.js';
 import {
   type ServerAnalytics,
   ServerAnalyticsMixpanel,
@@ -373,6 +375,11 @@ export interface ServerDeps {
    * certificado (senha/PFX em campos privados, nunca serializados).
    */
   readonly nfse: NfseConfig;
+  /**
+   * aperture-wp6j6 — cliente mTLS do Sistema Nacional NFS-e por ambiente.
+   * Testes injetam um que aponta para o fake HTTPS.
+   */
+  readonly nfseClienteSefin: FabricaClienteSefin;
 }
 
 /**
@@ -1417,6 +1424,7 @@ export function buildServerDeps(
     transferenciaProvider,
     extratoVerified: env.INTER_EXTRATO_VERIFIED === 'true',
     nfse: parseNfseConfig(env),
+    nfseClienteSefin: ({ ambiente, material }) => criarClienteSefin({ hosts: HOSTS_SEFIN[ambiente], material }),
   };
 }
 

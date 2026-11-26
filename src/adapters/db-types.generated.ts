@@ -368,6 +368,43 @@ export interface ListasDeConvidados {
   id_evento: string;
 }
 
+export interface NfseEmissoes {
+  ambiente: string;
+  atualizada_em: Timestamp;
+  autorizada_em: Timestamp | null;
+  campanhas: string[];
+  cancelada_em: Timestamp | null;
+  cancelada_por: string | null;
+  cancelamento_evento_xml: string | null;
+  cancelamento_motivo: string | null;
+  cancelamento_status: string | null;
+  cancelamento_texto: string | null;
+  chave_acesso: string | null;
+  competencia: string;
+  criada_em: Timestamp;
+  dps_xml_assinado: string | null;
+  enviada_em: Timestamp | null;
+  erros: Json | null;
+  id: string;
+  id_dps: string;
+  n_dps: Int8;
+  nfse_xml: string | null;
+  numero_nfse: string | null;
+  serie: string;
+  solicitada_por: string;
+  status: string;
+  tentativas: Generated<number>;
+  tomador_cpf: string;
+  tomador_nome: string;
+  valor_cents: Int8;
+}
+
+export interface NfseNumeracao {
+  ambiente: string;
+  proximo: Int8;
+  serie: string;
+}
+
 export interface OpcoesContribuicao {
   campanha_id: string;
   id: string;
@@ -774,6 +811,8 @@ export interface DB {
   lifecycle_email_rollout: LifecycleEmailRollout;
   lifecycle_email_scan_cursors: LifecycleEmailScanCursors;
   listas_de_convidados: ListasDeConvidados;
+  nfse_emissoes: NfseEmissoes;
+  nfse_numeracao: NfseNumeracao;
   opcoes_contribuicao: OpcoesContribuicao;
   pagamentos: Pagamentos;
   payment_provider_operation_attempt_facts: PaymentProviderOperationAttemptFacts;

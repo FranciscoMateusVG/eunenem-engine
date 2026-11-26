@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { z } from 'zod';
 import type {
+  LeiauteDps,
   OpSimpNac,
   RegApTribSN,
   RegEspTrib,
@@ -90,6 +91,13 @@ export interface NfseConfig {
   /** IBGE 7 dígitos: cLocEmi e cLocPrestacao. */
   readonly municipioIbge: string | null;
   readonly ambiente: CampoConfig<TipoAmbiente>;
+  /**
+   * Leiaute da DPS. Padrão por ambiente: homologação (2) → 'rtc-2026-11'
+   * (a produção restrita já exige o leiaute da Reforma); produção (1) →
+   * 'producao-2026-02'. NFSE_LEIAUTE_DPS sobrescreve (ex.: quando a produção
+   * migrar).
+   */
+  readonly leiauteDps: CampoConfig<LeiauteDps>;
   readonly cTribNac: CampoConfig<string>;
   /** Template; `{competencia}` vira "setembro/2026". */
   readonly descricaoServico: CampoConfig<string>;
@@ -106,8 +114,24 @@ export interface NfseConfig {
   /** pTotTribSN (ME/EPP), TSDec2V2. */
   readonly pTotTribSN: CampoConfig<string | null>;
   readonly certificado: CertificadoNfse | null;
+  /** Série real da DPS (aperture-wp6j6). Nunca a série de prévia 89999. */
+  readonly serie: CampoConfig<string>;
+  /**
+   * Segunda chave da produção: emitir com tpAmb=1 exige também
+   * NFSE_EMISSAO_PRODUCAO=liberada. Homologação não depende dela.
+   */
+  readonly emissaoProducaoLiberada: boolean;
+  /**
+   * NFSE_COMPETENCIA_MINIMA (AAAA-MM): primeira competência emitível EM
+   * PRODUÇÃO. Só pode SUBIR o piso absoluto 2026-11 (decisão do contador);
+   * valor menor é ignorado pelo plano. Homologação não tem piso.
+   */
+  readonly competenciaMinima: string;
   readonly problemas: readonly ProblemaConfig[];
 }
+
+/** Série própria das DPS reais (docs/nfse-prontidao.md). */
+export const SERIE_DPS_PADRAO = '00001';
 
 /** Código indicado pelo contador: LC 116 item 10.02, desdobro 02. */
 export const CTRIB_NAC_PADRAO = '100202';
@@ -147,7 +171,17 @@ const RegEspTribSchema = z.enum(['0', '1', '2', '3', '4', '5', '6', '9']);
 const TribISSQNSchema = z.enum(['1', '2', '3', '4']);
 const TpRetISSQNSchema = z.enum(['1', '2', '3']);
 const AliquotaSchema = z.string().regex(/^(0|[0-9](\.[0-9]{2})?)$/);
-const InscricaoMunicipalSchema = z.string().min(1).max(15).regex(LATIN1);
+/**
+ * IM do prestador. 'omitir' tira a tag: a produção restrita recusa IM quando
+ * o CNC NFS-e do município não tem dados complementares do prestador (E0120,
+ * smoke 26/11/2026).
+ */
+const InscricaoMunicipalSchema = z
+  .string()
+  .min(1)
+  .max(15)
+  .regex(LATIN1)
+  .transform((v) => (v === 'omitir' ? null : v));
 const CNbsSchema = z.string().regex(/^\d{9}$/);
 const DEC3V2 = /^(0|0\.[0-9]{2}|[1-9][0-9]{0,2}(\.[0-9]{2})?)$/;
 const DEC2V2 = /^(0|0\.[0-9]{2}|[1-9][0-9]?(\.[0-9]{2})?)$/;
@@ -168,6 +202,12 @@ const DescricaoSchema = z
   .min(1)
   .regex(LATIN1)
   .refine((t) => descricaoDoServico(t, ROTULO_COMPETENCIA_MAIS_LONGO).length <= 2000);
+/**
+ * Série com 5 dígitos, 00001–89999: o pack RTC (produção restrita 20261124)
+ * reserva 90000–99999 (TSSerieDPS = [0-9]{1,4}|[0-8][0-9]{4}); 89999 é a
+ * série da prévia.
+ */
+const SerieSchema = z.string().regex(/^[0-8]\d{4}$/).refine((v) => v !== '00000' && v !== '89999');
 const Base64Schema = z.string().transform((v) => v.replace(/\s/g, '')).pipe(z.base64().min(1));
 
 export type NfseVariavel = keyof typeof NfseEnvShape;
@@ -196,6 +236,10 @@ export const NfseEnvShape = {
   NFSE_CERT_PATH: z.string().optional(),
   NFSE_CERT_BASE64: z.string().optional(),
   NFSE_CERT_PASSWORD: z.string().optional(),
+  NFSE_SERIE: z.string().optional(),
+  NFSE_EMISSAO_PRODUCAO: z.string().optional(),
+  NFSE_COMPETENCIA_MINIMA: z.string().optional(),
+  NFSE_LEIAUTE_DPS: z.string().optional(),
 };
 
 export function parseNfseConfig(env: NfseEnv): NfseConfig {
@@ -235,6 +279,11 @@ export function parseNfseConfig(env: NfseEnv): NfseConfig {
   const municipioIbge = obrigatorio('NFSE_MUNICIPIO_IBGE', IbgeSchema);
   const cTribNac = campo('NFSE_CTRIB_NAC', CTribNacSchema, CTRIB_NAC_PADRAO);
   const ambiente = campo<TipoAmbiente, '2'>('NFSE_AMBIENTE', AmbienteSchema, '2');
+  const leiauteDps = campo<LeiauteDps, LeiauteDps>(
+    'NFSE_LEIAUTE_DPS',
+    z.enum(['producao-2026-02', 'rtc-2026-11']),
+    ambiente.valor === '1' ? 'producao-2026-02' : 'rtc-2026-11',
+  );
   const opSimpNac = campo<OpSimpNac, '1'>('NFSE_OP_SIMP_NAC', OpSimpNacSchema, '1');
 
   let regApTribSN = campo<RegApTribSN | null, null>('NFSE_REG_AP_TRIB_SN', RegApTribSNSchema, null);
@@ -252,6 +301,9 @@ export function parseNfseConfig(env: NfseEnv): NfseConfig {
   const pTotTrib = campo<PercentuaisTributos | null, PercentuaisTributos>('NFSE_P_TOT_TRIB', PTotTribSchema, { fed: '11.33', est: '0.00', mun: '3.00' });
   const pTotTribSN = campo<string | null, null>('NFSE_P_TOT_TRIB_SN', PTotTribSNSchema, null);
   const descricaoServico = campo('NFSE_DESCRICAO_SERVICO', DescricaoSchema, DESCRICAO_SERVICO_PADRAO);
+  const serie = campo('NFSE_SERIE', SerieSchema, SERIE_DPS_PADRAO);
+  const emissaoProducaoLiberada = ler('NFSE_EMISSAO_PRODUCAO') === 'liberada';
+  const competenciaMinima = campo('NFSE_COMPETENCIA_MINIMA', z.string().regex(/^20\d{2}-(0[1-9]|1[0-2])$/), '2026-11').valor;
 
   // A senha NÃO passa por trim: espaços nas pontas fazem parte dela.
   const certificado = parseCertificado(ler, env.NFSE_CERT_PASSWORD ?? '', problemas);
@@ -260,6 +312,7 @@ export function parseNfseConfig(env: NfseEnv): NfseConfig {
     prestadorCnpj,
     municipioIbge,
     ambiente,
+    leiauteDps,
     cTribNac,
     descricaoServico,
     opSimpNac,
@@ -273,6 +326,9 @@ export function parseNfseConfig(env: NfseEnv): NfseConfig {
     pTotTrib,
     pTotTribSN,
     certificado,
+    serie,
+    emissaoProducaoLiberada,
+    competenciaMinima,
     problemas,
   };
 }

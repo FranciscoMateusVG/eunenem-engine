@@ -13,7 +13,7 @@ import { appRouter } from '../../apps/eunenem-server/server/trpc/router.js';
 import { ID_PLATAFORMA_EUNENEM } from '../../src/index.js';
 import { adminAuthOverrides } from '../helpers/admin-auth.js';
 import { gerarPfxDeTeste, type TestPfx } from '../helpers/nfse-test-pfx.js';
-import { validateDps } from '../helpers/nfse-xsd.js';
+import { validateDpsDoLeiaute } from '../helpers/nfse-xsd.js';
 import { ReceitaLedgerSeed } from '../helpers/receita-ledger-seed.js';
 import { createTestDatabase, type TestDatabase } from '../helpers/test-db.js';
 import { verificarAssinaturaDps } from '../helpers/xmldsig-verify.js';
@@ -258,7 +258,7 @@ describe('valor da prévia = Resultado de taxas da Receita (mesmo mês, SP)', ()
     const mar = await previa('2032-03');
     if (mar.dps.status !== 'gerada') throw new Error(mar.dps.status);
     // "DPS" + cLocEmi (7) + tipo (1 = CPF, 2 = CNPJ) + inscrição (14) + série (5) + nDPS (15).
-    expect(mar.dps.idDps).toBe(`DPS${IBGE}2${CNPJ}99999020320300000001`);
+    expect(mar.dps.idDps).toBe(`DPS${IBGE}2${CNPJ}89999020320300000001`);
     expect(mar.dps.xml).toContain(`<infDPS Id="${mar.dps.idDps}">`);
   });
 
@@ -381,7 +381,7 @@ describe('DPS valida contra o XSD oficial (xmllint)', () => {
     await seedBordasDeMarco();
     const p = await previa('2032-03');
     if (p.dps.status !== 'gerada') throw new Error(p.dps.status);
-    expect(validateDps(p.dps.xml)).toEqual({ ok: true, errors: [] });
+    expect(validateDpsDoLeiaute(p.dps.xml)).toEqual({ ok: true, errors: [] });
   });
 
   it('com todos os opcionais de env preenchidos', async () => {
@@ -405,7 +405,7 @@ describe('DPS valida contra o XSD oficial (xmllint)', () => {
     expect(p.configuracao.problemas).toEqual([]);
     if (p.dps.status !== 'gerada') throw new Error(p.dps.status);
     expect(p.dps.xml).toContain('março/2032');
-    expect(validateDps(p.dps.xml)).toEqual({ ok: true, errors: [] });
+    expect(validateDpsDoLeiaute(p.dps.xml)).toEqual({ ok: true, errors: [] });
   });
 
   it('descrição que só passa do limite depois de expandir {competencia} não gera XML inválido', async () => {
@@ -415,7 +415,7 @@ describe('DPS valida contra o XSD oficial (xmllint)', () => {
     const env = { ...BASE_ENV, NFSE_DESCRICAO_SERVICO: '{competencia}'.repeat(146) };
     const p = await previa('2032-02', { env });
     if (p.dps.status === 'gerada') {
-      expect(validateDps(p.dps.xml)).toEqual({ ok: true, errors: [] });
+      expect(validateDpsDoLeiaute(p.dps.xml)).toEqual({ ok: true, errors: [] });
     } else {
       expect(p.configuracao.problemas).toContainEqual({
         variavel: 'NFSE_DESCRICAO_SERVICO',
@@ -446,7 +446,7 @@ describe('DPS valida contra o XSD oficial (xmllint)', () => {
       if (p.dps.status !== 'gerada') throw new Error(p.dps.status);
       expect(p.dps.xml).toContain(trecho);
       expect(p.avisos).not.toContain('tot_trib_pendente');
-      expect(validateDps(p.dps.xml)).toEqual({ ok: true, errors: [] });
+      expect(validateDpsDoLeiaute(p.dps.xml)).toEqual({ ok: true, errors: [] });
     }
     const padrao = await previa('2032-03');
     expect(padrao.avisos).not.toContain('tot_trib_pendente');
@@ -458,7 +458,7 @@ describe('DPS valida contra o XSD oficial (xmllint)', () => {
     const p = await previa('2032-03', { env: envComCert(pfx, 'base64') });
     if (p.dps.status !== 'gerada') throw new Error(p.dps.status);
     expect(p.dps.assinatura.status).toBe('assinada');
-    expect(validateDps(p.dps.xml)).toEqual({ ok: true, errors: [] });
+    expect(validateDpsDoLeiaute(p.dps.xml)).toEqual({ ok: true, errors: [] });
   });
 });
 
@@ -751,7 +751,7 @@ it('besta: separa CPFs, bloqueia checksum inválido e usa último recebedor no m
   });
   for (const n of p.notas) {
     expect(n.dps.status).toBe('gerada');
-    if (n.dps.status === 'gerada') expect(validateDps(n.dps.xml).ok).toBe(true);
+    if (n.dps.status === 'gerada') expect(validateDpsDoLeiaute(n.dps.xml).ok).toBe(true);
   }
 });
 it('besta: separa CPFs, bloqueia checksum inválido e usa último recebedor após o mês', async () => {
@@ -788,7 +788,7 @@ it('besta: separa CPFs, bloqueia checksum inválido e usa último recebedor apó
   });
   for (const n of p.notas) {
     expect(n.dps.status).toBe('gerada');
-    if (n.dps.status === 'gerada') expect(validateDps(n.dps.xml).ok).toBe(true);
+    if (n.dps.status === 'gerada') expect(validateDpsDoLeiaute(n.dps.xml).ok).toBe(true);
   }
 });
 
@@ -815,6 +815,6 @@ it('2w3pg: último cadastrado posterior à competência prevalece sobre antigo a
   expect(dps.status).toBe('gerada');
   if (dps.status === 'gerada') {
     expect(dps.xml).toContain('<CPF>11144477735</CPF>');
-    expect(validateDps(dps.xml).ok).toBe(true);
+    expect(validateDpsDoLeiaute(dps.xml).ok).toBe(true);
   }
 });

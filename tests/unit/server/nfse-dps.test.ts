@@ -118,8 +118,8 @@ describe('competenciaDoMes', () => {
 });
 
 describe('numeroDpsPrevia / série de prévia', () => {
-  it('série 99999 e número AAAAMM99999999 (casa TSNumDPS, nunca colide com série real 00001)', () => {
-    expect(SERIE_DPS_PREVIA).toBe('99999');
+  it('série 89999 e número AAAAMM99999999 (casa TSNumDPS, nunca colide com série real 00001)', () => {
+    expect(SERIE_DPS_PREVIA).toBe('89999');
     expect(numeroDpsPrevia('2026-09')).toBe('20260999999999');
     expect(numeroDpsPrevia('2026-09')).toMatch(/^[1-9][0-9]{0,14}$/);
   });
@@ -130,10 +130,10 @@ describe('montarIdDps', () => {
     const id = montarIdDps({
       cLocEmi: '2611606',
       cnpj: '12345678000195',
-      serie: '99999',
+      serie: '89999',
       nDPS: '20260999999999',
     });
-    expect(id).toBe('DPS2611606212345678000195999990' + '20260999999999');
+    expect(id).toBe('DPS2611606212345678000195899990' + '20260999999999');
     expect(id).toHaveLength(45);
     expect(id).toMatch(/^DPS[0-9]{42}$/);
   });
@@ -322,7 +322,7 @@ describe('montarDpsXml', () => {
   it('cabeçalho: tpEmit=1 (prestador) e cLocEmi', () => {
     const { xml } = montarDpsXml(input());
     expect(xml).toContain(
-      '<tpAmb>2</tpAmb><dhEmi>2026-10-05T14:30:00-03:00</dhEmi><verAplic>eunenem-previa-1</verAplic><serie>99999</serie><nDPS>20260999999999</nDPS><dCompet>2026-09-01</dCompet><tpEmit>1</tpEmit><cLocEmi>2611606</cLocEmi>',
+      '<tpAmb>2</tpAmb><dhEmi>2026-10-05T14:30:00-03:00</dhEmi><verAplic>eunenem-previa-1</verAplic><serie>89999</serie><nDPS>20260999999999</nDPS><dCompet>2026-09-01</dCompet><tpEmit>1</tpEmit><cLocEmi>2611606</cLocEmi>',
     );
   });
 
@@ -344,6 +344,8 @@ it('besta: DPS identifica tomador e usa códigos/percentuais/IBSCBS do contador'
     config: parseNfseConfig({
       NFSE_PRESTADOR_CNPJ: '12345678000195',
       NFSE_MUNICIPIO_IBGE: '3106200',
+      // Leiaute de produção (o RTC tem teste próprio abaixo).
+      NFSE_LEIAUTE_DPS: 'producao-2026-02',
     }),
     tomador: { cpf: '52998224725', nome: 'Titular sintético' },
     ordinal: 1,
@@ -380,4 +382,146 @@ it('besta: configuração nacional divergente não gera combinação municipal i
       }),
     }),
   ).toEqual({ status: 'config_incompleta', faltando: ['NFSE_CTRIB_NAC'] });
+});
+
+describe('endereço do tomador (aperture-wp6j6)', () => {
+  const endereco = {
+    cMun: '3106200',
+    cep: '30130010',
+    logradouro: 'Av. Afonso Pena',
+    numero: '1000',
+    complemento: 'Apto 12 & B',
+    bairro: 'Centro',
+  };
+
+  it('toma/end com endNac (cMun, CEP), logradouro, número, complemento e bairro; passa no XSD', async () => {
+    const { validateDps } = await import('../../helpers/nfse-xsd.js');
+    const { xml } = montarDpsXml(
+      input({ tomador: { cpf: '52998224725', nome: 'Ana Titular', endereco } }),
+    );
+    expect(xml).toContain(
+      '<toma><CPF>52998224725</CPF><xNome>Ana Titular</xNome><end><endNac><cMun>3106200</cMun><CEP>30130010</CEP></endNac>' +
+        '<xLgr>Av. Afonso Pena</xLgr><nro>1000</nro><xCpl>Apto 12 &amp; B</xCpl><xBairro>Centro</xBairro></end></toma>',
+    );
+    expect(validateDps(xml).errors).toEqual([]);
+  });
+
+  it('sem complemento omite xCpl; sem endereço, toma só com CPF e nome', async () => {
+    const { validateDps } = await import('../../helpers/nfse-xsd.js');
+    const sem = montarDpsXml(
+      input({
+        tomador: { cpf: '52998224725', nome: 'Ana', endereco: { ...endereco, complemento: null } },
+      }),
+    ).xml;
+    expect(sem).not.toContain('<xCpl>');
+    expect(validateDps(sem).ok).toBe(true);
+    const semEnd = montarDpsXml(input({ tomador: { cpf: '52998224725', nome: 'Ana' } })).xml;
+    expect(semEnd).toContain('<toma><CPF>52998224725</CPF><xNome>Ana</xNome></toma>');
+  });
+});
+
+describe('leiaute RTC 2026-11 (produção restrita) — aperture-wp6j6, smoke', () => {
+  const rtc = () =>
+    montarDpsXml(
+      input({
+        leiaute: 'rtc-2026-11',
+        // O pack RTC reserva as séries 90000–99999: usa a série real.
+        serie: '00001',
+        nDPS: '1',
+        tomador: { cpf: '52998224725', nome: 'Tomador Ficticio de Teste' },
+        ibscbs: true,
+      }),
+    ).xml;
+
+  it('finNFSe logo depois de tpEmit; indDest depois de toma; CST/cClassTrib em IBSCBS/valores/trib', () => {
+    const xml = rtc();
+    expect(xml).toContain('<tpEmit>1</tpEmit><finNFSe>0</finNFSe><cLocEmi>');
+    expect(xml).toContain('</toma><indDest>0</indDest><serv>');
+    expect(xml).toContain(
+      '<IBSCBS><indFinal>1</indFinal><cIndOp>100301</cIndOp><valores><trib><CST>000</CST><cClassTrib>000001</cClassTrib></trib></valores></IBSCBS>',
+    );
+  });
+
+  it('passa no XSD oficial de produção restrita 20261124 (e NÃO no de produção 20260209)', async () => {
+    const { validateDps, validateDpsRtc } = await import('../../helpers/nfse-xsd.js');
+    expect(validateDpsRtc(rtc()).errors).toEqual([]);
+    expect(validateDps(rtc()).ok).toBe(false);
+  });
+
+  it('leiaute de produção 20260209 continua igual e NÃO passa no pack RTC', async () => {
+    const { validateDps, validateDpsRtc } = await import('../../helpers/nfse-xsd.js');
+    const prod = montarDpsXml(
+      input({
+        leiaute: 'producao-2026-02',
+        tomador: { cpf: '52998224725', nome: 'Ana' },
+        ibscbs: true,
+      }),
+    ).xml;
+    expect(validateDps(prod).errors).toEqual([]);
+    expect(validateDpsRtc(prod).ok).toBe(false);
+  });
+
+  it('RTC com endereço do tomador também é válido', async () => {
+    const { validateDpsRtc } = await import('../../helpers/nfse-xsd.js');
+    const xml = montarDpsXml(
+      input({
+        leiaute: 'rtc-2026-11',
+        serie: '00001',
+        nDPS: '1',
+        ibscbs: true,
+        tomador: {
+          cpf: '52998224725',
+          nome: 'Ana',
+          endereco: {
+            cMun: '3106200',
+            cep: '30130010',
+            logradouro: 'Av. Afonso Pena',
+            numero: '1000',
+            bairro: 'Centro',
+          },
+        },
+      }),
+    ).xml;
+    expect(validateDpsRtc(xml).errors).toEqual([]);
+  });
+});
+
+describe('leiaute RTC: cNBS antes de xDescServ (smoke 26/11, E1235)', () => {
+  it('com cNBS, a DPS RTC passa no pack de produção restrita; produção mantém cNBS depois', async () => {
+    const { validateDps, validateDpsRtc } = await import('../../helpers/nfse-xsd.js');
+    const servico = {
+      cLocPrestacao: '2611606',
+      cTribNac: '100202',
+      cTribMun: '003',
+      xDescServ: 'Comissão',
+      cNBS: '109059000',
+    };
+    const rtc = montarDpsXml(
+      input({
+        leiaute: 'rtc-2026-11',
+        serie: '00001',
+        nDPS: '1',
+        ibscbs: true,
+        servico,
+        tomador: {
+          cpf: '52998224725',
+          nome: 'Ana',
+          endereco: {
+            cMun: '3106200',
+            cep: '30130003',
+            logradouro: 'Avenida Afonso Pena',
+            numero: '1212',
+            bairro: 'Centro',
+          },
+        },
+      }),
+    ).xml;
+    expect(rtc).toContain(
+      '<cTribMun>003</cTribMun><cNBS>109059000</cNBS><xDescServ>Comissão</xDescServ>',
+    );
+    expect(validateDpsRtc(rtc).errors).toEqual([]);
+    const prod = montarDpsXml(input({ leiaute: 'producao-2026-02', servico })).xml;
+    expect(prod).toContain('<xDescServ>Comissão</xDescServ><cNBS>109059000</cNBS>');
+    expect(validateDps(prod).errors).toEqual([]);
+  });
 });

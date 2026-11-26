@@ -484,6 +484,16 @@ describe('Migration round-trip', () => {
     //    this sequence must start at the LATEST migration and walk earlier.
     //    Adding a new migration on top REQUIRES prepending its down-step here.
 
+    // 081 nfse_emissoes + nfse_numeracao (aperture-wp6j6).
+    const tabela = async (nome: string) =>
+      (await sql<{ name: string | null }>`SELECT to_regclass(${nome})::text AS name`.execute(db))
+        .rows[0]?.name;
+    expect(await tabela('nfse_emissoes')).toBe('nfse_emissoes');
+    expect(await tabela('nfse_numeracao')).toBe('nfse_numeracao');
+    expect((await migrator.migrateDown()).error).toBeUndefined();
+    expect(await tabela('nfse_emissoes')).toBeNull();
+    expect(await tabela('nfse_numeracao')).toBeNull();
+
     // 080 agradecimentos_presentes + campanha_privacidade.mensagem_agradecimento (aperture-bqvb5).
     const agradecimentos = async () =>
       (
