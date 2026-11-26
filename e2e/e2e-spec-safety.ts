@@ -48,6 +48,8 @@ export const E2E_SPEC_SAFETY = [
     capability: 'Creates, reconciles, and refunds PIX payments.',
   },
   { file: 'acr3t-switcher-mobile.spec.ts', safety: 'non-payment' },
+  // Owner archives/unarchives a list; visitor only reads the public page.
+  { file: 'bqvb5-arquivar-campanha.spec.ts', safety: 'non-payment' },
   // Guest page CTA + signup first touch; seeds a campaign, never pays.
   { file: 'i06qu-guest-cta.spec.ts', safety: 'non-payment' },
   // Deliberately safe: only denied anonymous/non-admin approval attempts with

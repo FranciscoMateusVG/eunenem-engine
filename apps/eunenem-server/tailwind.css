@@ -8427,6 +8427,45 @@ dialog.camp-modal-rename {
   max-width: calc(100% - 32px);
 }
 dialog.camp-modal-rename::backdrop { background: rgba(51, 35, 51, 0.5); }
+/* aperture-bqvb5 — archived list: greyed card + "arquivada" tag. The painel
+   link still works; only the public page is offline. */
+.camp-card.is-arquivada {
+  filter: grayscale(1);
+  opacity: 0.72;
+  box-shadow: none;
+}
+.camp-card.is-arquivada .camp-tape { opacity: 0.35; }
+.camp-card-arquivada {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  align-self: flex-start;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--cream-2, #f1ece8);
+  color: var(--ink-soft);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.camp-card-arquivar {
+  position: relative;
+  z-index: 2;
+  align-self: flex-start;
+  min-height: 32px;
+  padding: 4px 0;
+  border: 0;
+  background: none;
+  color: var(--lilac-deep);
+  font-family: var(--font-dm-sans), system-ui, sans-serif;
+  font-size: 12px;
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+.camp-card-arquivar:disabled { cursor: progress; opacity: 0.6; }
 .camp-grid .camp-card-mimos { font-size: 11px; margin-top: 0; }
 .camp-grid .camp-cta {
   position: absolute; inset: 0; display: block; width: auto; min-height: 0;

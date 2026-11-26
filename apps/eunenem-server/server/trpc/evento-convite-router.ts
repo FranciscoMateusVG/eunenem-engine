@@ -1,4 +1,4 @@
-import { campanhaNoAr, isCampaignPublicOwner } from './campaign-public-address.js';
+import { campanhaNoAr, campanhaPublicaPadrao, isCampaignPublicOwner } from './campaign-public-address.js';
 import { randomUUID } from 'node:crypto';
 import { initTRPC, TRPCError } from '@trpc/server';
 import { z } from 'zod';
@@ -102,9 +102,9 @@ async function resolveCampanhaBySlug(
     return { campanha };
   }
 
-  const campanha = await ctx.deps.campanhaRepository.findByAdministrador(usuario.idConta);
+  const campanha = await campanhaPublicaPadrao(ctx, usuario.idConta);
   if (!campanha) {
-    throw new CampanhaSlugNaoEncontradaError('Usuario do slug nao administra nenhuma campanha');
+    throw new CampanhaSlugNaoEncontradaError('Usuario do slug nao tem lista publica');
   }
   if (!(await campanhaNoAr(ctx, campanha.id))) {
     throw new CampanhaSlugNaoEncontradaError('Campanha nao encontrada ou nao autorizada');

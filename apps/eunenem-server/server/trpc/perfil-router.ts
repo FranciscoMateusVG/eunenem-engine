@@ -1,4 +1,4 @@
-import { campanhaNoAr, isCampaignPublicOwner } from './campaign-public-address.js';
+import { campanhaNoAr, campanhaPublicaPadrao, isCampaignPublicOwner } from './campaign-public-address.js';
 /**
  * Perfil tRPC router (aperture-cdo69) — exposes the PerfilCriador aggregate.
  *
@@ -329,7 +329,11 @@ export const perfilRouter = t.router({
           // the all-null-content projection rather than a 404 — same
           // behavior the perfil_criadores-era read had for a profile-less
           // user.
-          campanha = await deps.campanhaRepository.findByAdministrador(usuario.idConta);
+          campanha = await campanhaPublicaPadrao(ctx, usuario.idConta);
+          // aperture-bqvb5: every owned list archived → no public page.
+          if (!campanha && (await deps.campanhaRepository.findByAdministrador(usuario.idConta))) {
+            throw new UsuarioNaoEncontradoError(input.slug);
+          }
         }
         // aperture-851nu: campanha sem owner ativo (ou conta desativada sem
         // campanha) não tem página pública.

@@ -105,6 +105,12 @@ const CampanhaNovaDTOSchema = z.object({
    * the card's "completar" affordance, and may use it as the display name.
    */
   nomeBebe: z.string().nullable(),
+  /**
+   * aperture-bqvb5 — ISO-8601 instant the titular archived the list, or null
+   * while it is active. Archived lists stay in Minhas Listas (greyed out) and
+   * in every painel screen; only the public page goes offline.
+   */
+  arquivadaEm: z.string().nullable(),
 });
 
 const CampanhaLegadoDTOSchema = z.object({
@@ -148,7 +154,55 @@ function toCardDTO(
     campanhaSlug: campanha.slug,
     slugJaAlterado: campanha.slugAlteradoEm !== null,
     nomeBebe,
+    arquivadaEm: campanha.arquivadaEm?.toISOString() ?? null,
   };
+}
+
+/**
+ * aperture-bqvb5 — arquiva (`arquivar=true`) ou desarquiva a lista. Só a
+ * titular; mesmo cerco de concorrência de `renomear` (FOR UPDATE serializa
+ * com exclusão e mudanças de acesso). Nada é apagado: pagamentos, extrato e
+ * repasses seguem intactos; só a página pública sai do ar.
+ */
+async function definirArquivamento(
+  ctx: TrpcContext,
+  idCampanha: string,
+  arquivar: boolean,
+): Promise<{ id: string; arquivadaEm: string | null }> {
+  try {
+    const { usuario, campanha } = await resolverCampanhaAdministrada(ctx, idCampanha);
+    const { deps } = ctx;
+    return await deps.db.transaction().execute(async (trx) => {
+      const lista = await trx
+        .selectFrom('campanhas')
+        .select('id')
+        .where('id', '=', campanha.id)
+        .forUpdate()
+        .executeTakeFirst();
+      if (!lista) throw new CampanhaAcessoNegadoError('Lista indisponível.');
+      const acesso = await deps.campanhaMembrosRepository.obterAcesso(
+        campanha.id,
+        usuario.idConta,
+        { trx },
+      );
+      if (acesso?.papel !== 'owner') {
+        throw new TRPCError({
+          code: 'FORBIDDEN',
+          message: arquivar
+            ? 'Somente quem criou a lista pode arquivá-la.'
+            : 'Somente quem criou a lista pode desarquivá-la.',
+        });
+      }
+      const arquivadaEm = arquivar ? deps.clock() : null;
+      await deps.campanhaRepository.definirArquivadaEm(campanha.id, arquivadaEm, { trx });
+      return { id: campanha.id, arquivadaEm: arquivadaEm?.toISOString() ?? null };
+    });
+  } catch (err) {
+    if (err instanceof CampanhaAcessoNegadoError) {
+      throw new TRPCError({ code: 'UNAUTHORIZED', message: 'Lista indisponível.', cause: err });
+    }
+    throw err;
+  }
 }
 
 // ── campanha slug (aperture-aphk8) ─────────────────────────────────────────
@@ -440,6 +494,14 @@ export const campanhasRouter = t.router({
         throw err;
       }
     }),
+
+  arquivar: t.procedure
+    .input(z.object({ idCampanha: z.string().uuid() }))
+    .mutation(({ ctx, input }) => definirArquivamento(ctx, input.idCampanha, true)),
+
+  desarquivar: t.procedure
+    .input(z.object({ idCampanha: z.string().uuid() }))
+    .mutation(({ ctx, input }) => definirArquivamento(ctx, input.idCampanha, false)),
 
   /**
    * Claim/replace a campanha's own URL slug (aperture-aphk8). Owner-gated

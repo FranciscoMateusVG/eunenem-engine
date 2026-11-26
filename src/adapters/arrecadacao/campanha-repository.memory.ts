@@ -36,7 +36,15 @@ export class CampanhaRepositoryMemory implements CampanhaRepository {
         if (!existing) this.owners.set(campanha.id, [...campanha.idsAdministradores]);
         this.campanhas.set(
           campanha.id,
-          existing ? { ...campanha, idsAdministradores: existing.idsAdministradores } : campanha,
+          // Mirrors Postgres: membership and the archive flag are never
+          // rewritten by `save` (a stale aggregate must not undo them).
+          existing
+            ? {
+                ...campanha,
+                idsAdministradores: existing.idsAdministradores,
+                arquivadaEm: existing.arquivadaEm,
+              }
+            : campanha,
         );
         span.setStatus({ code: SpanStatusCode.OK });
       } catch (error: unknown) {
@@ -365,6 +373,27 @@ export class CampanhaRepositoryMemory implements CampanhaRepository {
         if (campanha && (!marcarAlteracao || campanha.slugAlteradoEm === null)) {
           this.campanhas.set(idCampanha, { ...campanha, slug, slugAlteradoEm: alteradoEm });
         }
+        span.setStatus({ code: SpanStatusCode.OK });
+      } catch (error: unknown) {
+        span.recordException(error as Error);
+        span.setStatus({ code: SpanStatusCode.ERROR });
+        throw error;
+      } finally {
+        span.end();
+      }
+    });
+  }
+
+  async definirArquivadaEm(
+    idCampanha: IdCampanha,
+    arquivadaEm: Date | null,
+    _context?: ArrecadacaoRepositoryContext,
+  ): Promise<void> {
+    return tracer.startActiveSpan('db.arrecadacao_campanhas.definirArquivadaEm', async (span) => {
+      span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'UPDATE' });
+      try {
+        const campanha = this.campanhas.get(idCampanha);
+        if (campanha) this.campanhas.set(idCampanha, { ...campanha, arquivadaEm });
         span.setStatus({ code: SpanStatusCode.OK });
       } catch (error: unknown) {
         span.recordException(error as Error);

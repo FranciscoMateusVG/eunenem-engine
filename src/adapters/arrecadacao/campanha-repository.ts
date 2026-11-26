@@ -166,4 +166,16 @@ export interface CampanhaRepository {
     marcarAlteracao: boolean,
     context?: ArrecadacaoRepositoryContext,
   ): Promise<void>;
+
+  /**
+   * Arquiva (`arquivadaEm` = instante) ou desarquiva (`null`) a campanha
+   * (aperture-bqvb5). Narrow single-column update, deliberately NOT part of
+   * `save`: a stale aggregate saved later must never un-archive (or archive)
+   * the list. No-op for unknown id — the caller owner-gates before calling.
+   */
+  definirArquivadaEm(
+    idCampanha: IdCampanha,
+    arquivadaEm: Date | null,
+    context?: ArrecadacaoRepositoryContext,
+  ): Promise<void>;
 }

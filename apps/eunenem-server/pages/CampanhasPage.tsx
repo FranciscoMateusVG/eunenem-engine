@@ -595,13 +595,17 @@ function CardNova({
   const perfil = trpc.perfilCampanha.get.useQuery({ idCampanha: campanha.id });
   const acesso = useAcessoCampanha(campanha.id);
   const [renomearOpen, setRenomearOpen] = useState(false);
+  const [arquivarOpen, setArquivarOpen] = useState(false);
+  const arquivada = campanha.arquivadaEm !== null;
+  const desarquivar = useArquivamentoLista('desarquivar');
   const foto = perfil.data?.fotoPerfilUrl ?? perfil.data?.fotoCapaUrl;
   const [fotoFalhou, setFotoFalhou] = useState(false);
   useEffect(() => setFotoFalhou(false), [foto]);
   return (
     <article
-      className="camp-card"
+      className={'camp-card' + (arquivada ? ' is-arquivada' : '')}
       data-testid="card-campanha"
+      data-arquivada={arquivada ? 'true' : undefined}
       style={{ transform: TILTS[index % TILTS.length] }}
     >
       <span className="camp-tape" style={{ background: TAPES[index % TAPES.length] }} aria-hidden="true" />
@@ -640,10 +644,43 @@ function CardNova({
             </button>
           )}
         </div>
+        {arquivada && (
+          <span className="camp-card-arquivada" title="página pública fora do ar">
+            <IconArquivo />
+            arquivada
+          </span>
+        )}
         {campanha.quantidadeMimos !== null && (
           <div className="camp-card-mimos">{mimosLabel(campanha.quantidadeMimos)}</div>
         )}
-        {precisaCompletar && (
+        {/* aperture-bqvb5 — only the titular archives/unarchives. */}
+        {acesso.papel === 'owner' &&
+          (arquivada ? (
+            <button
+              type="button"
+              className="camp-card-arquivar"
+              aria-label={`Desarquivar lista ${campanha.titulo}`}
+              disabled={desarquivar.isPending}
+              onClick={() =>
+                desarquivar.mutate(
+                  { idCampanha: campanha.id },
+                  { onError: () => toast.error('Não conseguimos desarquivar a lista. Tente de novo.') },
+                )
+              }
+            >
+              {desarquivar.isPending ? 'desarquivando…' : 'desarquivar'}
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="camp-card-arquivar"
+              aria-label={`Arquivar lista ${campanha.titulo}`}
+              onClick={() => setArquivarOpen(true)}
+            >
+              arquivar
+            </button>
+          ))}
+        {precisaCompletar && !arquivada && (
           <button
             type="button"
             className="camp-card-completar"
@@ -662,7 +699,111 @@ function CardNova({
       {renomearOpen && (
         <RenomearListaDialog campanha={campanha} onFechar={() => setRenomearOpen(false)} />
       )}
+      {arquivarOpen && (
+        <ArquivarListaDialog campanha={campanha} onFechar={() => setArquivarOpen(false)} />
+      )}
     </article>
+  );
+}
+
+function IconArquivo() {
+  return (
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <rect x="3" y="4" width="18" height="5" rx="1" />
+      <path d="M5 9v10a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V9M10 13h4" />
+    </svg>
+  );
+}
+
+/** aperture-bqvb5 — arquivar/desarquivar, refletindo o resultado no card. */
+function useArquivamentoLista(acao: 'arquivar' | 'desarquivar') {
+  const utils = trpc.useUtils();
+  const onSuccess = ({ id, arquivadaEm }: { id: string; arquivadaEm: string | null }) => {
+    utils.campanhas.list.setData(undefined, (lista) =>
+      lista && {
+        ...lista,
+        novas: lista.novas.map((card) => (card.id === id ? { ...card, arquivadaEm } : card)),
+      },
+    );
+    void utils.campanhas.list.invalidate();
+  };
+  const arquivar = trpc.campanhas.arquivar.useMutation({ onSuccess });
+  const desarquivar = trpc.campanhas.desarquivar.useMutation({ onSuccess });
+  return acao === 'arquivar' ? arquivar : desarquivar;
+}
+
+function ArquivarListaDialog({
+  campanha,
+  onFechar,
+}: {
+  campanha: CampanhaNovaDTO;
+  onFechar: () => void;
+}) {
+  const dialog = useRef<HTMLDialogElement>(null);
+  const arquivar = useArquivamentoLista('arquivar');
+  const fechar = () => {
+    dialog.current?.close();
+    onFechar();
+  };
+
+  useEffect(() => {
+    dialog.current?.showModal();
+  }, []);
+
+  return (
+    <dialog
+      ref={dialog}
+      className="camp-modal camp-modal-nova camp-modal-rename"
+      aria-labelledby="camp-arquivar-title"
+      onCancel={(e) => {
+        e.preventDefault();
+        if (!arquivar.isPending) fechar();
+      }}
+    >
+      <h2 id="camp-arquivar-title" className="camp-modal-title camp-modal-title-sm">
+        Arquivar lista
+      </h2>
+      <p className="camp-modal-copy">
+        A página pública de <b>{campanha.titulo}</b> fica indisponível: ninguém consegue ver nem
+        presentear. Seu painel, os pagamentos e os resgates continuam funcionando, e você pode
+        desarquivar quando quiser.
+      </p>
+      {arquivar.isError && (
+        <p role="alert" className="camp-modal-copy">
+          {arquivar.error.data?.code === 'FORBIDDEN' || arquivar.error.data?.code === 'UNAUTHORIZED'
+            ? arquivar.error.message
+            : 'Não conseguimos arquivar a lista. Tente de novo.'}
+        </p>
+      )}
+      <div className="camp-modal-actions">
+        <button
+          type="button"
+          className="camp-btn-outline"
+          onClick={fechar}
+          disabled={arquivar.isPending}
+        >
+          Cancelar
+        </button>
+        <button
+          type="button"
+          className="camp-btn-fill"
+          disabled={arquivar.isPending}
+          onClick={() => arquivar.mutate({ idCampanha: campanha.id }, { onSuccess: fechar })}
+        >
+          {arquivar.isPending ? 'Arquivando…' : 'Arquivar'}
+        </button>
+      </div>
+    </dialog>
   );
 }
 

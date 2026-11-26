@@ -57,6 +57,7 @@ export class CampanhaRepositoryPostgres implements CampanhaRepository {
             slug: campanha.slug,
             slug_alterado_em: campanha.slugAlteradoEm,
             criada_em: campanha.criadaEm,
+            arquivada_em: campanha.arquivadaEm,
           })
           .onConflict((oc) => oc.column('id').doNothing())
           .returning('id')
@@ -225,6 +226,7 @@ export class CampanhaRepositoryPostgres implements CampanhaRepository {
           slugAlteradoEm: row.slug_alterado_em,
           opcoes: opcoes.map(toOpcao),
           criadaEm: row.criada_em,
+          arquivadaEm: row.arquivada_em,
         };
 
         span.setStatus({ code: SpanStatusCode.OK });
@@ -287,6 +289,7 @@ export class CampanhaRepositoryPostgres implements CampanhaRepository {
             slug: row.slug,
             opcoes: opcoes.map(toOpcao),
             criadaEm: row.criada_em,
+            arquivadaEm: row.arquivada_em,
           };
 
           resultados.push(
@@ -338,6 +341,7 @@ export class CampanhaRepositoryPostgres implements CampanhaRepository {
               'campanhas.slug',
               'campanhas.slug_alterado_em',
               'campanhas.criada_em',
+              'campanhas.arquivada_em',
             ])
             .where('campanha_administradores.id_usuario', '=', idConta)
             .where((eb) =>
@@ -387,6 +391,7 @@ export class CampanhaRepositoryPostgres implements CampanhaRepository {
             slug: row.slug,
             opcoes: opcoes.map(toOpcao),
             criadaEm: row.criada_em,
+            arquivadaEm: row.arquivada_em,
           };
 
           span.setStatus({ code: SpanStatusCode.OK });
@@ -651,6 +656,31 @@ export class CampanhaRepositoryPostgres implements CampanhaRepository {
           query = query.where('slug_alterado_em', 'is', null);
         }
         await query.where('id', '=', idCampanha).execute();
+        span.setStatus({ code: SpanStatusCode.OK });
+      } catch (error: unknown) {
+        span.recordException(error as Error);
+        span.setStatus({ code: SpanStatusCode.ERROR });
+        throw error;
+      } finally {
+        span.end();
+      }
+    });
+  }
+
+  async definirArquivadaEm(
+    idCampanha: IdCampanha,
+    arquivadaEm: Date | null,
+    context?: ArrecadacaoRepositoryContext,
+  ): Promise<void> {
+    const executor = context?.trx ?? this.db;
+    return tracer.startActiveSpan('db.arrecadacao_campanhas.definirArquivadaEm', async (span) => {
+      span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'UPDATE' });
+      try {
+        await executor
+          .updateTable('campanhas')
+          .set({ arquivada_em: arquivadaEm })
+          .where('id', '=', idCampanha)
+          .execute();
         span.setStatus({ code: SpanStatusCode.OK });
       } catch (error: unknown) {
         span.recordException(error as Error);
