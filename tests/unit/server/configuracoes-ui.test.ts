@@ -25,7 +25,12 @@ function props(over: Partial<ConfiguracoesViewProps> = {}): ConfiguracoesViewPro
     slug: 'helena',
     idCampanha: '10000000-0000-4000-8000-000000000001',
     pode: () => true,
-    config: { exibirRecados: true, emails: { presentes: true, recados: true, presencas: true } },
+    config: {
+      exibirRecados: true,
+      emails: { presentes: true, recados: true, presencas: true },
+      mensagemAgradecimento: null,
+      mensagemAgradecimentoSugerida: 'Oi, {nome}! Gratidão ♡',
+    },
     carregando: false,
     erroAoCarregar: false,
     onRecarregar: noop,
@@ -33,6 +38,7 @@ function props(over: Partial<ConfiguracoesViewProps> = {}): ConfiguracoesViewPro
     onEmail: noop,
     onExibirRecados: noop,
     desativacao: { pendente: false, erro: null, concluida: false, onConfirmar: noop },
+    agradecimento: { salvando: false, onSalvar: noop },
     ...over,
   };
 }
@@ -57,6 +63,8 @@ describe('ConfiguracoesView', () => {
         config: {
           exibirRecados: false,
           emails: { presentes: true, recados: true, presencas: true },
+          mensagemAgradecimento: null,
+          mensagemAgradecimentoSugerida: 'Oi, {nome}! Gratidão ♡',
         },
       }),
     );
@@ -94,6 +102,8 @@ describe('ConfiguracoesView', () => {
         config: {
           exibirRecados: true,
           emails: { presentes: true, recados: false, presencas: true },
+          mensagemAgradecimento: null,
+          mensagemAgradecimentoSugerida: 'Oi, {nome}! Gratidão ♡',
         },
       }),
     );
@@ -157,5 +167,32 @@ describe('DesativarContaDialog', () => {
     const html = dialog({ concluida: true });
     expect(html).toContain('Sua conta foi desativada');
     expect(html).not.toContain('Desativar minha conta</button>');
+  });
+});
+
+describe('ConfiguracoesView — mensagem de agradecimento (aperture-bqvb5)', () => {
+  const campo = (html: string) =>
+    html.match(
+      /<textarea[^>]*aria-label="Mensagem de agradecimento"[^>]*>[^<]*<\/textarea>/,
+    )?.[0] ?? '';
+
+  it('mostra a mensagem configurada, ou a sugerida quando não há', () => {
+    const configurada = render(
+      props({
+        config: {
+          ...(props().config as NonNullable<ConfiguracoesViewProps['config']>),
+          mensagemAgradecimento: 'Valeu, {nome}!',
+        },
+      }),
+    );
+    expect(campo(configurada)).toContain('Valeu, {nome}!');
+    expect(campo(render(props()))).toContain('Oi, {nome}! Gratidão ♡');
+  });
+
+  it('só quem gerencia mensagens edita', () => {
+    expect(campo(render(props()))).not.toContain('disabled');
+    expect(campo(render(props({ pode: (acao) => acao !== 'mensagens:gerenciar' })))).toContain(
+      'disabled',
+    );
   });
 });

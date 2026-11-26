@@ -48,6 +48,15 @@ export function ConfiguracoesBody({ slug }: PainelSectionBodyProps) {
     onError: (err) => toast.error(err.message || 'não consegui salvar — tenta de novo?'),
     onSettled: () => setSalvando((atual) => ({ ...atual, exibirRecados: false })),
   });
+  const agradecimento = trpc.configuracoes.mensagemAgradecimento.useMutation({
+    onSuccess: ({ mensagemAgradecimento }) => {
+      utils.configuracoes.get.setData({ idCampanha }, (atual) =>
+        atual ? { ...atual, mensagemAgradecimento } : atual,
+      );
+      toast.success('mensagem de agradecimento salva ♡');
+    },
+    onError: (err) => toast.error(err.message || 'não consegui salvar — tenta de novo?'),
+  });
   const desativar = trpc.usuario.desativarConta.useMutation({
     onSuccess: () => {
       resetAnalyticsIdentity();
@@ -73,6 +82,10 @@ export function ConfiguracoesBody({ slug }: PainelSectionBodyProps) {
         setSalvando((atual) => ({ ...atual, exibirRecados: true }));
         privacidade.mutate({ idCampanha, exibirRecados: valor });
       }}
+      agradecimento={{
+        salvando: agradecimento.isPending,
+        onSalvar: (mensagem) => agradecimento.mutate({ idCampanha, mensagem }),
+      }}
       desativacao={{
         pendente: desativar.isPending,
         erro: desativar.error ? desativar.error.message || 'não consegui desativar a conta.' : null,
@@ -95,6 +108,8 @@ export interface ConfiguracoesViewProps {
   onEmail: (chave: EmailToggleChave, valor: boolean) => void;
   onExibirRecados: (valor: boolean) => void;
   desativacao: Omit<DesativarContaDialogProps, 'onFechar'>;
+  /** aperture-bqvb5 — mensagem padrão de agradecimento (null = volta à sugerida). */
+  agradecimento: { salvando: boolean; onSalvar: (mensagem: string | null) => void };
 }
 
 export function ConfiguracoesView(props: ConfiguracoesViewProps) {
@@ -153,6 +168,16 @@ export function ConfiguracoesView(props: ConfiguracoesViewProps) {
           <a href={painelHref(slug, 'mensagens', idCampanha)}>Ver mensagens recebidas</a>
         )}
       </section>
+      {config && (
+        <MensagemAgradecimentoCard
+          key={config.mensagemAgradecimento ?? ''}
+          configurada={config.mensagemAgradecimento}
+          sugerida={config.mensagemAgradecimentoSugerida}
+          podeEditar={podeGerenciarMensagens && !carregando}
+          salvando={props.agradecimento.salvando}
+          onSalvar={props.agradecimento.onSalvar}
+        />
+      )}
       <section className="config-card">
         <h2>Notificações por e-mail</h2>
         <p>Escolha quais avisos você recebe por e-mail. A escolha vale só para você.</p>
@@ -190,6 +215,69 @@ export function ConfiguracoesView(props: ConfiguracoesViewProps) {
         <DesativarContaDialog {...props.desativacao} onFechar={() => setShowDelete(false)} />
       )}
     </div>
+  );
+}
+
+function MensagemAgradecimentoCard({
+  configurada,
+  sugerida,
+  podeEditar,
+  salvando,
+  onSalvar,
+}: {
+  configurada: string | null;
+  sugerida: string;
+  podeEditar: boolean;
+  salvando: boolean;
+  onSalvar: (mensagem: string | null) => void;
+}) {
+  const [texto, setTexto] = useState(configurada ?? sugerida);
+  const atual = configurada ?? sugerida;
+  const mudou = texto.trim() !== atual.trim();
+  return (
+    <section className="config-card">
+      <h2>Mensagem de agradecimento</h2>
+      <p>
+        É a mensagem padrão quando você agradece quem te presenteou (em Presentes ou Recados). Use{' '}
+        {'{nome}'} para chamar cada pessoa pelo primeiro nome.
+      </p>
+      <textarea
+        className="config-textarea"
+        aria-label="Mensagem de agradecimento"
+        rows={4}
+        maxLength={5000}
+        value={texto}
+        disabled={!podeEditar || salvando}
+        onChange={(e) => setTexto(e.target.value)}
+      />
+      {podeEditar ? (
+        <div className="config-actions">
+          {configurada !== null && (
+            <button
+              type="button"
+              className="perfil-btn perfil-btn-ghost"
+              disabled={salvando}
+              onClick={() => {
+                setTexto(sugerida);
+                onSalvar(null);
+              }}
+            >
+              Usar a sugerida
+            </button>
+          )}
+          <button
+            type="button"
+            className="perfil-btn perfil-btn-primary"
+            disabled={!mudou || texto.trim().length === 0 || salvando}
+            onClick={() => onSalvar(texto.trim() === sugerida.trim() ? null : texto.trim())}
+          >
+            {salvando ? 'Salvando…' : 'Salvar mensagem'}
+          </button>
+        </div>
+      ) : (
+        <small>Somente quem gerencia as mensagens pode alterar esta mensagem.</small>
+      )}
+    </section>
   );
 }
 

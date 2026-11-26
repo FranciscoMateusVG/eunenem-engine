@@ -77,6 +77,10 @@ function makeServer(port: number, extraEnv: Record<string, string>) {
       // drive pagarPix outcomes (pago/rejeitado/ambiguo/…) from the recebedor's
       // marker chave. Off by default everywhere else — zero blast radius.
       EUNENEM_FAKE_E2E_MAGIC: 'true',
+      // aperture-bqvb5: local servers have no SMTP; thank-you emails fail
+      // closed without it, so opt the E2E servers into the no-op transport.
+      // Rejected in production by setup.ts.
+      E2E_EMAIL_NOOP: '1',
       // Base server (:3002): empty STRIPE_* → server falls back to the fake
       // payment adapter (visitor-cart + UI specs rely on this).
       STRIPE_SECRET_KEY: '',

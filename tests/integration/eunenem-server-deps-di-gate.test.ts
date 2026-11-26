@@ -146,6 +146,23 @@ describe('eunenem-server payment-provider DI gate (aperture-ozlcr)', () => {
   });
 });
 
+describe('eunenem-server thank-you email E2E seam (aperture-bqvb5)', () => {
+  it('rejects the no-SMTP thank-you seam in production', () => {
+    expect(() =>
+      loadEnv({
+        ...baseEnv(),
+        NODE_ENV: 'production',
+        STRIPE_PUBLISHABLE_KEY: 'pk_live_dummy',
+        STRIPE_SECRET_KEY: 'sk_live_dummy',
+        STRIPE_WEBHOOK_SECRET: 'whsec_live_dummy',
+        LOG_PII_HASH_SALT: 'live-salt-thirty-two-chars-aaaaaaaaaaaaaaaaaaaa',
+        TRUSTED_HOP_COUNT: '1',
+        E2E_EMAIL_NOOP: '1',
+      }),
+    ).toThrow(/E2E_EMAIL_NOOP/);
+  });
+});
+
 describe('eunenem-server PIX reconciliation worker E2E seam', () => {
   it('accepts the worker-disable seam only outside production', () => {
     const env = loadEnv({

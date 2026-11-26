@@ -8377,6 +8377,10 @@ button.painel-topbar-link:hover {
 .config-modal-backdrop { position: fixed; inset: 0; z-index: 100; background: #33233380; padding: 16px; display: grid; place-items: center; }
 .config-modal { width: 100%; max-width: 540px; max-height: 90dvh; overflow-y: auto; }
 .config-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+/* aperture-bqvb5 — mensagem padrão de agradecimento. 16px avoids iOS zoom. */
+.config-textarea { width: 100%; box-sizing: border-box; margin-top: 8px; padding: 10px 12px; border: 1.5px solid var(--line); border-radius: 14px; background: var(--cream); color: var(--plum); font: inherit; font-size: 16px; line-height: 1.5; resize: vertical; }
+.config-textarea:focus { outline: none; border-color: var(--lilac); background: var(--paper); }
+.config-textarea:disabled { opacity: .7; }
 .config-consent { display: flex; align-items: flex-start; gap: 8px; font-size: 13px; line-height: 1.5; }
 .config-consent input { width: 20px; height: 20px; flex-shrink: 0; }
 dialog.config-modal { margin: auto; color: var(--ink); border: 1px solid var(--line); width: calc(100% - 32px); }

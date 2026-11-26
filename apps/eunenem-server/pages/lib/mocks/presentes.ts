@@ -29,6 +29,8 @@ export interface PresentesTx {
   /** Amount in centavos — positive; the sign comes from `type`. */
   amount: number;
   status: PresentesStatus;
+  /** aperture-bqvb5 — parent payment (live wire rows); drives "agradecer". */
+  idPagamento?: string;
   /** Payment method for received gifts. Live wire rows always provide it. */
   metodo?: "pix" | "credit_card" | null;
   /**

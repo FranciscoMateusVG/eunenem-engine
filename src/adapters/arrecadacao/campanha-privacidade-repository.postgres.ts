@@ -54,4 +54,32 @@ export class CampanhaPrivacidadeRepositoryPostgres implements CampanhaPrivacidad
         .execute();
     });
   }
+
+  async mensagemAgradecimento(idCampanha: IdCampanha): Promise<string | null> {
+    return comSpan('mensagemAgradecimento', 'SELECT', async () => {
+      const row = await this.db
+        .selectFrom('campanha_privacidade')
+        .select('mensagem_agradecimento')
+        .where('campanha_id', '=', idCampanha)
+        .executeTakeFirst();
+      return row?.mensagem_agradecimento ?? null;
+    });
+  }
+
+  async definirMensagemAgradecimento(
+    idCampanha: IdCampanha,
+    mensagem: string | null,
+  ): Promise<void> {
+    return comSpan('definirMensagemAgradecimento', 'UPSERT', async () => {
+      await this.db
+        .insertInto('campanha_privacidade')
+        .values({ campanha_id: idCampanha, mensagem_agradecimento: mensagem })
+        .onConflict((oc) =>
+          oc
+            .column('campanha_id')
+            .doUpdateSet({ mensagem_agradecimento: mensagem, atualizado_em: new Date() }),
+        )
+        .execute();
+    });
+  }
 }
