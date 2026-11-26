@@ -484,7 +484,7 @@ describe('Migration round-trip', () => {
     //    this sequence must start at the LATEST migration and walk earlier.
     //    Adding a new migration on top REQUIRES prepending its down-step here.
 
-    // 078 campanhas.arquivada_em (aperture-bqvb5).
+    // 079 campanhas.arquivada_em (aperture-bqvb5).
     const arquivadaEmCol = async () =>
       (
         await sql<{ data_type: string }>`SELECT data_type FROM information_schema.columns

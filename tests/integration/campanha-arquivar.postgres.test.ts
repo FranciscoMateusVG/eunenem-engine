@@ -72,6 +72,38 @@ function caller(cookie: string) {
   });
 }
 
+/** Anonymous visitor on the checkout boundary (same-origin, cookie jar). */
+function visitante() {
+  const ctx = {
+    deps: { ...deps, auth: authReal() },
+    headers: new Headers({ origin: deps.publicOrigin }),
+    resHeaders: new Headers(),
+  };
+  return { ctx, caller: appRouter.createCaller(ctx) };
+}
+
+/** First checkout hop: sets the capability cookie, creates no payment yet. */
+async function prepararCheckout(
+  v: ReturnType<typeof visitante>,
+  invoke: (operationId: string) => Promise<{ tipo: string }>,
+): Promise<string> {
+  const operationId = randomUUID();
+  expect(await invoke(operationId)).toMatchObject({ tipo: 'prepared' });
+  const pair = v.ctx.resHeaders.get('set-cookie')?.split(';', 1)[0];
+  if (!pair) throw new Error('checkout prepare did not set its capability cookie');
+  v.ctx.headers.set('cookie', pair);
+  return operationId;
+}
+
+async function pagamentosDaCampanha(idCampanha: string): Promise<number> {
+  const rows = await deps.db
+    .selectFrom('pagamentos')
+    .select('id')
+    .where('intencao_id_campanha', '=', idCampanha)
+    .execute();
+  return rows.length;
+}
+
 async function login(email = `arq-${randomUUID()}@example.com`) {
   const before = magicLinks.length;
   await authReal().api.signInMagicLink({
@@ -169,6 +201,62 @@ describe('campanhas.arquivar / campanhas.desarquivar', () => {
     expect(await sitemap()).toContain(`/${campanhaSlug}<`);
   });
 
+  it('arquivada: ninguém compra — nem checkout novo nem carrinho já preparado', async () => {
+    const owner = await login();
+    const slug = owner.user.slug;
+    const [idContribuicao] = (
+      await owner.caller.contribuicao.create({
+        idCampanha: owner.idCampanha,
+        nome: 'Banheira',
+        valor: 5000,
+        quantidade: 3,
+      })
+    ).ids;
+    if (!idContribuicao) throw new Error('setup: create não retornou id');
+    const contribuicao = (v: ReturnType<typeof visitante>) => (operationId: string) =>
+      v.caller.pagina.iniciarPagamentoContribuicao({
+        operationId,
+        slug,
+        idCampanha: owner.idCampanha,
+        idContribuicao,
+        metodo: 'pix',
+      });
+    const carrinho = (v: ReturnType<typeof visitante>) => (operationId: string) =>
+      v.caller.pagina.iniciarPagamentoCarrinho({
+        operationId,
+        slug,
+        idCampanha: owner.idCampanha,
+        itens: [{ idContribuicao, quantidade: 1 }],
+        metodo: 'pix',
+      });
+
+    // Controle: antes de arquivar, o checkout real cria o pagamento.
+    const controle = visitante();
+    const opControle = await prepararCheckout(controle, contribuicao(controle));
+    await expect(contribuicao(controle)(opControle)).resolves.not.toMatchObject({
+      tipo: 'prepared',
+    });
+    expect(await pagamentosDaCampanha(owner.idCampanha)).toBeGreaterThan(0);
+
+    // Visitantes com o carrinho já preparado (cookie emitido) antes do arquivamento.
+    const comContribuicao = visitante();
+    const opContribuicao = await prepararCheckout(comContribuicao, contribuicao(comContribuicao));
+    const comCarrinho = visitante();
+    const opCarrinho = await prepararCheckout(comCarrinho, carrinho(comCarrinho));
+
+    const antes = await pagamentosDaCampanha(owner.idCampanha);
+
+    await owner.caller.campanhas.arquivar({ idCampanha: owner.idCampanha });
+
+    const notFound = { code: 'NOT_FOUND' };
+    await expect(contribuicao(comContribuicao)(opContribuicao)).rejects.toMatchObject(notFound);
+    await expect(carrinho(comCarrinho)(opCarrinho)).rejects.toMatchObject(notFound);
+    const novo = visitante();
+    await expect(contribuicao(novo)(randomUUID())).rejects.toMatchObject(notFound);
+    await expect(carrinho(novo)(randomUUID())).rejects.toMatchObject(notFound);
+    expect(await pagamentosDaCampanha(owner.idCampanha)).toBe(antes);
+  });
+
   it('telas internas continuam funcionando e pagamentos não são apagados', async () => {
     const owner = await login();
     const { idPagamento } = await seed.pagamento({
@@ -197,9 +285,10 @@ describe('campanhas.arquivar / campanhas.desarquivar', () => {
     expect(pagamento?.id).toBe(idPagamento);
   });
 
-  it('só a titular arquiva/desarquiva; membro recebe FORBIDDEN e anônimo UNAUTHORIZED', async () => {
+  it('só a titular arquiva/desarquiva; membro FORBIDDEN, estranho e anônimo UNAUTHORIZED', async () => {
     const owner = await login();
     const membro = await login();
+    const estranho = await login();
     await deps.campanhaRepository.adicionarAdministrador(
       owner.idCampanha as never,
       membro.user.id_conta as never,
@@ -208,6 +297,9 @@ describe('campanhas.arquivar / campanhas.desarquivar', () => {
     await expect(
       membro.caller.campanhas.arquivar({ idCampanha: owner.idCampanha }),
     ).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    await expect(
+      estranho.caller.campanhas.arquivar({ idCampanha: owner.idCampanha }),
+    ).rejects.toMatchObject({ code: 'UNAUTHORIZED' });
     await expect(anon().campanhas.arquivar({ idCampanha: owner.idCampanha })).rejects.toMatchObject(
       { code: 'UNAUTHORIZED' },
     );
