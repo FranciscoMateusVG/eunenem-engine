@@ -15,6 +15,8 @@ const CONFIG_ENV = {
   NFSE_PRESTADOR_CNPJ: '11222333000181',
   NFSE_MUNICIPIO_IBGE: '3106200',
   NFSE_CERT_BASE64: 'AAAA',
+  // Leiaute de produção nos testes gerais; o RTC tem bloco próprio abaixo.
+  NFSE_LEIAUTE_DPS: 'producao-2026-02',
 };
 const CONFIG = parseNfseConfig(CONFIG_ENV);
 
@@ -283,5 +285,35 @@ describe('série reservada × configurada', () => {
     expect(
       montarPlanoEmissao({ previa: previa(), config: CONFIG, fixadas: [fixada] }).bloqueios,
     ).not.toContain('serie_divergente');
+  });
+});
+
+describe('leiaute RTC: endereço do tomador obrigatório (E0239 na produção restrita)', () => {
+  const RTC = parseNfseConfig({ ...CONFIG_ENV, NFSE_LEIAUTE_DPS: 'rtc-2026-11' });
+  const endereco = {
+    cMun: '3106200',
+    cep: '30130003',
+    logradouro: 'Av. Afonso Pena',
+    numero: '1212',
+    bairro: 'Centro',
+  };
+
+  it('sem endereço: nota PULADA com motivo sem_endereco (não vai para a Receita)', () => {
+    const p = montarPlanoEmissao({ previa: previa(), config: RTC });
+    expect(p.notas).toEqual([]);
+    expect(p.puladas).toEqual([{ referencia: 'c1', motivo: 'sem_endereco', valorCents: 100 }]);
+    expect(p.bloqueios).toEqual(['sem_notas']);
+  });
+
+  it('com endereço: emite normalmente', () => {
+    const comEndereco = previa();
+    (comEndereco.notas[0] as { endereco: unknown }).endereco = endereco;
+    const p = montarPlanoEmissao({ previa: comEndereco, config: RTC });
+    expect(p.notas.map((n) => n.tomadorCpf)).toEqual(['52998224725']);
+    expect(p.puladas).toEqual([]);
+  });
+
+  it('leiaute de produção: sem endereço continua emitindo (só CPF e nome)', () => {
+    expect(montarPlanoEmissao({ previa: previa(), config: CONFIG }).notas).toHaveLength(1);
   });
 });

@@ -105,6 +105,8 @@ const ENV_COMPLETO: NfseEnv = {
   NFSE_MUNICIPIO_IBGE: IBGE,
   NFSE_CERT_BASE64: '',
   NFSE_CERT_PASSWORD: '',
+  // Leiaute de produção nos testes gerais; o RTC tem testes próprios.
+  NFSE_LEIAUTE_DPS: 'producao-2026-02',
 };
 
 function env(extra: NfseEnv = {}): NfseEnv {
@@ -725,7 +727,7 @@ describe('endereço fiscal do tomador na DPS (aperture-xdylg)', () => {
     for (const e of lista) {
       const { xml } = await caller().xml({ id: e.id, tipo: 'dps' });
       if (!xml) throw new Error('sem XML');
-      expect(validateDps(xml).errors).toEqual([]);
+      expect(validateDpsDoLeiaute(xml).errors).toEqual([]);
       if (e.tomadorCpf === CPF_A) {
         expect(xml).toContain(
           '<end><endNac><cMun>3106200</cMun><CEP>30130010</CEP></endNac><xLgr>Av. Afonso Pena</xLgr><nro>1000</nro><xCpl>Apto 12</xCpl><xBairro>Centro</xBairro></end>',
@@ -734,6 +736,27 @@ describe('endereço fiscal do tomador na DPS (aperture-xdylg)', () => {
         expect(xml).not.toContain('<end>');
       }
     }
+  });
+});
+describe('leiaute RTC (produção restrita): endereço obrigatório', () => {
+  it('sem endereço a nota é PULADA (sem_endereco); com endereço vai com toma/end e passa no pack RTC', async () => {
+    await seedDoisTomadores();
+    await sql`UPDATE recebedores SET endereco_cep = '30130003', endereco_logradouro = 'Av. Afonso Pena',
+      endereco_numero = '1212', endereco_bairro = 'Centro', endereco_cidade = 'Belo Horizonte',
+      endereco_uf = 'MG', endereco_codigo_municipio_ibge = '3106200' WHERE cpf_titular = ${CPF_A}`.execute(
+      testDb.db,
+    );
+    const rtc = caller({ env: env({ NFSE_LEIAUTE_DPS: 'rtc-2026-11' }) });
+    const plano = await rtc.planoEmissao({ mes: MES });
+    expect(plano.notas.map((n) => n.tomadorCpf)).toEqual([CPF_A]);
+    expect(plano.puladas).toMatchObject([{ motivo: 'sem_endereco', valorCents: 500 }]);
+    expect((await emitir(rtc)).resultados.map((r) => [r.tomadorCpf, r.resultado])).toEqual([
+      [CPF_A, 'autorizada'],
+    ]);
+    const [enviada] = posts();
+    expect(enviada?.xml).toContain('</tpEmit><finNFSe>0</finNFSe>');
+    expect(enviada?.xml).toContain('<end><endNac><cMun>3106200</cMun><CEP>30130003</CEP></endNac>');
+    expect(validateDpsDoLeiaute(enviada?.xml ?? '').errors).toEqual([]);
   });
 });
 

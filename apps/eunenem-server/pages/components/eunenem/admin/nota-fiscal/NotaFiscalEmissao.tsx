@@ -54,6 +54,7 @@ const MOTIVOS_PULADA: Record<string, string> = {
   nome_ausente: "Nome do titular ausente",
   nomes_divergentes_no_cpf: "Nomes divergentes para o mesmo CPF",
   tomador_cpf_nome: "CPF/nome do tomador inválido",
+  sem_endereco: "Sem endereço do titular (obrigatório no leiaute da Reforma)",
 };
 
 const TEXTO_STATUS: Record<Emissao["status"], string> = {

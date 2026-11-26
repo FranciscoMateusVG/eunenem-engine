@@ -182,7 +182,13 @@ export function montarPlanoEmissao(input: {
   }
   if (config.ambiente.valor === '1' && !config.emissaoProducaoLiberada) bloqueios.add('producao_nao_liberada');
 
-  const recalculadas = agrupar(previa);
+  // Leiaute RTC: com IBS/CBS, a Receita exige o endereço do tomador (E0239,
+  // smoke 26/11/2026). Sem endereço a nota seria recusada com certeza: vira
+  // pendência pulada (aparece na confirmação e em "cadastros incompletos").
+  const exigeEndereco = config.leiauteDps.valor === 'rtc-2026-11';
+  const agrupadas = agrupar(previa);
+  const semEndereco = exigeEndereco ? agrupadas.filter((n) => !n.endereco) : [];
+  const recalculadas = exigeEndereco ? agrupadas.filter((n) => n.endereco) : agrupadas;
   const fixada = fixadas.length > 0;
   const { divergencias, novas } = compararComFixadas(recalculadas, fixadas);
   if (divergencias.length > 0) bloqueios.add('competencia_divergente');
@@ -214,7 +220,10 @@ export function montarPlanoEmissao(input: {
   };
   return {
     ...base,
-    puladas: pendenciasDaPrevia(previa),
+    puladas: [
+      ...pendenciasDaPrevia(previa),
+      ...semEndereco.map((n) => ({ referencia: n.campanhas.join(','), motivo: 'sem_endereco', valorCents: n.valorCents })),
+    ],
     divergencias,
     impressao: impressaoDoPlano({ ...base, prestadorCnpj: config.prestadorCnpj, camposFiscais }),
     bloqueios: [...bloqueios],
