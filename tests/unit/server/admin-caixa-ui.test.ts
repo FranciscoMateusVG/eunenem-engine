@@ -3,6 +3,10 @@ import { describe, expect, it } from 'vitest';
 import { resolveRoute } from '../../../apps/eunenem-server/pages/App.js';
 import { CaixaPainel } from '../../../apps/eunenem-server/pages/components/eunenem/admin/caixa/CaixaPainel.js';
 import { PagamentosTabs } from '../../../apps/eunenem-server/pages/components/eunenem/admin/PagamentosTabs.js';
+import {
+  periodoResgatesDaUrl,
+  ResgatesEfetuadosTabela,
+} from '../../../apps/eunenem-server/pages/components/eunenem/admin/ResgatesEfetuados.js';
 import { centavosParaReais } from '../../../apps/eunenem-server/pages/lib/caixaCsv.js';
 import { bucketsDoPeriodoCaixa } from '../../../apps/eunenem-server/pages/lib/caixaPeriodo.js';
 
@@ -21,6 +25,19 @@ const ZERO = {
   brutoCents: 0,
   estornosCents: 0,
   liquidoCents: 0,
+};
+
+const RESGATE = {
+  idRepasse: 'rep-1',
+  idCampanha: 'camp-1',
+  campanhaTitulo: 'Chá da Ana',
+  recebedorNome: 'Ana Souza',
+  amountCents: 5_000,
+  status: 'enviado_ao_banco',
+  metodo: 'inter',
+  bankTransferRef: null,
+  // 23:30 em SP de 12/08 = 02:30Z de 13/08: a data mostrada é a de SP.
+  efetuadoEm: '2033-08-13T02:30:00.000Z',
 };
 
 function painel(sobre: Record<string, unknown> = {}) {
@@ -60,6 +77,7 @@ function painel(sobre: Record<string, unknown> = {}) {
       totalCents: 5_000,
       repasses: 1,
       porMetodo: { inter: { cents: 5_000, repasses: 1 }, manual: { cents: 0, repasses: 0 } },
+      resgates: [RESGATE],
     },
     pendentes: {
       aprovadosNaoTransferidos: { cents: 3_000, repasses: 1 },
@@ -83,7 +101,7 @@ function painel(sobre: Record<string, unknown> = {}) {
       totalIndependente: { entradasBrutasCents: 16_233, estornosCents: 0, saidasCents: 5_000 },
       somaSerie: { entradasBrutasCents: 16_233, estornosCents: 0, saidasCents: 5_000 },
       totalPagoDosPagamentosCents: 16_233,
-      totalDosRepassesCents: 5_000,
+      totalNoLivroDosResgatesCents: 5_000,
       diferencas: {
         entradasBrutasCents: 0,
         estornosCents: 0,
@@ -175,5 +193,49 @@ describe('Fluxo de caixa — texto da tela', () => {
     });
     expect(t).toContain('não fecham ao centavo');
     expect(t).not.toContain('Fecha ao centavo');
+  });
+});
+
+describe('aperture-9nmdo — saídas = resgates aceitos pelo banco', () => {
+  it('caixa lista os resgates do período, soma = Saiu, e leva à tela de resgates no mesmo período', () => {
+    const html = renderToStaticMarkup(
+      React.createElement(CaixaPainel, { data: painel() as never, aoBaixarCsv: async () => {} }),
+    );
+    const t = render(painel());
+    expect(t).toContain('Resgates no período');
+    expect(t).toContain('1 resgate(s) aceito(s) pelo banco');
+    expect(t).toContain('12/08/2033');
+    expect(t).toContain('Chá da Ana');
+    expect(t).toContain('Ana Souza');
+    expect(t).toContain('Enviado ao banco');
+    expect(t).toContain('Total dos resgates R$ 50,00');
+    expect(t).toContain('1 resgate(s) · total R$ 50,00');
+    expect(html).toContain('href="/admin/repasses/rep-1"');
+    expect(html).toContain('href="/admin/repasses?de=2033-08-01&amp;ate=2033-09-01"');
+  });
+
+  it('tabela compartilhada: vazia diz isso; manual mostra a referência bancária', () => {
+    const vazio = renderToStaticMarkup(
+      React.createElement(ResgatesEfetuadosTabela, { resgates: [], totalCents: 0 }),
+    );
+    expect(vazio).toContain('Nenhum resgate aceito pelo banco neste período.');
+    const manual = renderToStaticMarkup(
+      React.createElement(ResgatesEfetuadosTabela, {
+        resgates: [{ ...RESGATE, status: 'aprovado', metodo: 'manual', bankTransferRef: 'TED-9' }],
+        totalCents: 5_000,
+      }),
+    );
+    expect(manual).toContain('Manual · TED-9');
+  });
+
+  it('período da tela de resgates vem da URL (de inclusivo, ate exclusivo) ou fica desligado', () => {
+    expect(periodoResgatesDaUrl('?de=2033-08-01&ate=2033-09-01')).toEqual({
+      de: '2033-08-01',
+      ate: '2033-09-01',
+    });
+    expect(periodoResgatesDaUrl('')).toBeNull();
+    expect(periodoResgatesDaUrl('?de=2033-08-01')).toBeNull();
+    expect(periodoResgatesDaUrl('?de=2033-09-01&ate=2033-08-01')).toBeNull();
+    expect(periodoResgatesDaUrl('?de=xx&ate=2033-08-01')).toBeNull();
   });
 });
