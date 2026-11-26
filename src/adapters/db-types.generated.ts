@@ -90,6 +90,7 @@ export interface CampanhaPrivacidade {
 }
 
 export interface Campanhas {
+  arquivada_em: Timestamp | null;
   criada_em: Generated<Timestamp>;
   id: string;
   id_plataforma: string;

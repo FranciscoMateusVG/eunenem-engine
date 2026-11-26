@@ -53,6 +53,8 @@ export const E2E_SPEC_SAFETY = [
   { file: 'acr3t-switcher-mobile.spec.ts', safety: 'non-payment' },
   // Owner thanks a seeded giver; no-op email transport locally, never pays.
   { file: 'bqvb5-agradecer-presentes.spec.ts', safety: 'non-payment' },
+  // Owner archives/unarchives a list; visitor only reads the public page.
+  { file: 'bqvb5-arquivar-campanha.spec.ts', safety: 'non-payment' },
   // Owner adds a custom gift on a phone viewport; never pays.
   { file: 'bqvb5-personalizado-mobile.spec.ts', safety: 'non-payment' },
   // Guest page CTA + signup first touch; seeds a campaign, never pays.
