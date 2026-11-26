@@ -327,4 +327,50 @@ describe('aperture-xdylg — dados fiscais do recebedor', () => {
     expect(ativo?.dadosRecebedor).toMatchObject({ chavePix: 'nova@exemplo.com' });
     expect(ativo?.dadosRecebedor).not.toHaveProperty('enderecoFiscal');
   });
+
+  it('barreira simétrica: endereço completado no meio de uma edição bancária → CONFLICT, endereço preservado', async () => {
+    const contar = await buildRig();
+    await contar.caller.recebedor.atualizar({ idCampanha: contar.idCampanha, dadosRecebedor: PIX });
+    let total = 0;
+    const lerContando = contar.recebedorRepository.findAtivoByCampanhaId.bind(
+      contar.recebedorRepository,
+    );
+    contar.recebedorRepository.findAtivoByCampanhaId = async (...args) => {
+      total += 1;
+      return lerContando(...args);
+    };
+    await contar.caller.recebedor.atualizar({
+      idCampanha: contar.idCampanha,
+      dadosRecebedor: { ...PIX, chavePix: 'nova@exemplo.com' },
+    });
+
+    const rig = await buildRig();
+    await rig.caller.recebedor.atualizar({ idCampanha: rig.idCampanha, dadosRecebedor: PIX });
+    const repo = rig.recebedorRepository;
+    const original = repo.findAtivoByCampanhaId.bind(repo);
+    let leituras = 0;
+    repo.findAtivoByCampanhaId = async (...args) => {
+      leituras += 1;
+      if (leituras === total) {
+        // Outra aba completa o endereço logo antes da releitura do caso de uso.
+        repo.findAtivoByCampanhaId = original;
+        await rig.caller.recebedor.atualizarEnderecoFiscal({
+          idCampanha: rig.idCampanha,
+          enderecoFiscal: ENDERECO,
+        });
+      }
+      return original(...args);
+    };
+    await expect(
+      rig.caller.recebedor.atualizar({
+        idCampanha: rig.idCampanha,
+        dadosRecebedor: { ...PIX, chavePix: 'nova@exemplo.com' },
+      }),
+    ).rejects.toMatchObject({ code: 'CONFLICT' });
+    const ativo = await original(rig.idCampanha as never);
+    expect(ativo?.dadosRecebedor).toMatchObject({
+      chavePix: PIX.chavePix,
+      enderecoFiscal: { cep: '30130010' },
+    });
+  });
 });

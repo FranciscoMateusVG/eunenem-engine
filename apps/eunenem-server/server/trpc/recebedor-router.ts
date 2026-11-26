@@ -1014,7 +1014,9 @@ const recebedorAtualizarProcedure = t.procedure
           clock: ctx.deps.clock,
           observability: ctx.deps.observability,
         },
-        { idCampanha, dadosRecebedor: input.dadosRecebedor },
+        // aperture-xdylg — CAS: o endereço preservado acima veio DESTE ativo;
+        // se outra operação trocou o recebedor no meio, recusa (CONFLICT).
+        { idCampanha, dadosRecebedor: input.dadosRecebedor, idRecebedorEsperado: ativo.id },
       );
       // aperture-kj9el #4b — a full edit also clears any pending marker.
       await ctx.deps.resgatePendenteRepository.limparPendente(idCampanha);
