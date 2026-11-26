@@ -70,11 +70,21 @@ export function valorUnitarioPresenteCentsValido(cents: number): boolean {
  *
  *   "1.500,00" → 1500      "1.234,56" → 1234.56
  *   "2.000"    → 2000      "50,00"    → 50        "" / "abc" → 0
+ *   "50.00"    → 50        "50.5"     → 50.5      (phone keypad decimal point)
  */
 export function parseValorBRL(input: string): number {
   const trimmed = input.trim();
   // Accept only complete pt-BR money inputs. In particular, reject a third
   // decimal digit instead of rounding it into a different write value.
+  // aperture-bqvb5 — phone keypads (inputMode="decimal") often only offer
+  // "." as the decimal key. A dot followed by one or two digits can never be a
+  // thousand separator (those groups are always three digits), so read it as
+  // the decimal point: "50.00" → 50, "1234.56" → 1234.56.
+  const pontoDecimal = /^(\d+)\.(\d{1,2})$/.exec(trimmed);
+  if (pontoDecimal) {
+    const decimal = Number(`${pontoDecimal[1]}.${pontoDecimal[2]}`);
+    return Number.isFinite(decimal) ? decimal : 0;
+  }
   if (!/^(?:\d+|\d{1,3}(?:\.\d{3})+)(?:,\d{1,2})?$/.test(trimmed)) return 0;
   const parsed = Number(trimmed.replace(/\./g, '').replace(',', '.'));
   return Number.isFinite(parsed) ? parsed : 0;
