@@ -23,6 +23,7 @@ import {
 } from "@/lib/mocks/bancarios";
 import { trpc } from "@/lib/trpc";
 import { AgradecerModal } from "./AgradecerModal";
+import { DadosFiscaisModal } from "./DadosFiscaisModal";
 // aperture-9abwt: deep-leaf import (zod-only, pg-free) — same rationale as
 // BancariosBody.tsx (the barrel drags the Postgres adapter's `pg` import
 // into the browser bundle).
@@ -798,6 +799,7 @@ function TransferModal({
   open,
   saldo,
   hasRecebedor,
+  dadosFiscaisCompletos,
   podeCadastrarRecebedor,
   idCampanha,
   onClose,
@@ -807,6 +809,8 @@ function TransferModal({
   saldo: number;
   /** Drives the onboarding branch. Sourced from useStubCampanhaIdForSlug. */
   hasRecebedor: boolean;
+  /** aperture-xdylg — sem endereço fiscal, o resgate pede os dados antes. */
+  dadosFiscaisCompletos: boolean;
   /** aperture-1z18g — recebedor:gerenciar; without it the onboarding form is hidden. */
   podeCadastrarRecebedor: boolean;
   /** Required to submit recebedor.criar (the input schema demands it). */
@@ -852,6 +856,36 @@ function TransferModal({
         onClose={onClose}
         solicitarState={solicitarState}
       />
+    );
+  }
+
+  // aperture-xdylg — CPF + endereço fiscal são obrigatórios para resgatar.
+  if (!dadosFiscaisCompletos) {
+    if (podeCadastrarRecebedor && idCampanha) {
+      return <DadosFiscaisModal idCampanha={idCampanha} onClose={onClose} />;
+    }
+    return (
+      <>
+        <div className="ex-scrim is-open" onClick={onClose} />
+        <div className="ex-modal" role="dialog" aria-label="Dados fiscais pendentes">
+          <header className="ex-modal-hd">
+            <div>
+              <span className="ex-caps">solicitar transferência</span>
+              <h3 className="ex-modal-title">dados fiscais pendentes</h3>
+            </div>
+            <button type="button" className="ex-icon-btn" onClick={onClose} aria-label="Fechar">
+              <IconClose />
+            </button>
+          </header>
+          <p className="ex-modal-text">
+            Falta o endereço do titular da conta de recebimento. Peça para quem criou a
+            campanha completar os dados antes de solicitar a transferência.
+          </p>
+          <button type="button" className="ex-btn-primary block" onClick={onClose}>
+            entendi
+          </button>
+        </div>
+      </>
     );
   }
 
@@ -1652,6 +1686,7 @@ function PresentesBodyConteudo(props: PainelSectionBodyProps) {
   const {
     idCampanha,
     hasRecebedor,
+    dadosFiscaisCompletos,
     isLoading: campanhaLoading,
     error: campanhaError,
   } = useStubCampanhaIdForSlug(props.slug);
@@ -1912,6 +1947,7 @@ function PresentesBodyConteudo(props: PainelSectionBodyProps) {
         open={transferOpen}
         saldo={summary.disponivel}
         hasRecebedor={hasRecebedor}
+        dadosFiscaisCompletos={dadosFiscaisCompletos}
         podeCadastrarRecebedor={acesso.pode("recebedor:gerenciar")}
         idCampanha={idCampanha}
         onClose={() => {

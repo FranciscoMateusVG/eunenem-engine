@@ -125,6 +125,21 @@ import {
   listarDespesasManuais,
 } from "../admin-despesas-manuais.js";
 import { carregarPreviaMensal, MesFuturoError } from "../nfse/previa-mensal.js";
+import { listarCadastrosIncompletos } from "../nfse/pendencias-cadastro.js";
+import {
+  cancelarEmissao,
+  carregarPlanoEmissao,
+  consultarEmissao,
+  EmissaoBloqueadaError,
+  type EmissaoNfse,
+  EmissaoNaoEncontradaError,
+  emitirCompetencia,
+  listarEmissaoPorId,
+  listarEmissoes,
+  OperacaoInvalidaError,
+  PlanoMudouError,
+  xmlDaEmissao,
+} from "../nfse/emissao.js";
 import {
   AdminPaymentAdministratorsSchema,
   AdminPaymentEvidenceSchema,
@@ -4756,6 +4771,105 @@ const NotaFiscalPreviaSchema = z.object({
 });
 export type NotaFiscalPreviaDTO = z.infer<typeof NotaFiscalPreviaSchema>;
 
+const NotaFiscalPlanoSchema = z.object({
+  mes: MesSchema,
+  rotulo: z.string(),
+  ambiente: z.enum(["1", "2"]),
+  serie: z.string(),
+  notas: z.array(
+    z.object({
+      tomadorCpf: z.string(),
+      tomadorNome: z.string(),
+      valorCents: z.number().int(),
+      campanhas: z.array(z.string()),
+      /** aperture-xdylg — endereço que vai na DPS, se houver. */
+      endereco: z
+        .object({ cMun: z.string(), cep: z.string(), logradouro: z.string(), numero: z.string(), complemento: z.string().nullable().optional(), bairro: z.string() })
+        .nullable(),
+    }),
+  ),
+  puladas: z.array(z.object({ referencia: z.string(), motivo: z.string(), valorCents: z.number().int() })),
+  fixada: z.boolean(),
+  divergencias: z.array(z.string()),
+  impressao: z.string(),
+  quantidade: z.number().int().nonnegative(),
+  totalCents: z.number().int(),
+  bloqueios: z.array(z.string()),
+  avisos: z.array(z.string()),
+  camposFiscais: z.array(NotaFiscalCampoSchema),
+});
+
+const NotaFiscalEmissaoSchema = z.object({
+  id: z.string(),
+  ambiente: z.enum(["1", "2"]),
+  competencia: z.string(),
+  tomadorCpf: z.string(),
+  tomadorNome: z.string(),
+  valorCents: z.number().int(),
+  serie: z.string(),
+  nDps: z.string(),
+  idDps: z.string(),
+  status: z.enum(["pendente", "enviando", "incerta", "rejeitada", "autorizada", "cancelada"]),
+  tentativas: z.number().int(),
+  chaveAcesso: z.string().nullable(),
+  numeroNfse: z.string().nullable(),
+  erros: z.array(z.object({ codigo: z.string(), descricao: z.string(), complemento: z.string().nullable() })).nullable(),
+  cancelamentoStatus: z.enum(["incerto", "rejeitado"]).nullable(),
+  cancelamentoMotivo: z.enum(["1", "2", "9"]).nullable(),
+  cancelamentoTexto: z.string().nullable(),
+  criadaEm: z.string().datetime(),
+  enviadaEm: z.string().datetime().nullable(),
+  autorizadaEm: z.string().datetime().nullable(),
+  canceladaEm: z.string().datetime().nullable(),
+  temDpsXml: z.boolean(),
+  temNfseXml: z.boolean(),
+});
+export type NotaFiscalEmissaoDTO = z.infer<typeof NotaFiscalEmissaoSchema>;
+
+function emissaoDTO(e: EmissaoNfse): NotaFiscalEmissaoDTO {
+  return {
+    id: e.id,
+    ambiente: e.ambiente,
+    competencia: e.competencia,
+    tomadorCpf: e.tomadorCpf,
+    tomadorNome: e.tomadorNome,
+    valorCents: e.valorCents,
+    serie: e.serie,
+    nDps: e.nDps,
+    idDps: e.idDps,
+    status: e.status,
+    tentativas: e.tentativas,
+    chaveAcesso: e.chaveAcesso,
+    numeroNfse: e.numeroNfse,
+    erros: e.erros ? [...e.erros] : null,
+    cancelamentoStatus: e.cancelamentoStatus,
+    cancelamentoMotivo: e.cancelamentoMotivo,
+    cancelamentoTexto: e.cancelamentoTexto,
+    criadaEm: e.criadaEm.toISOString(),
+    enviadaEm: e.enviadaEm?.toISOString() ?? null,
+    autorizadaEm: e.autorizadaEm?.toISOString() ?? null,
+    canceladaEm: e.canceladaEm?.toISOString() ?? null,
+    temDpsXml: e.temDpsXml,
+    temNfseXml: e.temNfseXml,
+  };
+}
+
+function depsEmissao(deps: TrpcContext["deps"]) {
+  return { db: deps.db, config: deps.nfse, clienteSefin: deps.nfseClienteSefin, clock: deps.clock };
+}
+
+function erroEmissao(error: unknown): never {
+  if (error instanceof TRPCError) throw error;
+  if (error instanceof MesFuturoError) throw new TRPCError({ code: "BAD_REQUEST", message: error.message });
+  if (error instanceof EmissaoBloqueadaError) {
+    throw new TRPCError({ code: "PRECONDITION_FAILED", message: `${error.message}:${error.bloqueios.join(",")}` });
+  }
+  if (error instanceof PlanoMudouError) throw new TRPCError({ code: "CONFLICT", message: error.message });
+  if (error instanceof EmissaoNaoEncontradaError) throw new TRPCError({ code: "NOT_FOUND", message: error.message });
+  if (error instanceof OperacaoInvalidaError) throw new TRPCError({ code: "PRECONDITION_FAILED", message: error.message });
+  return receitaBadRequest(error);
+}
+
 const notaFiscalRouter = t.router({
   previaMensal: adminProcedure
     .input(z.object({ mes: MesSchema }))
@@ -4813,7 +4927,129 @@ const notaFiscalRouter = t.router({
                 },
       };
     }),
+
+  /* ── Emissão REAL (aperture-wp6j6) ─────────────────────────────────────
+   * Só por clique do admin, com confirmação: o cliente reenvia a quantidade
+   * e o total que viu no plano; se o servidor recalcular outra coisa, nada é
+   * enviado. Sem job/cron. XML só sai por `xml`, nunca na listagem.
+   * ──────────────────────────────────────────────────────────────────── */
+  planoEmissao: adminProcedure
+    .input(z.object({ mes: MesSchema }))
+    .output(NotaFiscalPlanoSchema)
+    .query(async ({ ctx, input }) => {
+      try {
+        const p = await carregarPlanoEmissao(depsEmissao(ctx.deps), { platformId: ID_PLATAFORMA_EUNENEM, mes: input.mes });
+        return { ...p, notas: p.notas.map((n) => ({ ...n, campanhas: [...n.campanhas] })), divergencias: [...p.divergencias], puladas: [...p.puladas], bloqueios: [...p.bloqueios], avisos: [...p.avisos], camposFiscais: [...p.camposFiscais] };
+      } catch (error: unknown) {
+        return erroEmissao(error);
+      }
+    }),
+
+  emissoes: adminProcedure
+    .input(z.object({ mes: MesSchema }))
+    .output(z.array(NotaFiscalEmissaoSchema))
+    .query(async ({ ctx, input }) => {
+      const lista = await listarEmissoes(ctx.deps.db, { ambiente: ctx.deps.nfse.ambiente.valor, mes: input.mes });
+      return lista.map(emissaoDTO);
+    }),
+
+  emitir: adminProcedure
+    .input(
+      z.object({
+        mes: MesSchema,
+        /** Impressão (sha256) do plano que o admin viu na confirmação. */
+        confirmacao: z.object({ impressao: z.string().regex(/^[0-9a-f]{64}$/) }),
+      }),
+    )
+    .output(z.object({ resultados: z.array(z.object({ tomadorCpf: z.string(), resultado: z.string() })) }))
+    .mutation(async ({ ctx, input }) => {
+      try {
+        const r = await emitirCompetencia(depsEmissao(ctx.deps), {
+          platformId: ID_PLATAFORMA_EUNENEM,
+          mes: input.mes,
+          autorId: ctx.adminUsuario.id,
+          confirmacao: input.confirmacao,
+        });
+        return { resultados: [...r.resultados] };
+      } catch (error: unknown) {
+        return erroEmissao(error);
+      }
+    }),
+
+  consultar: adminProcedure
+    .input(z.object({ id: z.string().uuid() }))
+    .output(NotaFiscalEmissaoSchema)
+    .mutation(async ({ ctx, input }) => {
+      try {
+        return emissaoDTO(await consultarEmissao(depsEmissao(ctx.deps), input));
+      } catch (error: unknown) {
+        return erroEmissao(error);
+      }
+    }),
+
+  cancelar: adminProcedure
+    .input(
+      z.object({
+        id: z.string().uuid(),
+        motivo: z.enum(["1", "2", "9"]),
+        // TSMotivo: 15 a 255, Latin-1 imprimível sem espaço nas pontas.
+        texto: z.string().trim().min(15).max(255).regex(/^[!-ÿ](?:[ -ÿ]*[!-ÿ])?$/),
+        /** O admin redigita a chave de acesso na confirmação. */
+        confirmacaoChave: z.string().regex(/^\d{50}$/),
+      }),
+    )
+    .output(NotaFiscalEmissaoSchema)
+    .mutation(async ({ ctx, input }) => {
+      try {
+        const atual = (await listarEmissaoPorId(ctx.deps.db, input.id)) ?? null;
+        if (atual === null) throw new EmissaoNaoEncontradaError();
+        if (atual.chaveAcesso !== input.confirmacaoChave) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "nfse_confirmacao_nao_confere" });
+        }
+        return emissaoDTO(
+          await cancelarEmissao(depsEmissao(ctx.deps), {
+            id: input.id,
+            motivo: input.motivo,
+            texto: input.texto,
+            autorId: ctx.adminUsuario.id,
+          }),
+        );
+      } catch (error: unknown) {
+        return erroEmissao(error);
+      }
+    }),
+
+  xml: adminProcedure
+    .input(z.object({ id: z.string().uuid(), tipo: z.enum(["dps", "nfse", "cancelamento"]) }))
+    .output(z.object({ xml: z.string().nullable() }))
+    .query(async ({ ctx, input }) => {
+      try {
+        return { xml: await xmlDaEmissao(ctx.deps.db, input) };
+      } catch (error: unknown) {
+        return erroEmissao(error);
+      }
+    }),
+
+  /** aperture-xdylg — listas com taxa no mês e cadastro fiscal incompleto (sem CPF na saída). */
+  cadastrosIncompletos: adminProcedure
+    .input(z.object({ mes: MesSchema }))
+    .output(
+      z.array(
+        z.object({
+          campanhaId: z.string(),
+          campanhaTitulo: z.string(),
+          responsaveis: z.array(z.object({ nome: z.string(), email: z.string() })),
+          taxaCents: z.number().int(),
+          motivos: z.array(z.enum(["sem_recebedor", "cpf_invalido", "nome_ausente", "sem_endereco"])),
+        }),
+      ),
+    )
+    .query(async ({ ctx, input }) => {
+      const lista = await listarCadastrosIncompletos(ctx.deps.db, { platformId: ID_PLATAFORMA_EUNENEM, mes: input.mes });
+      return lista.map((l) => ({ ...l, responsaveis: [...l.responsaveis], motivos: [...l.motivos] }));
+    }),
 });
+
 
 // ────────────────────────────────────────────────────────────────────
 //  despesas.* — aba Despesas (aperture-5qoz0 PR3). Tarifas OBSERVADAS no

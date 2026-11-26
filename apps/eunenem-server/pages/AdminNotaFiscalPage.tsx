@@ -2,20 +2,22 @@ import { keepPreviousData } from "@tanstack/react-query";
 import { type FormEvent, useCallback, useEffect, useId, useState } from "react";
 import { AdminShell } from "@/components/eunenem/admin/AdminShell";
 import { DddBadge } from "@/components/eunenem/admin/DddBadge";
+import { CadastrosIncompletos } from "@/components/eunenem/admin/nota-fiscal/CadastrosIncompletos";
+import { NotaFiscalEmissao } from "@/components/eunenem/admin/nota-fiscal/NotaFiscalEmissao";
 import { NotaFiscalPainel } from "@/components/eunenem/admin/nota-fiscal/NotaFiscalPainel";
 import { PagamentosTabs } from "@/components/eunenem/admin/PagamentosTabs";
 import { isMes, mesAtualSP, mesFromSearch, mesToSearch } from "@/lib/notaFiscalMes";
 import { trpc } from "@/lib/trpc.js";
 
 /**
- * /admin/pagamentos/nota-fiscal — PRÉVIA da NFS-e mensal (aperture-dh1k7).
+ * /admin/pagamentos/nota-fiscal — prévia (aperture-dh1k7) e emissão real
+ * (aperture-wp6j6) da NFS-e mensal.
  *
  * O operador escolhe um mês e vê uma prévia por CPF de recebedor,
- * sem adicional de cartão, com pendências de identidade e XML.
- *
- * NÃO EXISTE ENVIO: nenhum botão desta página emite, envia ou cancela nota,
- * e nada é gravado. O mês vive na query string (`?mes=YYYY-MM`) e é lido no
- * cliente depois de hidratar.
+ * sem adicional de cartão, com pendências de identidade e XML. A prévia não
+ * envia nada. O envio só acontece na seção "Emissão no Sistema Nacional",
+ * por clique em "Emitir NFS-e" seguido de confirmação. O mês vive na query
+ * string (`?mes=YYYY-MM`) e é lido no cliente depois de hidratar.
  */
 export function AdminNotaFiscalPage() {
   const [mes, setMes] = useState<string | null>(null);
@@ -43,7 +45,7 @@ export function AdminNotaFiscalPage() {
         { label: "pagamentos", href: "/admin/pagamentos" },
         { label: "nota fiscal" },
       ]}
-      bcContext="prévia da NFS-e mensal — nada é enviado"
+      bcContext="NFS-e mensal — prévia e emissão manual"
     >
       <section className="space-y-6">
         <PagamentosTabs active="nota-fiscal" />
@@ -55,15 +57,15 @@ export function AdminNotaFiscalPage() {
             </p>
           </div>
           <h1 className="text-3xl font-semibold tracking-tight text-ink">
-            Prévia da NFS-e mensal
+            NFS-e mensal
           </h1>
           <div
             role="note"
             className="max-w-3xl rounded-md border border-plum/40 bg-plum/5 p-4 text-[14px] leading-relaxed text-ink"
           >
-            <strong className="font-semibold">Isto é uma prévia.</strong> Nenhuma nota é emitida,
-            enviada ao Sistema Nacional NFS-e ou cancelada a partir desta tela, e nada é gravado. A
-            série 99999 e o número exibidos existem só na prévia.
+            <strong className="font-semibold">A prévia abaixo não envia nada.</strong> A série 89999 e
+            o número exibidos nela existem só na prévia. Notas só são emitidas ou canceladas na seção
+            “Emissão no Sistema Nacional”, por clique e com confirmação.
           </div>
         </header>
 
@@ -80,6 +82,10 @@ export function AdminNotaFiscalPage() {
             carregando…
           </p>
         ) : null}
+
+        {mes && query.data ? <NotaFiscalEmissao mes={mes} mesFechado={query.data.situacao === "fechado"} /> : null}
+
+        {mes ? <CadastrosIncompletos mes={mes} /> : null}
 
         {!query.error && query.data ? (
           <div

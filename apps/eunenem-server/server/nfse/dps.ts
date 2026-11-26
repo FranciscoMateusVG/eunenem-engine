@@ -17,8 +17,12 @@
 export const NFSE_NAMESPACE = 'http://www.sped.fazenda.gov.br/nfse';
 export const DPS_VERSAO = '1.01';
 
-/** Série de prévia: nunca colide com a série real (que começa em 00001). */
-export const SERIE_DPS_PREVIA = '99999';
+/**
+ * Série de prévia: nunca colide com a série real (NFSE_SERIE recusa 89999).
+ * Não é 9xxxx porque o pack RTC (produção restrita 20261124) reserva
+ * 90000–99999, e a prévia tem de ser válida no leiaute do ambiente.
+ */
+export const SERIE_DPS_PREVIA = '89999';
 
 export type TipoAmbiente = '1' | '2';
 export type OpSimpNac = '1' | '2' | '3';
@@ -27,7 +31,20 @@ export type RegEspTrib = '0' | '1' | '2' | '3' | '4' | '5' | '6' | '9';
 export type TribISSQN = '1' | '2' | '3' | '4';
 export type TpRetISSQN = '1' | '2' | '3';
 
+/**
+ * Leiaute da DPS (aperture-wp6j6, smoke de homologação 26/11/2026):
+ *   - 'producao-2026-02': pack v1.01-20260209 ("documentação atual",
+ *     produção) — IBSCBS com finNFSe/indDest dentro e CST/cClassTrib em gIBSCBS.
+ *   - 'rtc-2026-11': pack de produção restrita 20261124 (Reforma Tributária) —
+ *     finNFSe depois de tpEmit, indDest depois de toma, CST/cClassTrib direto
+ *     em IBSCBS/valores/trib. A produção restrita recusa o leiaute antigo
+ *     (E1235).
+ */
+export type LeiauteDps = 'producao-2026-02' | 'rtc-2026-11';
+
 export interface DpsInput {
+  /** Padrão: 'producao-2026-02'. */
+  readonly leiaute?: LeiauteDps;
   readonly tpAmb: TipoAmbiente;
   /** AAAA-MM-DDThh:mm:ss±hh:mm */
   readonly dhEmi: string;
@@ -46,7 +63,7 @@ export interface DpsInput {
     readonly regApTribSN: RegApTribSN | null;
     readonly regEspTrib: RegEspTrib;
   };
-  readonly tomador?: { readonly cpf: string; readonly nome: string };
+  readonly tomador?: { readonly cpf: string; readonly nome: string; readonly endereco?: EnderecoTomador };
   readonly ibscbs?: boolean;
   readonly servico: {
     readonly cLocPrestacao: string;
@@ -64,6 +81,29 @@ export interface DpsInput {
     readonly pAliq: string | null;
     readonly totTrib: TotTrib;
   };
+}
+
+/** TCEndereco com endNac (endereço no Brasil). */
+export interface EnderecoTomador {
+  /** IBGE do município, 7 dígitos. */
+  readonly cMun: string;
+  /** 8 dígitos. */
+  readonly cep: string;
+  readonly logradouro: string;
+  readonly numero: string;
+  readonly complemento?: string | null;
+  readonly bairro: string;
+}
+
+function enderecoXml(e: EnderecoTomador): string {
+  return el(
+    'end',
+    el('endNac', txt('cMun', e.cMun) + txt('CEP', e.cep)) +
+      txt('xLgr', e.logradouro) +
+      txt('nro', e.numero) +
+      (e.complemento ? txt('xCpl', e.complemento) : '') +
+      txt('xBairro', e.bairro),
+  );
 }
 
 /**
@@ -222,6 +262,7 @@ export function montarDpsXml(input: DpsInput): { readonly xml: string; readonly 
     nDPS: input.nDPS,
   });
   const { prestador, servico, valores } = input;
+  const rtc = input.leiaute === 'rtc-2026-11';
 
   const prest = el(
     'prest',
@@ -240,7 +281,12 @@ export function montarDpsXml(input: DpsInput): { readonly xml: string; readonly 
     el('locPrest', txt('cLocPrestacao', servico.cLocPrestacao)) +
       el(
         'cServ',
-        txt('cTribNac', servico.cTribNac) + opcional('cTribMun', servico.cTribMun ?? null) + txt('xDescServ', servico.xDescServ) + opcional('cNBS', servico.cNBS),
+        txt('cTribNac', servico.cTribNac) +
+          opcional('cTribMun', servico.cTribMun ?? null) +
+          // RTC (produção restrita 20261124): cNBS antes de xDescServ.
+          (rtc
+            ? opcional('cNBS', servico.cNBS) + txt('xDescServ', servico.xDescServ)
+            : txt('xDescServ', servico.xDescServ) + opcional('cNBS', servico.cNBS)),
       ),
   );
 
@@ -256,6 +302,14 @@ export function montarDpsXml(input: DpsInput): { readonly xml: string; readonly 
       ),
   );
 
+  // Classificação IBS/CBS fixa (contador): finNFSe=0, indFinal=1,
+  // cIndOp=100301, indDest=0, CST=000, cClassTrib=000001.
+  const ibscbs = !input.ibscbs
+    ? ''
+    : rtc
+      ? '<IBSCBS><indFinal>1</indFinal><cIndOp>100301</cIndOp><valores><trib><CST>000</CST><cClassTrib>000001</cClassTrib></trib></valores></IBSCBS>'
+      : '<IBSCBS><finNFSe>0</finNFSe><indFinal>1</indFinal><cIndOp>100301</cIndOp><indDest>0</indDest><valores><trib><gIBSCBS><CST>000</CST><cClassTrib>000001</cClassTrib></gIBSCBS></trib></valores></IBSCBS>';
+
   const infDps =
     `<infDPS Id="${idDps}">` +
     txt('tpAmb', input.tpAmb) +
@@ -265,12 +319,21 @@ export function montarDpsXml(input: DpsInput): { readonly xml: string; readonly 
     txt('nDPS', input.nDPS) +
     txt('dCompet', input.dCompet) +
     txt('tpEmit', '1') +
+    (rtc ? txt('finNFSe', '0') : '') +
     txt('cLocEmi', input.cLocEmi) +
     prest +
-    (input.tomador ? el('toma', txt('CPF', input.tomador.cpf) + txt('xNome', input.tomador.nome)) : '') +
+    (input.tomador
+      ? el(
+          'toma',
+          txt('CPF', input.tomador.cpf) +
+            txt('xNome', input.tomador.nome) +
+            (input.tomador.endereco ? enderecoXml(input.tomador.endereco) : ''),
+        )
+      : '') +
+    (rtc ? txt('indDest', '0') : '') +
     serv +
     vals +
-    (input.ibscbs ? '<IBSCBS><finNFSe>0</finNFSe><indFinal>1</indFinal><cIndOp>100301</cIndOp><indDest>0</indDest><valores><trib><gIBSCBS><CST>000</CST><cClassTrib>000001</cClassTrib></gIBSCBS></trib></valores></IBSCBS>' : '') +
+    ibscbs +
     '</infDPS>';
 
   return {

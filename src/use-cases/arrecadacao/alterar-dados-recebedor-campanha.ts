@@ -15,6 +15,7 @@ import { DadosRecebedorSchema } from '../../domain/arrecadacao/value-objects/dad
 import { IdCampanhaSchema, type IdRecebedor } from '../../domain/arrecadacao/value-objects/ids.js';
 import { ArrecadacaoCampanhaNaoEncontradaError } from '../../errors/arrecadacao/campanha-nao-encontrada.error.js';
 import { ArrecadacaoInputInvalidoError } from '../../errors/arrecadacao/input-invalido.error.js';
+import { ArrecadacaoRecebedorAlteradoConcorrentementeError } from '../../errors/arrecadacao/recebedor-alterado-concorrentemente.error.js';
 import { ArrecadacaoRecebedorNaoEncontradoError } from '../../errors/arrecadacao/recebedor-nao-encontrado.error.js';
 import type { Observability } from '../../observability/observability.js';
 import {
@@ -25,6 +26,12 @@ import {
 export const AlterarDadosRecebedorCampanhaInputSchema = z.object({
   idCampanha: IdCampanhaSchema,
   dadosRecebedor: DadosRecebedorSchema,
+  /**
+   * aperture-xdylg — compare-and-swap: quem montou `dadosRecebedor` a partir
+   * de um recebedor lido antes informa o id dele; se o ativo agora for outro,
+   * nada é gravado (ArrecadacaoRecebedorAlteradoConcorrentementeError).
+   */
+  idRecebedorEsperado: z.string().optional(),
 });
 
 export type AlterarDadosRecebedorCampanhaInput = z.infer<
@@ -81,6 +88,12 @@ export async function alterarDadosRecebedorCampanha(
       const ativo = await recebedorRepository.findAtivoByCampanhaId(idCampanha);
       if (!ativo) {
         throw new ArrecadacaoRecebedorNaoEncontradoError(idCampanha);
+      }
+      if (
+        parsed.data.idRecebedorEsperado !== undefined &&
+        ativo.id !== parsed.data.idRecebedorEsperado
+      ) {
+        throw new ArrecadacaoRecebedorAlteradoConcorrentementeError(idCampanha);
       }
 
       const desativado = desativarRecebedor(ativo);

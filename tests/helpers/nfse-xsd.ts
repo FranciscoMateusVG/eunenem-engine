@@ -1,7 +1,7 @@
 import { execFileSync, spawnSync } from 'node:child_process';
 import { copyFileSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 /**
@@ -72,4 +72,27 @@ export function validateAgainstXsd(xml: string, xsdPath: string): XsdResult {
 /** Valida contra o pack oficial 1.01 (com a normalização documentada acima). */
 export function validateDps(xml: string): XsdResult {
   return validateAgainstXsd(xml, dpsXsdNormalizado());
+}
+
+/** Pedido de registro de evento (cancelamento) contra o mesmo pack 1.01. */
+export function validatePedRegEvento(xml: string): XsdResult {
+  return validateAgainstXsd(xml, join(dirname(dpsXsdNormalizado()), 'pedRegEvento_v1.01.xsd'));
+}
+
+/** Pack da PRODUÇÃO RESTRITA 20261124 (leiaute RTC), verbatim — sem normalização. */
+export const DPS_XSD_PRODREST = fileURLToPath(
+  new URL('../fixtures/nfse-xsd/prodrest-20261124/DPS_v1.01.xsd', import.meta.url),
+);
+
+/** Valida contra o pack de produção restrita (homologação, leiaute RTC 2026-11). */
+export function validateDpsRtc(xml: string): XsdResult {
+  return validateAgainstXsd(xml, DPS_XSD_PRODREST);
+}
+
+/**
+ * Valida contra o pack do LEIAUTE da DPS: RTC (finNFSe logo depois de tpEmit)
+ * → produção restrita 20261124; senão → produção 20260209.
+ */
+export function validateDpsDoLeiaute(xml: string): XsdResult {
+  return /<\/tpEmit><finNFSe>/.test(xml) ? validateDpsRtc(xml) : validateDps(xml);
 }

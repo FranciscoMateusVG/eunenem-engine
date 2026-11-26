@@ -3,6 +3,7 @@ import type { ReadableSpan } from '@opentelemetry/sdk-trace-base';
 import { beforeEach, describe, expect, it } from 'vitest';
 import type { RecebedorRepository } from '../../src/adapters/arrecadacao/recebedor-repository.js';
 import { criarRecebedorInicial } from '../../src/domain/arrecadacao/entities/recebedor.js';
+import { ArrecadacaoRecebedorAlteradoConcorrentementeError } from '../../src/errors/arrecadacao/recebedor-alterado-concorrentemente.error.js';
 import type { createArrecadacaoMemoryRepos } from './arrecadacao-repos.js';
 import { makeCampanha } from './campanha-repository.conformance.js';
 
@@ -58,6 +59,87 @@ export function describeRecebedorRepositoryConformance(name: string, options: Co
       });
       await repo.save(recebedor);
       expect(await repo.findAtivoByCampanhaId(idCampanha)).toEqual(recebedor);
+    });
+
+    it('round-trips the fiscal address (aperture-xdylg), with and without complemento', async () => {
+      for (const complemento of ['Apto 12', null]) {
+        const idCampanha = randomUUID();
+        await seedCampanha(idCampanha);
+        const recebedor = criarRecebedorInicial({
+          id: randomUUID(),
+          idCampanha,
+          dadosRecebedor: {
+            metodo: 'pix',
+            nomeTitular: 'Maria',
+            cpfTitular: '52998224725',
+            tipoChavePix: 'email',
+            chavePix: 'maria@exemplo.com',
+            enderecoFiscal: {
+              cep: '30130010',
+              logradouro: 'Av. Afonso Pena',
+              numero: '1000',
+              complemento,
+              bairro: 'Centro',
+              cidade: 'Belo Horizonte',
+              uf: 'MG',
+              codigoMunicipioIbge: '3106200',
+            },
+          },
+          criadaEm: new Date('2026-05-01T12:00:00.000Z'),
+        });
+        await repo.save(recebedor);
+        expect(await repo.findAtivoByCampanhaId(idCampanha)).toEqual(recebedor);
+      }
+    });
+
+    it('a second ACTIVE receiver for the same campanha is a typed concurrency error (aperture-xdylg)', async () => {
+      const idCampanha = randomUUID();
+      await seedCampanha(idCampanha);
+      const dados = {
+        metodo: 'pix' as const,
+        nomeTitular: 'Maria',
+        cpfTitular: '52998224725',
+        tipoChavePix: 'email' as const,
+        chavePix: 'maria@exemplo.com',
+      };
+      await repo.save(
+        criarRecebedorInicial({
+          id: randomUUID(),
+          idCampanha,
+          dadosRecebedor: dados,
+          criadaEm: new Date(),
+        }),
+      );
+      await expect(
+        repo.save(
+          criarRecebedorInicial({
+            id: randomUUID(),
+            idCampanha,
+            dadosRecebedor: dados,
+            criadaEm: new Date(),
+          }),
+        ),
+      ).rejects.toBeInstanceOf(ArrecadacaoRecebedorAlteradoConcorrentementeError);
+    });
+
+    it('receiver without fiscal address reads back without the field', async () => {
+      const idCampanha = randomUUID();
+      await seedCampanha(idCampanha);
+      const recebedor = criarRecebedorInicial({
+        id: randomUUID(),
+        idCampanha,
+        dadosRecebedor: {
+          metodo: 'pix',
+          nomeTitular: 'Maria',
+          cpfTitular: '52998224725',
+          tipoChavePix: 'email',
+          chavePix: 'maria@exemplo.com',
+        },
+        criadaEm: new Date('2026-05-01T12:00:00.000Z'),
+      });
+      await repo.save(recebedor);
+      const lido = await repo.findAtivoByCampanhaId(idCampanha);
+      expect(lido?.dadosRecebedor).not.toHaveProperty('enderecoFiscal');
     });
 
     it('round-trips a conta (bank-account) receiver', async () => {

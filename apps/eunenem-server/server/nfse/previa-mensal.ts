@@ -22,6 +22,7 @@ import {
   competenciaDoMes,
   dhEmiSaoPaulo,
   type DpsInput,
+  type EnderecoTomador,
   formatarValorDps,
   montarDpsXml,
   numeroDpsPrevia,
@@ -68,7 +69,7 @@ export function situacaoDoMes(mes: string, now: Date): SituacaoMes {
 //  totTrib por regime (Anexo I: E0710, E0712, E0713)
 // ────────────────────────────────────────────────────────────────────
 
-interface TotTribResolvido {
+export interface TotTribResolvido {
   readonly totTrib: TotTrib;
   /** A DPS seria recusada pelas regras do Sistema Nacional como está. */
   readonly pendente: boolean;
@@ -187,6 +188,18 @@ function camposDaDps(dps: DpsInput, config: NfseConfig, totTrib: TotTribResolvid
     deConfig(id, 'tpAmb', 'Ambiente', config.ambiente, '1 = produção, 2 = homologação (produção restrita). Defina NFSE_AMBIENTE.'),
     {
       grupo: id,
+      tag: 'leiaute',
+      rotulo: 'Leiaute da DPS',
+      valor: config.leiauteDps.valor,
+      origem: config.leiauteDps.origem === 'env' ? 'env' : 'derivado',
+      aConfirmar: false,
+      nota:
+        config.leiauteDps.valor === 'rtc-2026-11'
+          ? 'Leiaute da Reforma (produção restrita 20261124): finNFSe/indDest no infDPS. Defina NFSE_LEIAUTE_DPS para trocar.'
+          : 'Leiaute de produção (pack 20260209). Defina NFSE_LEIAUTE_DPS=rtc-2026-11 quando a produção migrar.',
+    },
+    {
+      grupo: id,
       tag: 'dhEmi',
       rotulo: 'Data/hora de emissão',
       valor: dps.dhEmi,
@@ -289,15 +302,30 @@ export type PreviaDps =
 
 const VARIAVEIS_BLOQUEANTES: readonly NfseVariavel[] = ['NFSE_PRESTADOR_CNPJ', 'NFSE_MUNICIPIO_IBGE'];
 
-export function montarPreviaDps(input: {
-  readonly tomador?: { readonly cpf: string; readonly nome: string };
-  readonly ordinal?: number;
+/**
+ * DpsInput de UMA nota (tomador × competência). Compartilhado pela prévia e
+ * pela emissão real (aperture-wp6j6): só série, número, verAplic e o instante
+ * mudam entre as duas — os campos fiscais são exatamente os mesmos.
+ */
+export type DpsDaNota =
+  | Exclude<PreviaDps, { status: 'gerada' }>
+  | { readonly status: 'pronta'; readonly dps: DpsInput; readonly totTrib: TotTribResolvido };
+
+export interface NumeracaoDps {
+  readonly serie: string;
+  readonly nDPS: string;
+  readonly verAplic: string;
+}
+
+export function montarDpsDaNota(input: {
+  readonly tomador?: { readonly cpf: string; readonly nome: string; readonly endereco?: EnderecoTomador };
   readonly mes: string;
   readonly resultadoCents: number;
   readonly config: NfseConfig;
   readonly now: Date;
-}): PreviaDps {
-  const { mes, resultadoCents, config, now } = input;
+  readonly numeracao: NumeracaoDps;
+}): DpsDaNota {
+  const { mes, resultadoCents, config, now, numeracao } = input;
   if (resultadoCents <= 0) return { status: 'sem_valor' };
 
   const { prestadorCnpj, municipioIbge } = config;
@@ -315,11 +343,12 @@ export function montarPreviaDps(input: {
   const competencia = competenciaDoMes(mes);
   const totTrib = resolverTotTrib(config);
   const dps: DpsInput = {
+    leiaute: config.leiauteDps.valor,
     tpAmb: config.ambiente.valor,
     dhEmi: dhEmiSaoPaulo(now),
-    verAplic: VER_APLIC_PREVIA,
-    serie: SERIE_DPS_PREVIA,
-    nDPS: input.ordinal ? `${mes.replace('-', '')}${String(input.ordinal).padStart(8, '0')}` : numeroDpsPrevia(mes),
+    verAplic: numeracao.verAplic,
+    serie: numeracao.serie,
+    nDPS: numeracao.nDPS,
     dCompet: competencia.ultimoDia,
     cLocEmi: municipioIbge,
     prestador: {
@@ -346,14 +375,39 @@ export function montarPreviaDps(input: {
       totTrib: totTrib.totTrib,
     },
   };
+  return { status: 'pronta', dps, totTrib };
+}
+
+export function montarPreviaDps(input: {
+  readonly tomador?: { readonly cpf: string; readonly nome: string; readonly endereco?: EnderecoTomador };
+  readonly ordinal?: number;
+  readonly mes: string;
+  readonly resultadoCents: number;
+  readonly config: NfseConfig;
+  readonly now: Date;
+}): PreviaDps {
+  const { mes, config } = input;
+  const nota = montarDpsDaNota({
+    ...input,
+    numeracao: {
+      serie: SERIE_DPS_PREVIA,
+      nDPS: input.ordinal ? `${mes.replace('-', '')}${String(input.ordinal).padStart(8, '0')}` : numeroDpsPrevia(mes),
+      verAplic: VER_APLIC_PREVIA,
+    },
+  });
+  if (nota.status !== 'pronta') return nota;
+  const { dps, totTrib } = nota;
+  const resultadoCents = dps.valores.vServCents;
+  const tomador = dps.tomador as { readonly cpf: string; readonly nome: string; readonly endereco?: EnderecoTomador };
   const { xml, idDps } = montarDpsXml(dps);
   return {
     status: 'gerada',
     idDps,
     valorServico: formatarValorDps(resultadoCents),
     campos: [...camposDaDps(dps, config, totTrib),
-      { grupo:'Tomador',tag:'CPF',rotulo:'CPF do recebedor mais recente',valor:input.tomador.cpf,origem:'derivado',aConfirmar:true,nota:'Último recebedor cadastrado da campanha; decisão do operador para a prévia histórica.' },
-      { grupo:'Tomador',tag:'xNome',rotulo:'Nome do recebedor mais recente',valor:input.tomador.nome,origem:'derivado',aConfirmar:true,nota:null },
+      { grupo:'Tomador',tag:'CPF',rotulo:'CPF do recebedor mais recente',valor:tomador.cpf,origem:'derivado',aConfirmar:true,nota:'Último recebedor cadastrado da campanha; decisão do operador para a prévia histórica.' },
+      { grupo:'Tomador',tag:'xNome',rotulo:'Nome do recebedor mais recente',valor:tomador.nome,origem:'derivado',aConfirmar:true,nota:null },
+      { grupo:'Tomador',tag:'end',rotulo:'Endereço do tomador',valor:tomador.endereco ? `${tomador.endereco.logradouro}, ${tomador.endereco.numero}${tomador.endereco.complemento ? ` ${tomador.endereco.complemento}` : ''} — ${tomador.endereco.bairro} — CEP ${tomador.endereco.cep} — IBGE ${tomador.endereco.cMun}` : OMITIDO,origem:'derivado',aConfirmar:!tomador.endereco,nota:tomador.endereco ? null : 'Recebedor sem endereço fiscal: a DPS sai só com CPF e nome.' },
       { grupo:'Serviço',tag:'cTribMun',rotulo:'Código municipal',valor:'003',origem:'fixo',aConfirmar:false,nota:'Orientação do contador.' },
       { grupo:'IBS/CBS',tag:'IBSCBS',rotulo:'Classificação IBS/CBS',valor:'finNFSe=0; indFinal=1; cIndOp=100301; indDest=0; CST=000; cClassTrib=000001',origem:'fixo',aConfirmar:false,nota:'Alíquotas calculadas pelo Sistema Nacional, não informadas na DPS.' },
     ],
@@ -419,7 +473,7 @@ export type AvisoPrevia =
 export interface PreviaMensal {
   readonly titularConsultadoEm: Date;
   readonly pendencias: readonly PendenciaTomador[];
-  readonly notas: readonly { cpf: string; nome: string; resultadoCents: number; houveTroca: boolean; dps: PreviaMensal['dps'] }[];
+  readonly notas: readonly { cpf: string; nome: string; resultadoCents: number; houveTroca: boolean; campanhas: readonly string[]; endereco: EnderecoTomador | null; dps: PreviaMensal['dps'] }[];
   readonly mes: string;
   readonly rotulo: string;
   readonly situacao: SituacaoMes;
@@ -512,9 +566,9 @@ async function previaMensal(
   const titulares = await carregarTomadoresMes(db, platformId, competencia.de, competencia.ate);
   const notas: PreviaMensal['notas'][number][] = [];
   for (const [i, tomador] of titulares.tomadores.entries()) {
-    const gerada = montarPreviaDps({ mes, resultadoCents: tomador.resultadoCents, config, now, tomador, ordinal:i+1 });
+    const gerada = montarPreviaDps({ mes, resultadoCents: tomador.resultadoCents, config, now, tomador: { cpf: tomador.cpf, nome: tomador.nome, ...(tomador.endereco ? { endereco: tomador.endereco } : {}) }, ordinal:i+1 });
     const dpsNota = gerada.status === 'gerada' ? { ...gerada, ...assinarPrevia(gerada.xml, gerada.idDps, config) } : gerada;
-    notas.push({ houveTroca:tomador.houveTroca, cpf:tomador.cpf, nome:tomador.nome, resultadoCents:tomador.resultadoCents, dps:dpsNota });
+    notas.push({ houveTroca:tomador.houveTroca, campanhas:[...tomador.campanhas].sort(), endereco:tomador.endereco, cpf:tomador.cpf, nome:tomador.nome, resultadoCents:tomador.resultadoCents, dps:dpsNota });
   }
   if ((notas.length > 0 || titulares.pendencias.length === 0) && notas.every(n => n.resultadoCents <= 0)) avisos.push('resultado_nao_positivo');
   for (const nota of notas) {

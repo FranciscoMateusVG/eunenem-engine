@@ -77,6 +77,19 @@ export function carregarCertificado(certificado: CertificadoNfse): MaterialCerti
 }
 
 export function assinarDps(xml: string, idDps: string, material: MaterialCertificado): string {
+  return assinarElemento(xml, { raiz: 'DPS', inf: 'infDPS', id: idDps }, material);
+}
+
+/** Pedido de registro de evento (cancelamento): mesmo perfil, raiz `pedRegEvento`. */
+export function assinarPedidoEvento(xml: string, idPedido: string, material: MaterialCertificado): string {
+  return assinarElemento(xml, { raiz: 'pedRegEvento', inf: 'infPedReg', id: idPedido }, material);
+}
+
+function assinarElemento(
+  xml: string,
+  alvo: { readonly raiz: string; readonly inf: string; readonly id: string },
+  material: MaterialCertificado,
+): string {
   const certBase64 = material.certificatePem
     .replace(/-----(BEGIN|END) CERTIFICATE-----/g, '')
     .replace(/\s/g, '');
@@ -89,7 +102,7 @@ export function assinarDps(xml: string, idDps: string, material: MaterialCertifi
   });
   sig.getKeyInfoContent = () => `<X509Data><X509Certificate>${certBase64}</X509Certificate></X509Data>`;
   sig.addReference({
-    xpath: `//*[local-name()='infDPS' and @Id='${idDps}']`,
+    xpath: `//*[local-name()='${alvo.inf}' and @Id='${alvo.id}']`,
     digestAlgorithm: 'http://www.w3.org/2001/04/xmlenc#sha256',
     transforms: [
       'http://www.w3.org/2000/09/xmldsig#enveloped-signature',
@@ -97,7 +110,7 @@ export function assinarDps(xml: string, idDps: string, material: MaterialCertifi
     ],
   });
   sig.computeSignature(xml, {
-    location: { reference: "/*[local-name()='DPS']", action: 'append' },
+    location: { reference: `/*[local-name()='${alvo.raiz}']`, action: 'append' },
   });
   return sig.getSignedXml();
 }
