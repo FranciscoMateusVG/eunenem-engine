@@ -138,6 +138,53 @@ function caller(opts: { env?: NfseEnv; now?: Date } = {}) {
   return appRouter.createCaller(ctx).admin.notaFiscal;
 }
 
+/**
+ * Proxy do Kysely para testes de corrida: antes do `execute` da N-ésima
+ * leitura `selectFrom(tabela)`, roda `gancho` (ex.: outro clique gravando).
+ */
+function comGanchoNaLeitura<T extends object>(
+  db: T,
+  tabela: string,
+  n: number,
+  gancho: () => Promise<void>,
+): T {
+  let leituras = 0;
+  const envolver = (alvo: object, disparar: boolean): object =>
+    new Proxy(alvo, {
+      get(obj, prop, recv) {
+        const v = Reflect.get(obj, prop, recv);
+        if (typeof v !== 'function') return v;
+        return (...args: unknown[]) => {
+          if (
+            prop === 'execute' ||
+            prop === 'executeTakeFirst' ||
+            prop === 'executeTakeFirstOrThrow'
+          ) {
+            return (async () => {
+              if (disparar) await gancho();
+              return (v as (...a: unknown[]) => unknown).apply(obj, args);
+            })();
+          }
+          const r = (v as (...a: unknown[]) => unknown).apply(obj, args);
+          return r && typeof r === 'object' && !(r instanceof Promise) ? envolver(r, disparar) : r;
+        };
+      },
+    });
+  return new Proxy(db, {
+    get(obj, prop, recv) {
+      const v = Reflect.get(obj, prop, recv);
+      if (prop !== 'selectFrom' || typeof v !== 'function')
+        return typeof v === 'function' ? v.bind(obj) : v;
+      return (t: string) => {
+        const builder = (v as (t: string) => object).call(obj, t);
+        if (t !== tabela) return builder;
+        leituras += 1;
+        return envolver(builder, leituras === n);
+      };
+    },
+  });
+}
+
 type ErroTrpc = Error & { readonly code: string };
 async function erroDe(p: Promise<unknown>): Promise<ErroTrpc> {
   try {
@@ -551,7 +598,7 @@ describe('fixação concorrente da competência', () => {
 
   it('primeiros cliques simultâneos com CPFs disjuntos: só um fixa o mês', async () => {
     const r = await Promise.all([fixar(CPF_A), fixar(CPF_C), fixar(CPF_B)]);
-    expect(r.filter(Boolean)).toHaveLength(1);
+    expect(r.filter((x) => x !== null)).toHaveLength(1);
     const linhas = await sql<{
       tomador_cpf: string;
     }>`SELECT tomador_cpf FROM nfse_emissoes WHERE competencia = ${MES}`.execute(testDb.db);
@@ -563,8 +610,72 @@ describe('fixação concorrente da competência', () => {
   });
 
   it('mês já fixado com outro CPF: a fixação seguinte é recusada', async () => {
-    expect(await fixar(CPF_A)).toBe(true);
-    expect(await fixar(CPF_C)).toBe(false);
+    expect(await fixar(CPF_A)).not.toBeNull();
+    expect(await fixar(CPF_C)).toBeNull();
+  });
+
+  it('barreira: nota gravada por outro clique DEPOIS da confirmação não é enviada por este', async () => {
+    await seedDoisTomadores();
+    const pendente = await seed.campanha();
+    await seed.recebedor(pendente, '12345678900', 'CPF com DV errado');
+    await seed.taxa({
+      campaignId: pendente,
+      taxaCents: 300,
+      criadoEm: new Date('2033-03-08T15:00:00Z'),
+    });
+    fake.proximaEmissao = ['autorizar', { rejeitar: { codigo: 'E1', descricao: 'x' } }];
+    await emitir(); // B autorizada, A rejeitada; campanha pendente pulada
+    const plano = await caller().planoEmissao({ mes: MES });
+    expect(plano.notas.map((n) => n.tomadorCpf)).toEqual([CPF_A]);
+
+    // Entre a conferência do plano e o laço de envio, outro clique resolve a
+    // pendência e grava CPF C. Barreira: a 3ª leitura de nfse_emissoes do
+    // emitir (1ª = plano, 2ª = notas vistas, 3ª = laço de envio).
+    const linhas = async () =>
+      (await sql<{ id: string }>`SELECT id FROM nfse_emissoes`.execute(testDb.db)).rows.map(
+        (r) => r.id,
+      );
+    let gravadaC = false;
+    const gravarC = async () => {
+      gravadaC = true;
+      await trocarRecebedor('12345678900', CPF_C, 'Carla');
+      const criadas = await gravarNotas(testDb.db, {
+        ambiente: '2',
+        serie: '00001',
+        mes: MES,
+        notas: [
+          { tomadorCpf: CPF_C, tomadorNome: 'Carla', valorCents: 300, campanhas: [pendente] },
+        ],
+        idsEsperados: await linhas(),
+        autorId: randomUUID(),
+        now: NOW,
+        idDps: (n) => `DPS${IBGE}2${CNPJ}00001${n.padStart(15, '0')}`,
+      });
+      expect(criadas).not.toBeNull();
+    };
+    const auth = adminAuthOverrides();
+    const deps = {
+      ...auth.depsOverrides,
+      db: comGanchoNaLeitura(testDb.db, 'nfse_emissoes', 3, gravarC),
+      clock: () => NOW,
+      logPiiHashSalt: 'nfse-emissao-integration-salt',
+      nfse: parseNfseConfig(env()),
+      nfseClienteSefin: fabricaFake,
+    } as unknown as ServerDeps;
+    const c = appRouter.createCaller({
+      deps,
+      headers: auth.headers,
+      resHeaders: new Headers(),
+    } as TrpcContext).admin.notaFiscal;
+    const r = await c.emitir({ mes: MES, confirmacao: { impressao: plano.impressao } });
+    expect(gravadaC).toBe(true);
+    expect(r.resultados.map((x) => [x.tomadorCpf, x.resultado])).toEqual(
+      expect.arrayContaining([[CPF_A, 'autorizada']]),
+    );
+    expect(r.resultados.some((x) => x.tomadorCpf === CPF_C)).toBe(false);
+    const lista = await caller().emissoes({ mes: MES });
+    expect(lista.find((e) => e.tomadorCpf === CPF_C)?.status).toBe('pendente');
+    expect(posts().filter((p) => p.xml?.includes(`<CPF>${CPF_C}</CPF>`))).toHaveLength(0);
   });
 
   it('série configurada mudou depois da fixação: retry bloqueado, nada enviado', async () => {

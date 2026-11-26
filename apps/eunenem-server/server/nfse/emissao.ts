@@ -186,7 +186,7 @@ export async function xmlDaEmissao(
  * sequência, numa transação, ANTES de qualquer envio. `idsEsperados` são as
  * notas já gravadas que o plano confirmado considerou: se o conjunto mudou
  * desde então (outro clique gravou), desfaz tudo — nenhum número é consumido
- * — e devolve false.
+ * — e devolve null. Sucesso: os ids das linhas criadas.
  */
 export async function gravarNotas(
   db: Database,
@@ -200,9 +200,10 @@ export async function gravarNotas(
     readonly autorId: string;
     readonly now: Date;
   },
-): Promise<boolean> {
+): Promise<string[] | null> {
   try {
-    await db.transaction().execute(async (trx) => {
+    return await db.transaction().execute(async (trx) => {
+      const criadas: string[] = [];
       // Serializa a gravação por (ambiente, competência) e relê DENTRO da
       // transação: dois cliques com planos de CPFs disjuntos (ex.: recebedor
       // trocado entre eles) não podem gravar a mesma receita duas vezes.
@@ -245,11 +246,12 @@ export async function gravarNotas(
           .returning('id')
           .executeTakeFirst();
         if (!inserida) throw new CompetenciaJaFixada();
+        criadas.push(inserida.id);
       }
+      return criadas;
     });
-    return true;
   } catch (e: unknown) {
-    if (e instanceof CompetenciaJaFixada) return false;
+    if (e instanceof CompetenciaJaFixada) return null;
     throw e;
   }
 }
@@ -384,12 +386,16 @@ export async function emitirCompetencia(
     const { prestadorCnpj, municipioIbge } = config;
     if (prestadorCnpj === null || municipioIbge === null) throw new EmissaoBloqueadaError(['config_incompleta']);
 
-    const jaGravados = new Set(
-      (await linhasDaCompetencia(db, ambiente, input.mes)).filter((l) => plano.idsFixados.includes(l.id)).map((l) => l.tomador_cpf),
-    );
+    const linhasVistas = (await linhasDaCompetencia(db, ambiente, input.mes)).filter((l) => plano.idsFixados.includes(l.id));
+    const jaGravados = new Set(linhasVistas.map((l) => l.tomador_cpf));
+    const cpfsConfirmados = new Set(plano.notas.map((n) => n.tomadorCpf));
+    // Só envia o que o admin confirmou: as notas gravadas que o plano viu e
+    // que estão nele, mais as que ESTE clique grava agora. Linhas gravadas por
+    // outro clique concorrente ficam para ele (ou para uma nova confirmação).
+    const autorizadas = new Set(linhasVistas.filter((l) => cpfsConfirmados.has(l.tomador_cpf)).map((l) => l.id));
     const novas = plano.notas.filter((n) => !jaGravados.has(n.tomadorCpf));
     if (novas.length > 0) {
-      const gravou = await gravarNotas(db, {
+      const criadas = await gravarNotas(db, {
         ambiente,
         serie: plano.serie,
         mes: input.mes,
@@ -400,7 +406,8 @@ export async function emitirCompetencia(
         idDps: (nDps) => montarIdDps({ cLocEmi: municipioIbge, cnpj: prestadorCnpj, serie: plano.serie, nDPS: nDps }),
       });
       // Outro clique gravou notas agora: o plano confirmado não vale mais.
-      if (!gravou) throw new PlanoMudouError();
+      if (criadas === null) throw new PlanoMudouError();
+      for (const id of criadas) autorizadas.add(id);
     }
 
     // Envia o que está GRAVADO (valores gravados), nunca um recálculo.
@@ -410,6 +417,7 @@ export async function emitirCompetencia(
         resultados.push({ tomadorCpf: linha.tomador_cpf, resultado: 'ja_emitida' });
         continue;
       }
+      if (!autorizadas.has(linha.id)) continue;
       const status = await enviarNota(deps, { linha, material, cliente });
       resultados.push({ tomadorCpf: linha.tomador_cpf, resultado: status });
     }
