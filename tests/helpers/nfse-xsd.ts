@@ -78,3 +78,21 @@ export function validateDps(xml: string): XsdResult {
 export function validatePedRegEvento(xml: string): XsdResult {
   return validateAgainstXsd(xml, join(dirname(dpsXsdNormalizado()), 'pedRegEvento_v1.01.xsd'));
 }
+
+/** Pack da PRODUÇÃO RESTRITA 20261124 (leiaute RTC), verbatim — sem normalização. */
+export const DPS_XSD_PRODREST = fileURLToPath(
+  new URL('../fixtures/nfse-xsd/prodrest-20261124/DPS_v1.01.xsd', import.meta.url),
+);
+
+/** Valida contra o pack de produção restrita (homologação, leiaute RTC 2026-11). */
+export function validateDpsRtc(xml: string): XsdResult {
+  return validateAgainstXsd(xml, DPS_XSD_PRODREST);
+}
+
+/**
+ * Valida contra o pack do LEIAUTE da DPS: RTC (finNFSe logo depois de tpEmit)
+ * → produção restrita 20261124; senão → produção 20260209.
+ */
+export function validateDpsDoLeiaute(xml: string): XsdResult {
+  return /<\/tpEmit><finNFSe>/.test(xml) ? validateDpsRtc(xml) : validateDps(xml);
+}

@@ -12,7 +12,8 @@ import type { TipoAmbiente } from './dps.js';
  *
  * Contrato da API (Sefin Nacional / ADN):
  *   POST {sefin}/nfse                         {dpsXmlGZipB64}
- *   GET  {sefin}/dps/{idDps}                  → {chaveAcesso}
+ *   GET  {sefin}/dps/{42 dígitos do Id}      → {chaveAcesso}  (SEM o prefixo
+ *        "DPS": a API real responde E2400 com ele; não achou = 404 E2404)
  *   GET  {sefin}/nfse/{chave}                 → {nfseXmlGZipB64}
  *   POST {sefin}/nfse/{chave}/eventos         {pedidoRegistroEventoXmlGZipB64}
  *   GET  {sefin}/nfse/{chave}/eventos/{tipo}/{seq} → {eventoXmlGZipB64}
@@ -246,7 +247,7 @@ export function criarClienteSefin(opcoes: OpcoesClienteSefin): ClienteSefin {
       }),
 
     consultarDps: (idDps) =>
-      chamar('consultarDps', 'GET', `${sefin}/dps/${idDps}`, undefined, (r): RespostaConsultaDps => {
+      chamar('consultarDps', 'GET', `${sefin}/dps/${idDps.replace(/^DPS/, '')}`, undefined, (r): RespostaConsultaDps => {
         if (r.status === 404) return { tipo: 'nao_encontrada' };
         const json = lerJson(r.corpo);
         const chaveAcesso = json ? texto(json, 'chaveAcesso') : null;

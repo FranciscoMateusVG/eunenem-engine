@@ -62,7 +62,7 @@ export function AdminNotaFiscalPage() {
             role="note"
             className="max-w-3xl rounded-md border border-plum/40 bg-plum/5 p-4 text-[14px] leading-relaxed text-ink"
           >
-            <strong className="font-semibold">A prévia abaixo não envia nada.</strong> A série 99999 e
+            <strong className="font-semibold">A prévia abaixo não envia nada.</strong> A série 89999 e
             o número exibidos nela existem só na prévia. Notas só são emitidas ou canceladas na seção
             “Emissão no Sistema Nacional”, por clique e com confirmação.
           </div>

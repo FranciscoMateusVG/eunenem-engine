@@ -66,10 +66,10 @@ describe('montarPreviaDps', () => {
       now: NOW,
     });
     if (previa.status !== 'gerada') throw new Error(previa.status);
-    expect(previa.idDps).toBe('DPS2611606211222333000181999990' + '20260999999999');
+    expect(previa.idDps).toBe('DPS2611606211222333000181899990' + '20260999999999');
     expect(previa.valorServico).toBe('1234.56');
     expect(previa.xml).toContain(
-      '<serie>99999</serie><nDPS>20260999999999</nDPS><dCompet>2026-09-30</dCompet>',
+      '<serie>89999</serie><nDPS>20260999999999</nDPS><dCompet>2026-09-30</dCompet>',
     );
     expect(previa.xml).toContain('<dhEmi>2026-10-05T14:30:00-03:00</dhEmi>');
     expect(previa.xml).toContain('<vServ>1234.56</vServ>');
@@ -114,7 +114,7 @@ describe('montarPreviaDps', () => {
       aConfirmar: false,
     });
     expect(por('toma')).toMatchObject({ origem: 'fixo', aConfirmar: true });
-    expect(por('serie')).toMatchObject({ valor: '99999', origem: 'fixo', aConfirmar: false });
+    expect(por('serie')).toMatchObject({ valor: '89999', origem: 'fixo', aConfirmar: false });
     for (const campo of previa.campos) {
       expect(campo.rotulo.length).toBeGreaterThan(0);
       expect(campo.grupo.length).toBeGreaterThan(0);

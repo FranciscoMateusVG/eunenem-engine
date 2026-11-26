@@ -20,7 +20,7 @@ import { ID_PLATAFORMA_EUNENEM } from '../../src/index.js';
 import { adminAuthOverrides } from '../helpers/admin-auth.js';
 import { type FakeSefin, iniciarFakeSefin } from '../helpers/fake-sefin.js';
 import { gerarPfxDeTeste, type TestPfx } from '../helpers/nfse-test-pfx.js';
-import { validateDps } from '../helpers/nfse-xsd.js';
+import { validateDpsDoLeiaute } from '../helpers/nfse-xsd.js';
 import { ReceitaLedgerSeed } from '../helpers/receita-ledger-seed.js';
 import { createTestDatabase, type TestDatabase } from '../helpers/test-db.js';
 import {
@@ -91,6 +91,7 @@ beforeEach(async () => {
   fake.notas.clear();
   fake.proximaEmissao = [];
   fake.reacaoEvento = 'registrar';
+  fake.reacaoConsultaDps = 'normal';
 });
 
 afterAll(async () => {
@@ -430,7 +431,7 @@ describe('emitir — envio real ao (fake) Sistema Nacional', () => {
       expect(e.idDps).toBe(`DPS${IBGE}2${CNPJ}00001${e.nDps.padStart(15, '0')}`);
       const { xml: dps } = await caller().xml({ id: e.id, tipo: 'dps' });
       if (dps === null) throw new Error('sem XML da DPS');
-      expect(validateDps(dps).errors).toEqual([]);
+      expect(validateDpsDoLeiaute(dps).errors).toEqual([]);
       const dsig = verificarAssinaturaDps(dps);
       expect(dsig.digestConfere && dsig.assinaturaConfere).toBe(true);
       expect(dps).toContain('<tpAmb>2</tpAmb>');
@@ -821,6 +822,24 @@ describe('consultar e cancelar', () => {
     nota.cancelada = true;
     nota.eventoXml = '<evento/>';
     expect((await caller().consultar({ id: b.id })).status).toBe('cancelada');
+  });
+
+  it('consultar uma rejeitada com consulta inconclusiva NÃO a rebaixa para incerta (smoke 26/11)', async () => {
+    await seedDoisTomadores();
+    fake.proximaEmissao = [
+      { rejeitar: { codigo: 'E1235', descricao: 'Falha no esquema XML do DF-e.' } },
+      'autorizar',
+    ];
+    await emitir();
+    const rejeitada = (await caller().emissoes({ mes: MES })).find((e) => e.status === 'rejeitada');
+    if (!rejeitada) throw new Error('sem rejeitada');
+    fake.reacaoConsultaDps = 'erro_500';
+    expect((await caller().consultar({ id: rejeitada.id })).status).toBe('rejeitada');
+    fake.reacaoConsultaDps = 'normal';
+    expect((await caller().consultar({ id: rejeitada.id })).status).toBe('rejeitada');
+    expect(
+      fake.requisicoes.filter((q) => q.path === `/dps/${rejeitada.idDps.slice(3)}`),
+    ).toHaveLength(2);
   });
 
   it('danfse devolve o PDF do ADN', async () => {

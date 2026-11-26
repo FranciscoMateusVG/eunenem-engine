@@ -107,6 +107,7 @@ export async function iniciarFakeSefin(opts: {
     notas,
     proximaEmissao: [] as ReacaoEmissao[],
     reacaoEvento: 'registrar' as FakeSefin['reacaoEvento'],
+    reacaoConsultaDps: 'normal' as FakeSefin['reacaoConsultaDps'],
   };
 
   const server: Server = createServer(
@@ -195,13 +196,27 @@ export async function iniciarFakeSefin(opts: {
           });
         }
 
-        const dps = /^\/dps\/(DPS\d{42})$/.exec(path);
+        // Como a API real: o identificador vai SEM o prefixo "DPS" (42 dígitos).
+        const dps = /^\/dps\/([^/]+)$/.exec(path);
         if (dps && req.method === 'GET') {
-          const nota = [...notas.values()].find((n) => n.idDps === dps[1]);
+          if (fake.reacaoConsultaDps === 'erro_500') return json(500, { message: 'erro interno' });
+          if (!/^\d{42}$/.test(dps[1] ?? '')) {
+            return json(400, {
+              ...base,
+              erro: {
+                codigo: 'E2400',
+                descricao: 'Identificador mal formado. O ID da DPS deve conter 42 números.',
+              },
+            });
+          }
+          const nota = [...notas.values()].find((n) => n.idDps === `DPS${dps[1]}`);
           if (!nota)
             return json(404, {
               ...base,
-              erros: [{ Codigo: 'E404', Descricao: 'DPS nao encontrada' }],
+              erro: {
+                codigo: 'E2404',
+                descricao: 'Não foi gerada uma NFS-e com o identificador de DPS informado',
+              },
             });
           return json(200, { ...base, idDps: nota.idDps, chaveAcesso: nota.chave });
         }

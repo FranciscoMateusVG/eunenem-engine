@@ -187,6 +187,18 @@ function camposDaDps(dps: DpsInput, config: NfseConfig, totTrib: TotTribResolvid
     deConfig(id, 'tpAmb', 'Ambiente', config.ambiente, '1 = produção, 2 = homologação (produção restrita). Defina NFSE_AMBIENTE.'),
     {
       grupo: id,
+      tag: 'leiaute',
+      rotulo: 'Leiaute da DPS',
+      valor: config.leiauteDps.valor,
+      origem: config.leiauteDps.origem === 'env' ? 'env' : 'derivado',
+      aConfirmar: false,
+      nota:
+        config.leiauteDps.valor === 'rtc-2026-11'
+          ? 'Leiaute da Reforma (produção restrita 20261124): finNFSe/indDest no infDPS. Defina NFSE_LEIAUTE_DPS para trocar.'
+          : 'Leiaute de produção (pack 20260209). Defina NFSE_LEIAUTE_DPS=rtc-2026-11 quando a produção migrar.',
+    },
+    {
+      grupo: id,
       tag: 'dhEmi',
       rotulo: 'Data/hora de emissão',
       valor: dps.dhEmi,
@@ -330,6 +342,7 @@ export function montarDpsDaNota(input: {
   const competencia = competenciaDoMes(mes);
   const totTrib = resolverTotTrib(config);
   const dps: DpsInput = {
+    leiaute: config.leiauteDps.valor,
     tpAmb: config.ambiente.valor,
     dhEmi: dhEmiSaoPaulo(now),
     verAplic: numeracao.verAplic,
