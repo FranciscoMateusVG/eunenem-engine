@@ -3,6 +3,8 @@ import { formatBRL } from "@/lib/formatBRL";
 import {
   DIA_COBRANCA_MAX,
   descreverRecorrencia,
+  INTERVALO_MESES_MAX,
+  nomePeriodicidade,
   parseValorBRL,
   type Recorrencia,
 } from "@/lib/despesasManuais";
@@ -16,6 +18,10 @@ import type { DespesaManualData } from "./types";
  * opcional) ou única (uma data). Mudar o valor vale a partir de uma data e
  * não reescreve meses anteriores; encerrar grava o fim uma vez.
  *
+ * aperture-9nmdo: recorrente pode cobrar a cada N meses; "Corrigir mês"
+ * substitui o valor de UMA cobrança com nota obrigatória, e a lista mostra o
+ * valor previsto, a diferença e as correções substituídas.
+ *
  * Componentes puros: as mutações chegam por callback (AdminDespesasPage).
  */
 
@@ -27,6 +33,7 @@ export interface NovaDespesaManual {
     | {
         readonly recorrencia: "mensal";
         readonly diaCobranca: number;
+        readonly intervaloMeses: number;
         readonly inicio: string;
         readonly fim?: string;
       }
@@ -39,6 +46,18 @@ const INPUT =
 const BOTAO = "rounded-md bg-plum px-4 py-2 text-[13px] font-semibold text-white disabled:opacity-50";
 const BOTAO_SECUNDARIO =
   "rounded-md border border-line px-3 py-1.5 text-[12px] text-ink hover:bg-cream disabled:opacity-50";
+
+/** "Todo mês", "A cada 3 meses (trimestral)", "A cada 4 meses"… */
+function rotuloIntervalo(n: number): string {
+  if (n === 1) return "Todo mês";
+  const nome = nomePeriodicidade(n);
+  return nome.startsWith("a cada") ? `A cada ${n} meses` : `A cada ${n} meses (${nome})`;
+}
+
+/** Como `parseValorBRL`, mas aceita zero (cobrança zerada naquele mês). */
+function parseValorOuZero(entrada: string): number | null {
+  return /^\s*(R\$)?\s*0+([,.]0{1,2})?\s*$/i.test(entrada) ? 0 : parseValorBRL(entrada);
+}
 
 function Erro({ mensagem }: { mensagem: string | null | undefined }) {
   if (!mensagem) return null;
@@ -67,6 +86,7 @@ export function FormDespesaManual({
   const [valor, setValor] = useState("");
   const [categoria, setCategoria] = useState("");
   const [diaCobranca, setDiaCobranca] = useState("");
+  const [intervaloMeses, setIntervaloMeses] = useState(1);
   const [inicio, setInicio] = useState(hoje);
   const [fim, setFim] = useState("");
   const [data, setData] = useState(hoje);
@@ -95,7 +115,7 @@ export function FormDespesaManual({
     setInvalido(null);
     onSalvar({
       ...base,
-      tipo: { recorrencia, diaCobranca: dia, inicio, ...(fim ? { fim } : {}) },
+      tipo: { recorrencia, diaCobranca: dia, intervaloMeses, inicio, ...(fim ? { fim } : {}) },
     });
   }
 
@@ -168,7 +188,22 @@ export function FormDespesaManual({
         </label>
       </div>
       {recorrencia === "mensal" ? (
-        <div className="grid gap-4 sm:grid-cols-3">
+        <div className="grid gap-4 sm:grid-cols-4">
+          <label className={CAMPO}>
+            Periodicidade
+            <select
+              className={INPUT}
+              name="intervaloMeses"
+              value={intervaloMeses}
+              onChange={(e) => setIntervaloMeses(Number(e.target.value))}
+            >
+              {Array.from({ length: INTERVALO_MESES_MAX }, (_, i) => i + 1).map((n) => (
+                <option key={n} value={n}>
+                  {rotuloIntervalo(n)}
+                </option>
+              ))}
+            </select>
+          </label>
           <label className={CAMPO}>
             Dia de cobrança (1–{DIA_COBRANCA_MAX})
             <input
@@ -229,7 +264,103 @@ export function FormDespesaManual({
   );
 }
 
-type Acao = { tipo: "valor" | "encerrar" | "excluir"; id: string } | null;
+type Acao = { tipo: "valor" | "encerrar" | "excluir" | "corrigir"; id: string } | null;
+
+function FormCorrecao({
+  hoje,
+  onConfirmar,
+  onCancelar,
+  salvando,
+}: {
+  hoje: string;
+  onConfirmar: (dados: { mes: string; valorCents: number; nota: string }) => void;
+  onCancelar: () => void;
+  salvando: boolean;
+}) {
+  const [mes, setMes] = useState(hoje.slice(0, 7));
+  const [valor, setValor] = useState("");
+  const [nota, setNota] = useState("");
+  const [invalido, setInvalido] = useState<string | null>(null);
+  return (
+    <form
+      data-testid="despesa-correcao-form"
+      className="flex flex-wrap items-end gap-3 pt-2"
+      onSubmit={(event) => {
+        event.preventDefault();
+        const valorCents = parseValorOuZero(valor);
+        if (!/^\d{4}-\d{2}$/.test(mes)) return setInvalido("Informe o mês.");
+        if (valorCents === null) return setInvalido("Valor inválido.");
+        if (!nota.trim()) return setInvalido("Explique a diferença na nota.");
+        setInvalido(null);
+        onConfirmar({ mes, valorCents, nota: nota.trim() });
+      }}
+    >
+      <label className={CAMPO}>
+        Mês da cobrança
+        <input
+          className={INPUT}
+          name="mes"
+          type="month"
+          required
+          value={mes}
+          onChange={(e) => setMes(e.target.value)}
+        />
+      </label>
+      <label className={CAMPO}>
+        Valor cobrado (R$)
+        <input
+          className={INPUT}
+          name="valorCorrigido"
+          inputMode="decimal"
+          required
+          value={valor}
+          onChange={(e) => setValor(e.target.value)}
+        />
+      </label>
+      <label className={`${CAMPO} min-w-60 flex-1`}>
+        Nota (por que o valor foi diferente)
+        <input
+          className={INPUT}
+          name="nota"
+          required
+          maxLength={500}
+          value={nota}
+          onChange={(e) => setNota(e.target.value)}
+        />
+      </label>
+      <button type="submit" className={BOTAO_SECUNDARIO} disabled={salvando}>
+        Salvar correção
+      </button>
+      <button type="button" className={BOTAO_SECUNDARIO} onClick={onCancelar}>
+        Cancelar
+      </button>
+      <Erro mensagem={invalido} />
+    </form>
+  );
+}
+
+function diferenca(cents: number): string {
+  return `${cents >= 0 ? "+" : "−"}${formatBRL(Math.abs(cents))}`;
+}
+
+function Ajustes({ despesa }: { despesa: DespesaManualData }) {
+  if (despesa.ajustes.length === 0) return null;
+  return (
+    <ul data-testid={`despesa-ajustes-${despesa.id}`} className="flex flex-col gap-0.5 text-[12px]">
+      {despesa.ajustes.map((a) => (
+        <li
+          key={`${a.competencia}-${a.criadoEm}`}
+          className={a.vigente ? "text-ink-soft" : "text-ink-mute line-through"}
+        >
+          Cobrança de {formatLocalDate(a.competencia)}: {formatBRL(a.valorCents)} (previsto{" "}
+          {formatBRL(a.valorOriginalCents)}, diferença {diferenca(a.valorCents - a.valorOriginalCents)}) —{" "}
+          {a.nota}
+          {a.vigente ? null : <span className="no-underline"> · substituída</span>}
+        </li>
+      ))}
+    </ul>
+  );
+}
 
 function FormAcao({
   rotulo,
@@ -302,6 +433,7 @@ export function DespesasManuaisLista({
   onAlterarValor,
   onEncerrar,
   onExcluir,
+  onCorrigirMes,
   salvando = false,
   erro,
 }: {
@@ -310,6 +442,7 @@ export function DespesasManuaisLista({
   onAlterarValor: (input: { id: string; valorCents: number; vigenteDesde: string }) => void;
   onEncerrar: (input: { id: string; fim: string }) => void;
   onExcluir: (input: { id: string; confirmar: true }) => void;
+  onCorrigirMes: (input: { id: string; mes: string; valorCents: number; nota: string }) => void;
   salvando?: boolean;
   erro?: string | null;
 }) {
@@ -353,16 +486,25 @@ export function DespesasManuaisLista({
                     </span>
                   ))}
                 </span>
-                {ativaMensal ? (
+                {d.recorrencia === "mensal" ? (
                   <span className="flex gap-2">
                     <button
                       type="button"
                       className={BOTAO_SECUNDARIO}
-                      onClick={() => setAcao({ tipo: "valor", id: d.id })}
+                      onClick={() => setAcao({ tipo: "corrigir", id: d.id })}
                     >
-                      Alterar valor
+                      Corrigir mês
                     </button>
-                    {d.fim === null ? (
+                    {ativaMensal ? (
+                      <button
+                        type="button"
+                        className={BOTAO_SECUNDARIO}
+                        onClick={() => setAcao({ tipo: "valor", id: d.id })}
+                      >
+                        Alterar valor
+                      </button>
+                    ) : null}
+                    {ativaMensal && d.fim === null ? (
                       <button
                         type="button"
                         className={BOTAO_SECUNDARIO}
@@ -374,6 +516,7 @@ export function DespesasManuaisLista({
                   </span>
                 ) : null}
               </div>
+              <Ajustes despesa={d} />
               <button type="button" className={BOTAO_SECUNDARIO} disabled={salvando} onClick={()=>setAcao({tipo:"excluir",id:d.id})}>Excluir</button>
               {acao?.id === d.id && acao.tipo === "excluir" ? <div role="alertdialog" aria-label="Excluir despesa" className="rounded border border-red-200 p-3">
                 <p>Excluir {d.nome}? Ela deixará de contar em todos os períodos, inclusive no passado, no lucro e nas metas. Diferente de Encerrar, a exclusão remove também as cobranças anteriores dos cálculos.</p>
@@ -381,7 +524,18 @@ export function DespesasManuaisLista({
                 <button type="button" className={BOTAO_SECUNDARIO} disabled={salvando} onClick={()=>setAcao(null)}>Cancelar</button>
                 <Erro mensagem={erro} />
               </div> : null}
-              {acao?.id === d.id && acao.tipo !== "excluir" ? (
+              {acao?.id === d.id && acao.tipo === "corrigir" ? (
+                <FormCorrecao
+                  hoje={hoje}
+                  salvando={salvando}
+                  onCancelar={() => setAcao(null)}
+                  onConfirmar={(dados) => {
+                    onCorrigirMes({ id: d.id, ...dados });
+                    setAcao(null);
+                  }}
+                />
+              ) : null}
+              {acao?.id === d.id && (acao.tipo === "valor" || acao.tipo === "encerrar") ? (
                 <FormAcao
                   key={acao.tipo}
                   rotulo={acao.tipo === "valor" ? "Salvar novo valor" : "Encerrar despesa"}

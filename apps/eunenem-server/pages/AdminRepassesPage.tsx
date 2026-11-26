@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useState } from "react";
 import { AdminShell } from "@/components/eunenem/admin/AdminShell";
 import { DddBadge } from "@/components/eunenem/admin/DddBadge";
 import {
@@ -7,6 +7,14 @@ import {
   REPASSE_STATUS_PALETTE,
   RepasseStatusPill,
 } from "@/components/eunenem/admin/repasse-status";
+import {
+  granularidadeParaCaixa,
+  type PeriodoResgates,
+  periodoResgatesDaUrl,
+  ResgatesEfetuadosTabela,
+} from "@/components/eunenem/admin/ResgatesEfetuados";
+import { addDays } from "@/lib/receitaPeriodo";
+import { trpc } from "@/lib/trpc.js";
 import {
   type RepasseListRow,
   type RepasseStatus,
@@ -42,11 +50,26 @@ import {
  * DATA LAYER: `useStubRepassesList()` returns the full set; this page
  * filters by status client-side. Same shape as the eventual trpc query.
  * See RepassesStubData.ts for the swap playbook when Rex's PR lands.
+ *
+ * PERÍODO (aperture-9nmdo): `?de=&ate=` (de inclusivo, ate exclusivo — a
+ * convenção do Fluxo de caixa) mostra os resgates ACEITOS PELO BANCO no
+ * período, pela mesma consulta que alimenta as saídas do caixa; o total é o
+ * mesmo número. A fila por status continua abaixo, sem mudança.
  */
 export function AdminRepassesPage() {
   const [statusFilter, setStatusFilter] =
     useState<RepasseStatus>("solicitado");
   const { rows, isLoading, error } = useStubRepassesList();
+  // Lido só depois de hidratar (SSR não tem window).
+  const [periodo, setPeriodo] = useState<PeriodoResgates | null>(null);
+  useEffect(() => {
+    setPeriodo(periodoResgatesDaUrl(window.location.search));
+  }, []);
+  const aplicarPeriodo = (proximo: PeriodoResgates | null) => {
+    setPeriodo(proximo);
+    const qs = proximo ? `?${new URLSearchParams({ de: proximo.de, ate: proximo.ate })}` : "";
+    window.history.replaceState(null, "", `${window.location.pathname}${qs}`);
+  };
 
   const filtered = useMemo(
     () => rows.filter((r) => r.status === statusFilter),
@@ -71,6 +94,7 @@ export function AdminRepassesPage() {
     >
       <section className="space-y-6">
         <SectionHeader />
+        <PeriodoResgatesSecao periodo={periodo} aoAplicar={aplicarPeriodo} />
         <FilterChips
           active={statusFilter}
           onChange={setStatusFilter}
@@ -86,6 +110,103 @@ export function AdminRepassesPage() {
         )}
       </section>
     </AdminShell>
+  );
+}
+
+function PeriodoResgatesSecao({
+  periodo,
+  aoAplicar,
+}: {
+  periodo: PeriodoResgates | null;
+  aoAplicar: (p: PeriodoResgates | null) => void;
+}) {
+  const id = useId();
+  const [de, setDe] = useState(periodo?.de ?? "");
+  // O campo mostra o último dia INCLUÍDO; a URL e o servidor usam o fim exclusivo.
+  const [ateIncluso, setAteIncluso] = useState(periodo ? addDays(periodo.ate, -1) : "");
+  useEffect(() => {
+    setDe(periodo?.de ?? "");
+    setAteIncluso(periodo ? addDays(periodo.ate, -1) : "");
+  }, [periodo]);
+  const query = trpc.admin.repasses.efetuados.useQuery(
+    periodo ?? { de: "2000-01-01", ate: "2000-01-02" },
+    { enabled: periodo !== null, staleTime: 30_000 },
+  );
+  const campo =
+    "min-h-11 rounded-md border border-line bg-white px-3 font-mono text-[13px] text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-plum";
+
+  return (
+    <div className="space-y-3" data-testid="resgates-periodo">
+      <form
+        aria-label="Resgates aceitos pelo banco no período"
+        className="flex flex-wrap items-end gap-3"
+        onSubmit={(event) => {
+          event.preventDefault();
+          if (!de || !ateIncluso || ateIncluso < de) return;
+          aoAplicar({ de, ate: addDays(ateIncluso, 1) });
+        }}
+      >
+        <label htmlFor={`${id}-de`} className="flex flex-col gap-1 text-[12px] text-ink-soft">
+          Aceitos pelo banco de
+          <input
+            id={`${id}-de`}
+            type="date"
+            className={campo}
+            value={de}
+            onChange={(e) => setDe(e.target.value)}
+          />
+        </label>
+        <label htmlFor={`${id}-ate`} className="flex flex-col gap-1 text-[12px] text-ink-soft">
+          Até (inclusive)
+          <input
+            id={`${id}-ate`}
+            type="date"
+            className={campo}
+            value={ateIncluso}
+            onChange={(e) => setAteIncluso(e.target.value)}
+          />
+        </label>
+        <button
+          type="submit"
+          className="min-h-11 rounded-md bg-plum px-4 font-mono text-[12px] uppercase tracking-[0.12em] text-white"
+        >
+          Filtrar período
+        </button>
+        {periodo ? (
+          <button
+            type="button"
+            onClick={() => aoAplicar(null)}
+            className="min-h-11 rounded-md border border-line px-4 font-mono text-[12px] uppercase tracking-[0.12em] text-ink-soft hover:text-plum"
+          >
+            Limpar período
+          </button>
+        ) : null}
+      </form>
+      {periodo ? (
+        <div className="space-y-2">
+          <div className="flex flex-wrap items-baseline justify-between gap-2">
+            <p className="text-[13px] text-ink-soft">
+              Resgates que o banco aceitou no período (enviado ao banco, pago, ou manual com
+              referência). É o mesmo número das saídas do fluxo de caixa.
+            </p>
+            <a
+              href={`/admin/pagamentos/caixa?${new URLSearchParams({ de: periodo.de, ate: periodo.ate, g: granularidadeParaCaixa(periodo) })}`}
+              className="font-mono text-[12px] text-plum hover:underline"
+            >
+              ver no fluxo de caixa →
+            </a>
+          </div>
+          {query.error ? <ErrorState message={query.error.message} /> : null}
+          {!query.error && !query.data ? <LoadingState /> : null}
+          {query.data ? (
+            <ResgatesEfetuadosTabela
+              resgates={query.data.resgates}
+              totalCents={query.data.totalCents}
+            />
+          ) : null}
+        </div>
+      ) : null}
+    </div>
   );
 }
 

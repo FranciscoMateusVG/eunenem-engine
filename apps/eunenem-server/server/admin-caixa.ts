@@ -8,7 +8,11 @@ import {
   type PeriodoCaixa,
   type PeriodoCaixaInvalido,
 } from "../pages/lib/caixaPeriodo.js";
-import { localDateInSaoPaulo, RECEITA_TIMEZONE } from "../pages/lib/receitaPeriodo.js";
+import {
+  isLocalDate,
+  localDateInSaoPaulo,
+  RECEITA_TIMEZONE,
+} from "../pages/lib/receitaPeriodo.js";
 import { emSnapshotDeLeitura } from "./admin-receita.js";
 
 /**
@@ -24,15 +28,24 @@ import { emSnapshotDeLeitura } from "./admin-receita.js";
  * ESTORNO é o mesmo lançamento datado por `cancelado_em`. Líquido = bruto −
  * estornos (pode ser negativo). Nenhuma fórmula lê `pagamentos.status`.
  *
- * SAÍDAS: lançamento `credito_saldo_recebedor` ligado a repasse com
- * `transferido_em` preenchido — o mesmo predicado que o saldo do recebedor
- * usa, MAS só se o repasse é `pago` ou `aprovado` com referência bancária (aprovado ≠ transferido). Datada por `transferido_em`. Método: repasse
- * com `inter_codigo_solicitacao` = Inter automático; sem ele = manual
- * (com referência bancária, quando houver).
+ * SAÍDAS (aperture-9nmdo): os RESGATES da tela /admin/repasses cuja
+ * transferência o banco aceitou — não há confirmação de liquidação, então
+ * aceito pelo banco = pago. Valor = `repasses_recebedor.amount_cents` (o mesmo
+ * da tela de resgates). Mapeamento de status:
+ *   enviado_ao_banco                 → saída (Inter aceito)
+ *   pago                             → saída
+ *   aprovado COM bank_transfer_ref   → saída (manual, TED/PIX feito à mão)
+ *   aprovado sem ref / transferindo / falhou → pendente "aprovados não transferidos"
+ *   verificando                      → pendente "em verificação"
+ *   solicitado / cancelado           → nada
+ * Data da saída = quando o banco aceitou: `enviado_ao_banco_em`; sem ela (pago
+ * direto, manual), o primeiro `transferido_em` do livro; sem carimbo, `aprovado_em`.
+ * Método: com `inter_codigo_solicitacao` = Inter; sem = manual.
+ * A mesma consulta (`resgatesEfetuados`) alimenta o filtro de período da tela
+ * de resgates, então os dois números são iguais por construção.
  *
  * PENDENTE (fotografia de agora, independe do período e NUNCA entra em
- * saída/saldo; aprovado carimbado sem referência/envio FICA pendente): repasses `aprovado`/`transferindo`/`enviado_ao_banco`/`falhou`
- * ("aprovados ainda não transferidos") e `verificando` ("em verificação").
+ * saída/saldo; aprovado carimbado sem referência/envio FICA pendente).
  *
  * ESCOPO: a plataforma vem de pagamento→campanha (entradas) e
  * repasse→campanha (saídas/pendentes).
@@ -75,6 +88,20 @@ export interface SerieBucketCaixa extends BucketCaixa {
   readonly saldoCents: number;
 }
 
+/** Um resgate aceito pelo banco no período: uma linha da tela de resgates. */
+export interface ResgateEfetuado {
+  readonly idRepasse: string;
+  readonly idCampanha: string;
+  readonly campanhaTitulo: string;
+  readonly recebedorNome: string | null;
+  readonly amountCents: number;
+  readonly status: string;
+  readonly metodo: MetodoSaida;
+  readonly bankTransferRef: string | null;
+  /** Quando o banco aceitou a transferência (ver cabeçalho). */
+  readonly efetuadoEm: Date;
+}
+
 export interface PendenteCaixa {
   readonly cents: number;
   readonly repasses: number;
@@ -99,6 +126,8 @@ export interface CaixaPainel {
     readonly totalCents: number;
     readonly repasses: number;
     readonly porMetodo: Readonly<Record<MetodoSaida, SaidaMetodo>>;
+    /** Os resgates que compõem `totalCents`, ordenados pela data do aceite. */
+    readonly resgates: readonly ResgateEfetuado[];
   };
   readonly pendentes: {
     readonly aprovadosNaoTransferidos: PendenteCaixa;
@@ -114,8 +143,8 @@ export interface CaixaPainel {
     readonly somaSerie: SomaCaixa;
     /** SUM(pagamentos.intencao_total_paid_cents) dos pagamentos com entrada no período. */
     readonly totalPagoDosPagamentosCents: number;
-    /** SUM(repasses_recebedor.amount_cents) dos repasses com saída no período. */
-    readonly totalDosRepassesCents: number;
+    /** Lançamentos de presente do livro ligados aos resgates do período. */
+    readonly totalNoLivroDosResgatesCents: number;
     /** Tudo abaixo: referência − comparado. Exibir quando ≠ 0; nunca ajustar. */
     readonly diferencas: {
       readonly entradasBrutasCents: number;
@@ -137,12 +166,11 @@ const TIPO_ADICIONAL = "credito_passthrough_surcharge";
 const TIPOS_ENTRADA = [TIPO_PRESENTE, TIPO_TAXA, TIPO_ADICIONAL] as const;
 
 /**
- * Repasse cujo dinheiro de fato saiu: `pago`, ou `aprovado` manual com
- * referência bancária. `aprovado` carimbado SEM referência e SEM envio é a
- * "conta marcada transferida sem envio" (#284): não é saída, é pendente.
+ * Resgate cuja transferência o banco aceitou (ver mapeamento no cabeçalho).
+ * `aprovado` SEM referência e SEM envio (inclusive o carimbado do #284) não é.
  */
-const REPASSE_TRANSFERIDO = sql`(
-  r.status = 'pago'
+const REPASSE_ACEITO = sql`(
+  r.status IN ('enviado_ao_banco', 'pago')
   OR (r.status = 'aprovado' AND r.bank_transfer_ref IS NOT NULL)
 )`;
 
@@ -188,23 +216,81 @@ function eventosEntrada(platformId: string, de: string, ate: string) {
   )`;
 }
 
-/** Lançamentos de presente efetivamente transferidos no período. */
-function eventosSaida(platformId: string, de: string, ate: string) {
+/** Resgates aceitos pelo banco no período, um por linha, com a data do aceite. */
+function resgatesEfetuados(platformId: string, de: string, ate: string) {
   return sql`(
     SELECT
-      l.id,
-      l.amount_cents,
       r.id AS id_repasse,
-      r.amount_cents AS repasse_amount_cents,
+      r.id_campanha,
+      c.titulo AS campanha_titulo,
+      (SELECT rc.nome_titular FROM recebedores rc
+        WHERE rc.campanha_id = r.id_campanha AND rc.is_active
+        ORDER BY rc.id LIMIT 1) AS recebedor_nome,
+      r.amount_cents,
+      r.status,
+      r.bank_transfer_ref,
       CASE WHEN r.inter_codigo_solicitacao IS NOT NULL THEN 'inter' ELSE 'manual' END AS metodo,
-      ${diaLocal("l.transferido_em")} AS dia
-    FROM lancamentos_financeiros l
-    INNER JOIN repasses_recebedor r ON r.id = l.id_repasse
+      a.efetuado_em,
+      ${diaLocal("a.efetuado_em")} AS dia,
+      (SELECT COALESCE(SUM(l.amount_cents), 0) FROM lancamentos_financeiros l
+        WHERE l.id_repasse = r.id AND l.tipo = ${sql.lit(TIPO_PRESENTE)}
+          AND (l.cancelado_em IS NULL OR l.transferido_em IS NOT NULL)) AS livro_cents
+    FROM repasses_recebedor r
     INNER JOIN campanhas c ON c.id = r.id_campanha AND c.id_plataforma = ${platformId}
-    WHERE l.tipo = ${sql.lit(TIPO_PRESENTE)}
-      AND l.transferido_em >= ${corte(de)} AND l.transferido_em < ${corte(ate)}
-      AND ${REPASSE_TRANSFERIDO}
+    CROSS JOIN LATERAL (
+      SELECT COALESCE(
+        r.enviado_ao_banco_em,
+        (SELECT MIN(l.transferido_em) FROM lancamentos_financeiros l WHERE l.id_repasse = r.id),
+        r.aprovado_em
+      ) AS efetuado_em
+    ) a
+    WHERE ${REPASSE_ACEITO}
+      AND a.efetuado_em >= ${corte(de)} AND a.efetuado_em < ${corte(ate)}
   )`;
+}
+
+interface ResgateRow {
+  id_repasse: string;
+  id_campanha: string;
+  campanha_titulo: string;
+  recebedor_nome: string | null;
+  amount_cents: string | number;
+  status: string;
+  bank_transfer_ref: string | null;
+  metodo: string;
+  efetuado_em: Date;
+  dia: string;
+  livro_cents: string | number;
+}
+
+/**
+ * Resgates aceitos pelo banco em [de, ate) (datas locais de SP). Fonte única
+ * das saídas do caixa e do filtro de período da tela de resgates.
+ */
+export async function listarResgatesEfetuados(
+  db: Database,
+  input: { readonly platformId: string; readonly de: string; readonly ate: string },
+): Promise<(ResgateEfetuado & { readonly dia: string; readonly livroCents: number })[]> {
+  if (!isLocalDate(input.de) || !isLocalDate(input.ate) || input.de >= input.ate) {
+    throw new InvalidCaixaPeriodoError(input.de >= input.ate ? "intervalo_vazio" : "data_invalida");
+  }
+  const res = await sql<ResgateRow>`
+    SELECT * FROM ${resgatesEfetuados(input.platformId, input.de, input.ate)} s
+    ORDER BY s.efetuado_em, s.id_repasse
+  `.execute(db);
+  return res.rows.map((row) => ({
+    idRepasse: row.id_repasse,
+    idCampanha: row.id_campanha,
+    campanhaTitulo: row.campanha_titulo,
+    recebedorNome: row.recebedor_nome,
+    amountCents: inteiro(row.amount_cents, `resgate.${row.id_repasse}`),
+    status: row.status,
+    metodo: row.metodo === "inter" ? "inter" : "manual",
+    bankTransferRef: row.bank_transfer_ref,
+    efetuadoEm: row.efetuado_em,
+    dia: row.dia,
+    livroCents: inteiro(row.livro_cents, `resgate.${row.id_repasse}.livro`),
+  }));
 }
 
 function inteiro(value: string | number | null | undefined, campo: string): number {
@@ -311,53 +397,22 @@ export async function loadCaixaPainel(
       )
     `.execute(trx);
 
-    // ── Saídas: total independente, por método e por dia ──────────────
-    const saidaTotalRes = await sql<{
-      cents: string | number;
-      repasses: string | number;
-      repasses_cents: string | number;
-    }>`
-      SELECT
-        COALESCE(SUM(s.amount_cents), 0)::bigint AS cents,
-        COUNT(DISTINCT s.id_repasse) AS repasses,
-        COALESCE((
-          SELECT SUM(x.repasse_amount_cents) FROM (
-            SELECT DISTINCT s2.id_repasse, s2.repasse_amount_cents
-            FROM ${eventosSaida(platformId, de, ate)} s2
-          ) x
-        ), 0)::bigint AS repasses_cents
-      FROM ${eventosSaida(platformId, de, ate)} s
+    // ── Saídas: os resgates aceitos no período + total independente ────
+    const resgates = await listarResgatesEfetuados(trx, { platformId, de, ate });
+    const saidaTotalRes = await sql<{ cents: string | number }>`
+      SELECT COALESCE(SUM(s.amount_cents), 0)::bigint AS cents
+      FROM ${resgatesEfetuados(platformId, de, ate)} s
     `.execute(trx);
-    const saidaTotal = saidaTotalRes.rows[0];
-    if (!saidaTotal) throw new Error("admin_caixa_saida_sem_linha");
-
-    const saidaMetodoRes = await sql<{
-      metodo: string;
-      cents: string | number;
-      repasses: string | number;
-    }>`
-      SELECT s.metodo, COALESCE(SUM(s.amount_cents), 0)::bigint AS cents,
-             COUNT(DISTINCT s.id_repasse) AS repasses
-      FROM ${eventosSaida(platformId, de, ate)} s
-      GROUP BY s.metodo
-    `.execute(trx);
+    const saidasCents = inteiro(saidaTotalRes.rows[0]?.cents, "saida.total");
     const saidaPorMetodo: Record<MetodoSaida, SaidaMetodo> = {
       inter: { cents: 0, repasses: 0 },
       manual: { cents: 0, repasses: 0 },
     };
-    for (const row of saidaMetodoRes.rows) {
-      const chave: MetodoSaida = row.metodo === "inter" ? "inter" : "manual";
-      saidaPorMetodo[chave] = {
-        cents: inteiro(row.cents, `saida.${row.metodo}.cents`),
-        repasses: inteiro(row.repasses, `saida.${row.metodo}.repasses`),
-      };
+    for (const r of resgates) {
+      const m = saidaPorMetodo[r.metodo];
+      saidaPorMetodo[r.metodo] = { cents: m.cents + r.amountCents, repasses: m.repasses + 1 };
     }
-
-    const diasSaidaRes = await sql<{ dia: string; cents: string | number }>`
-      SELECT s.dia, COALESCE(SUM(s.amount_cents), 0)::bigint AS cents
-      FROM ${eventosSaida(platformId, de, ate)} s
-      GROUP BY s.dia
-    `.execute(trx);
+    const totalNoLivroDosResgatesCents = resgates.reduce((a, r) => a + r.livroCents, 0);
 
     // ── Pendentes: fotografia de agora, independe do período ──────────
     const pendRes = await sql<{ grupo: string; cents: string | number; repasses: string | number }>`
@@ -375,13 +430,9 @@ export async function loadCaixaPainel(
         COUNT(*) AS repasses
       FROM repasses_recebedor r
       INNER JOIN campanhas c ON c.id = r.id_campanha AND c.id_plataforma = ${platformId}
-      WHERE r.status IN ('aprovado', 'transferindo', 'enviado_ao_banco', 'falhou', 'verificando')
-        -- Repasse manual aprovado já carimbado no livro JÁ foi transferido (é saída).
-        AND NOT (r.status = 'aprovado' AND r.bank_transfer_ref IS NOT NULL
-          AND EXISTS (
-            SELECT 1 FROM lancamentos_financeiros l
-            WHERE l.id_repasse = r.id AND l.transferido_em IS NOT NULL
-          ))
+      WHERE r.status IN ('aprovado', 'transferindo', 'falhou', 'verificando')
+        -- Aceito pelo banco (manual com referência) é saída, não pendente.
+        AND NOT ${REPASSE_ACEITO}
       GROUP BY 1
     `.execute(trx);
     const pend = (grupo: string): PendenteCaixa => {
@@ -412,8 +463,8 @@ export async function loadCaixaPainel(
       acc.bruto += v.brutoCents;
       acc.estornos += v.estornosCents;
     }
-    for (const row of diasSaidaRes.rows) {
-      acumula(row.dia).saidas += inteiro(row.cents, `dia.saida.${row.dia}`);
+    for (const r of resgates) {
+      acumula(r.dia).saidas += r.amountCents;
     }
     const serie: SerieBucketCaixa[] = grade.buckets.map((bucket) => {
       const acc = porBucket.get(bucket.inicio) ?? { bruto: 0, estornos: 0, saidas: 0 };
@@ -428,9 +479,7 @@ export async function loadCaixaPainel(
     });
 
     const entradasTotal = entradaValores(total, "total");
-    const saidasCents = inteiro(saidaTotal.cents, "saida.total");
     const totalPagoDosPagamentosCents = inteiro(totalPagoRes.rows[0]?.total_pago, "total_pago");
-    const totalDosRepassesCents = inteiro(saidaTotal.repasses_cents, "repasses_cents");
     const somaSerie: SomaCaixa = {
       entradasBrutasCents: serie.reduce((a, b) => a + b.entradasBrutasCents, 0),
       estornosCents: serie.reduce((a, b) => a + b.estornosCents, 0),
@@ -454,8 +503,9 @@ export async function loadCaixaPainel(
       },
       saidas: {
         totalCents: saidasCents,
-        repasses: inteiro(saidaTotal.repasses, "saida.repasses"),
+        repasses: resgates.length,
         porMetodo: saidaPorMetodo,
+        resgates: resgates.map(({ dia: _dia, livroCents: _livro, ...r }) => r),
       },
       pendentes: {
         aprovadosNaoTransferidos: pend("aprovado"),
@@ -468,13 +518,13 @@ export async function loadCaixaPainel(
         totalIndependente,
         somaSerie,
         totalPagoDosPagamentosCents,
-        totalDosRepassesCents,
+        totalNoLivroDosResgatesCents,
         diferencas: {
           entradasBrutasCents: totalIndependente.entradasBrutasCents - somaSerie.entradasBrutasCents,
           estornosCents: totalIndependente.estornosCents - somaSerie.estornosCents,
           saidasCents: totalIndependente.saidasCents - somaSerie.saidasCents,
           totalPagoCents: totalPagoDosPagamentosCents - entradasTotal.brutoCents,
-          repassesCents: totalDosRepassesCents - saidasCents,
+          repassesCents: totalNoLivroDosResgatesCents - saidasCents,
         },
       },
     };

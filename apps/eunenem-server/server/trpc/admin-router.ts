@@ -105,11 +105,17 @@ import {
 } from "../../pages/lib/receitaPeriodo.js";
 import { type CoberturaDespesas, loadDespesasPainel } from "../admin-despesas.js";
 import type { Database } from "../../../../src/adapters/database.js";
-import { InvalidCaixaPeriodoError, loadCaixaPainel } from "../admin-caixa.js";
+import {
+  InvalidCaixaPeriodoError,
+  listarResgatesEfetuados,
+  loadCaixaPainel,
+  type ResgateEfetuado,
+} from "../admin-caixa.js";
 import { caixaParaCsv, nomeArquivoCaixa } from "../../pages/lib/caixaCsv.js";
 import { CAIXA_GRANULARIDADES } from "../../pages/lib/caixaPeriodo.js";
 import {
   alterarValorDespesaManual,
+  corrigirMesDespesaManual,
   criarDespesaManual,
   excluirDespesaManual,
   DespesaManualInvalida,
@@ -2855,7 +2861,65 @@ function toRepasseAdminDTO(
   };
 }
 
+const LocalDateSchema = z
+  .string()
+  .length(10)
+  .refine(isLocalDate, { message: "data_invalida" });
+
+/** aperture-9nmdo — um resgate aceito pelo banco (linha da tela de resgates). */
+const ResgateEfetuadoSchema = z.object({
+  idRepasse: z.string(),
+  idCampanha: z.string(),
+  campanhaTitulo: z.string(),
+  recebedorNome: z.string().nullable(),
+  amountCents: z.number().int(),
+  status: z.string(),
+  metodo: z.enum(["inter", "manual"]),
+  bankTransferRef: z.string().nullable(),
+  efetuadoEm: z.string(),
+});
+
+function toResgateEfetuadoDTO(r: ResgateEfetuado): z.infer<typeof ResgateEfetuadoSchema> {
+  return {
+    idRepasse: r.idRepasse,
+    idCampanha: r.idCampanha,
+    campanhaTitulo: r.campanhaTitulo,
+    recebedorNome: r.recebedorNome,
+    amountCents: r.amountCents,
+    status: r.status,
+    metodo: r.metodo,
+    bankTransferRef: r.bankTransferRef,
+    efetuadoEm: r.efetuadoEm.toISOString(),
+  };
+}
+
 const repassesRouter = t.router({
+  /**
+   * aperture-9nmdo — filtro de período da tela de resgates: os resgates
+   * aceitos pelo banco em [de, ate), pela MESMA consulta das saídas do
+   * Fluxo de caixa (server/admin-caixa.ts). Leitura pura.
+   */
+  efetuados: adminProcedure
+    .input(z.object({ de: LocalDateSchema, ate: LocalDateSchema }))
+    .output(z.object({ resgates: z.array(ResgateEfetuadoSchema), totalCents: z.number().int() }))
+    .query(async ({ ctx, input }) => {
+      try {
+        const resgates = await listarResgatesEfetuados(ctx.deps.db, {
+          platformId: ID_PLATAFORMA_EUNENEM,
+          ...input,
+        });
+        return {
+          resgates: resgates.map(toResgateEfetuadoDTO),
+          totalCents: resgates.reduce((a, r) => a + r.amountCents, 0),
+        };
+      } catch (error: unknown) {
+        if (error instanceof InvalidCaixaPeriodoError) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: error.message });
+        }
+        throw error;
+      }
+    }),
+
   list: adminProcedure
     .input(RepassesListInputSchema)
     .output(RepassesListOutputSchema)
@@ -4320,11 +4384,6 @@ const catalogRouter = t.router({
  * prévia da NFS-e (PR #144) depende dele e dos tipos dele.
  * ────────────────────────────────────────────────────────────────────── */
 
-const LocalDateSchema = z
-  .string()
-  .length(10)
-  .refine(isLocalDate, { message: "data_invalida" });
-
 const ReceitaSomaSchema = z.object({
   taxasRegistradasCents: cents(),
   cancelamentosCents: cents(),
@@ -4844,6 +4903,8 @@ const TipoDespesaManualSchema = z.discriminatedUnion("recorrencia", [
   z.object({
     recorrencia: z.literal("mensal"),
     diaCobranca: z.number().int().min(1).max(28),
+    /** aperture-9nmdo: cobra a cada N meses a partir do mês do início. */
+    intervaloMeses: z.number().int().min(1).max(12).optional(),
     inicio: LocalDateSchema,
     fim: LocalDateSchema.optional(),
   }),
@@ -4856,11 +4917,23 @@ const DespesaManualSchema = z.object({
   categoria: z.string().nullable(),
   recorrencia: z.enum(["mensal", "unica"]),
   diaCobranca: z.number().int().nullable(),
+  intervaloMeses: z.number().int().min(1).max(12),
   inicio: LocalDateSchema.nullable(),
   fim: LocalDateSchema.nullable(),
   data: LocalDateSchema.nullable(),
   valores: z.array(z.object({ vigenteDesde: LocalDateSchema, valorCents: z.number().int() })),
   valorAtualCents: z.number().int().nonnegative(),
+  /** Correções de uma cobrança, em ordem de criação; `vigente` = a que conta. */
+  ajustes: z.array(
+    z.object({
+      competencia: LocalDateSchema,
+      valorCents: z.number().int().nonnegative(),
+      valorOriginalCents: z.number().int().nonnegative(),
+      nota: z.string(),
+      vigente: z.boolean(),
+      criadoEm: z.string(),
+    }),
+  ),
 });
 
 function erroDespesaManual(error: unknown): never {
@@ -4901,11 +4974,20 @@ const despesasManuaisRouter = t.router({
           categoria: d.categoria,
           recorrencia: d.recorrencia,
           diaCobranca: d.diaCobranca,
+          intervaloMeses: d.intervaloMeses,
           inicio: d.inicio,
           fim: d.fim,
           data: d.data,
           valores: [...d.valores],
           valorAtualCents: d.valorAtualCents,
+          ajustes: d.ajustes.map((a) => ({
+            competencia: a.competencia,
+            valorCents: a.valorCents,
+            valorOriginalCents: a.valorOriginalCents,
+            nota: a.nota,
+            vigente: a.vigente,
+            criadoEm: a.criadoEm.toISOString(),
+          })),
         })),
       };
     }),
@@ -4947,6 +5029,29 @@ const despesasManuaisRouter = t.router({
           ...input,
         });
         return { ok: true as const };
+      } catch (error: unknown) {
+        erroDespesaManual(error);
+      }
+    }),
+
+  /** aperture-9nmdo — corrige o valor da cobrança de um mês; nota obrigatória. */
+  corrigirMes: adminProcedure
+    .input(
+      z.object({
+        id: z.string().uuid(),
+        mes: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/),
+        valorCents: z.number().int().nonnegative().max(100_000_000_00),
+        nota: z.string().trim().min(1).max(500),
+      }),
+    )
+    .output(z.object({ competencia: LocalDateSchema }))
+    .mutation(async ({ ctx, input }) => {
+      try {
+        return await corrigirMesDespesaManual(ctx.deps.db, {
+          platformId: ID_PLATAFORMA_EUNENEM,
+          ...input,
+          actorId: ctx.adminUsuario.id,
+        });
       } catch (error: unknown) {
         erroDespesaManual(error);
       }
@@ -5038,6 +5143,7 @@ const CaixaPainelSchema = z.object({
     totalCents: z.number().int(),
     repasses: z.number().int(),
     porMetodo: z.object({ inter: CaixaSaidaMetodoSchema, manual: CaixaSaidaMetodoSchema }),
+    resgates: z.array(ResgateEfetuadoSchema),
   }),
   pendentes: z.object({
     aprovadosNaoTransferidos: CaixaPendenteSchema,
@@ -5061,7 +5167,7 @@ const CaixaPainelSchema = z.object({
     totalIndependente: CaixaSomaSchema,
     somaSerie: CaixaSomaSchema,
     totalPagoDosPagamentosCents: z.number().int(),
-    totalDosRepassesCents: z.number().int(),
+    totalNoLivroDosResgatesCents: z.number().int(),
     diferencas: z.object({
       entradasBrutasCents: z.number().int(),
       estornosCents: z.number().int(),
@@ -5102,7 +5208,12 @@ const caixaRouter = t.router({
     .output(CaixaPainelSchema)
     .query(async ({ ctx, input }) => {
       const painel = await lerCaixa(ctx, input);
-      return { ...painel, snapshotAt: painel.snapshotAt.toISOString(), serie: [...painel.serie] };
+      return {
+        ...painel,
+        snapshotAt: painel.snapshotAt.toISOString(),
+        saidas: { ...painel.saidas, resgates: painel.saidas.resgates.map(toResgateEfetuadoDTO) },
+        serie: [...painel.serie],
+      };
     }),
   csv: adminProcedure
     .input(CaixaPeriodoInputSchema)
