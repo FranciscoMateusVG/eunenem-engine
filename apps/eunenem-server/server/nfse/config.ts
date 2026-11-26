@@ -171,7 +171,17 @@ const RegEspTribSchema = z.enum(['0', '1', '2', '3', '4', '5', '6', '9']);
 const TribISSQNSchema = z.enum(['1', '2', '3', '4']);
 const TpRetISSQNSchema = z.enum(['1', '2', '3']);
 const AliquotaSchema = z.string().regex(/^(0|[0-9](\.[0-9]{2})?)$/);
-const InscricaoMunicipalSchema = z.string().min(1).max(15).regex(LATIN1);
+/**
+ * IM do prestador. 'omitir' tira a tag: a produção restrita recusa IM quando
+ * o CNC NFS-e do município não tem dados complementares do prestador (E0120,
+ * smoke 26/11/2026).
+ */
+const InscricaoMunicipalSchema = z
+  .string()
+  .min(1)
+  .max(15)
+  .regex(LATIN1)
+  .transform((v) => (v === 'omitir' ? null : v));
 const CNbsSchema = z.string().regex(/^\d{9}$/);
 const DEC3V2 = /^(0|0\.[0-9]{2}|[1-9][0-9]{0,2}(\.[0-9]{2})?)$/;
 const DEC2V2 = /^(0|0\.[0-9]{2}|[1-9][0-9]?(\.[0-9]{2})?)$/;

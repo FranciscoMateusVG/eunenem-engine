@@ -168,6 +168,21 @@ describe('parseNfseConfig', () => {
     }
   });
 
+  it('IM: default do contador; NFSE_INSCRICAO_MUNICIPAL=omitir tira a tag (E0120 na produção restrita)', () => {
+    expect(parseNfseConfig({}).inscricaoMunicipal).toEqual({
+      valor: '12306200019',
+      origem: 'default',
+    });
+    expect(parseNfseConfig({ NFSE_INSCRICAO_MUNICIPAL: 'omitir' }).inscricaoMunicipal).toEqual({
+      valor: null,
+      origem: 'env',
+    });
+    expect(parseNfseConfig({ NFSE_INSCRICAO_MUNICIPAL: '123' }).inscricaoMunicipal).toEqual({
+      valor: '123',
+      origem: 'env',
+    });
+  });
+
   it('produção só é liberada com NFSE_EMISSAO_PRODUCAO=liberada, exatamente', () => {
     expect(parseNfseConfig({}).emissaoProducaoLiberada).toBe(false);
     expect(parseNfseConfig({ NFSE_EMISSAO_PRODUCAO: 'true' }).emissaoProducaoLiberada).toBe(false);
