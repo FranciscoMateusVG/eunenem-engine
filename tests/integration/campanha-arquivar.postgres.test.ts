@@ -33,7 +33,9 @@ let seed: ReceitaLedgerSeed;
 const magicLinks: string[] = [];
 
 beforeAll(async () => {
-  testDb = await createTestDatabase();
+  // Own container: checkout rows and extra public lists would leak into the
+  // shared DB other files truncate and count (e.g. the sitemap).
+  testDb = await createTestDatabase({ isolated: true });
   deps = buildServerDeps(
     loadEnv({
       BETTER_AUTH_SECRET: SECRET,
