@@ -4,6 +4,7 @@ import { resolveRoute } from '../../../apps/eunenem-server/pages/App.js';
 import { CaixaPainel } from '../../../apps/eunenem-server/pages/components/eunenem/admin/caixa/CaixaPainel.js';
 import { PagamentosTabs } from '../../../apps/eunenem-server/pages/components/eunenem/admin/PagamentosTabs.js';
 import {
+  granularidadeParaCaixa,
   periodoResgatesDaUrl,
   ResgatesEfetuadosTabela,
 } from '../../../apps/eunenem-server/pages/components/eunenem/admin/ResgatesEfetuados.js';
@@ -238,4 +239,10 @@ describe('aperture-9nmdo — saídas = resgates aceitos pelo banco', () => {
     expect(periodoResgatesDaUrl('?de=2033-09-01&ate=2033-08-01')).toBeNull();
     expect(periodoResgatesDaUrl('?de=xx&ate=2033-08-01')).toBeNull();
   });
+});
+
+it('9nmdo: link para o caixa usa uma granularidade que o caixa aceita (≤ 400 buckets)', () => {
+  expect(granularidadeParaCaixa({ de: '2033-08-01', ate: '2033-09-01' })).toBe('dia');
+  expect(granularidadeParaCaixa({ de: '2032-01-01', ate: '2033-09-01' })).toBe('semana');
+  expect(granularidadeParaCaixa({ de: '2020-01-01', ate: '2033-09-01' })).toBe('mes');
 });

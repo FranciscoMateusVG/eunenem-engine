@@ -8,6 +8,7 @@ import {
   RepasseStatusPill,
 } from "@/components/eunenem/admin/repasse-status";
 import {
+  granularidadeParaCaixa,
   type PeriodoResgates,
   periodoResgatesDaUrl,
   ResgatesEfetuadosTabela,
@@ -189,7 +190,7 @@ function PeriodoResgatesSecao({
               referência). É o mesmo número das saídas do fluxo de caixa.
             </p>
             <a
-              href={`/admin/pagamentos/caixa?${new URLSearchParams({ de: periodo.de, ate: periodo.ate, g: "dia" })}`}
+              href={`/admin/pagamentos/caixa?${new URLSearchParams({ de: periodo.de, ate: periodo.ate, g: granularidadeParaCaixa(periodo) })}`}
               className="font-mono text-[12px] text-plum hover:underline"
             >
               ver no fluxo de caixa →

@@ -1,4 +1,5 @@
 import type { inferRouterOutputs } from "@trpc/server";
+import { bucketsDoPeriodoCaixa, type CaixaGranularidade } from "@/lib/caixaPeriodo";
 import { formatBRL } from "@/lib/formatBRL";
 import { formatLocalDate, isLocalDate, localDateInSaoPaulo } from "@/lib/receitaPeriodo";
 import type { AppRouter } from "../../../../server/trpc/router.js";
@@ -30,6 +31,14 @@ export function periodoResgatesDaUrl(search: string): PeriodoResgates | null {
   const ate = params.get("ate");
   if (!de || !ate || !isLocalDate(de) || !isLocalDate(ate) || de >= ate) return null;
   return { de, ate };
+}
+
+/** A granularidade mais fina que o Fluxo de caixa aceita para o período (≤ 400 buckets). */
+export function granularidadeParaCaixa(periodo: PeriodoResgates): CaixaGranularidade {
+  for (const g of ["dia", "semana"] as const) {
+    if (bucketsDoPeriodoCaixa({ ...periodo, granularidade: g }).ok) return g;
+  }
+  return "mes";
 }
 
 const TH =
