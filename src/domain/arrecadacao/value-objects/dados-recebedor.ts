@@ -1,4 +1,5 @@
 import { z } from 'zod/v4';
+import { EnderecoFiscalSchema } from './endereco-fiscal.js';
 
 /**
  * Value object: the receiver's payout data — a DISCRIMINATED UNION by
@@ -107,6 +108,13 @@ export function mensagemChavePixInvalida(
 
 const nomeTitular = z.string().trim().min(1, 'Nome do titular nao pode ser vazio').max(120);
 
+/**
+ * aperture-xdylg — endereço fiscal do titular (tomador da NFS-e). Opcional no
+ * cadastro (recebedores antigos não têm); obrigatório para solicitar resgate —
+ * a política vive na fronteira `transferencia.solicitar`.
+ */
+const enderecoFiscal = EnderecoFiscalSchema.optional();
+
 export const DadosRecebedorPixSchema = z.object({
   metodo: z.literal('pix'),
   nomeTitular,
@@ -114,6 +122,7 @@ export const DadosRecebedorPixSchema = z.object({
   cpfTitular: z.string().trim().min(1).max(20),
   tipoChavePix: TipoChavePixSchema,
   chavePix: z.string().trim().min(1, 'Chave PIX nao pode ser vazia').max(140),
+  enderecoFiscal,
 });
 
 export const DadosRecebedorContaSchema = z.object({
@@ -140,6 +149,7 @@ export const DadosRecebedorContaSchema = z.object({
     .regex(/^\d{1,20}$/, 'Conta deve ser numerica'),
   contaDigito: z.string().trim().min(1).max(2),
   tipoConta: TipoContaSchema,
+  enderecoFiscal,
 });
 
 /**

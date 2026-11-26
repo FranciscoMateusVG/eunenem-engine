@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import type { NfseConfig } from './config.js';
-import type { TipoAmbiente } from './dps.js';
+import type { EnderecoTomador, TipoAmbiente } from './dps.js';
 import type { AvisoPrevia, CampoDps, PreviaMensal } from './previa-mensal.js';
 
 /**
@@ -41,6 +41,8 @@ export interface NotaPlanejada {
   readonly valorCents: number;
   /** Campanhas cuja receita compõe a nota (ordenadas). */
   readonly campanhas: readonly string[];
+  /** Endereço fiscal do tomador (aperture-xdylg), quando houver. Não entra na conferência de divergência (não é base de cálculo). */
+  readonly endereco: EnderecoTomador | null;
 }
 
 /** Nota já gravada para a competência por um clique anterior. */
@@ -74,7 +76,7 @@ export type PoliticaPendencias = (previa: PreviaMensal) => readonly BloqueioEmis
 export const agruparPorTomador: EstrategiaAgrupamento = (previa) =>
   previa.notas
     .filter((n) => n.dps.status === 'gerada')
-    .map((n) => ({ tomadorCpf: n.cpf, tomadorNome: n.nome, valorCents: n.resultadoCents, campanhas: [...n.campanhas].sort() }));
+    .map((n) => ({ tomadorCpf: n.cpf, tomadorNome: n.nome, valorCents: n.resultadoCents, campanhas: [...n.campanhas].sort(), endereco: n.endereco }));
 
 export interface NotaPulada {
   /** Campanha(s) ou CPF da pendência. */
@@ -138,7 +140,7 @@ const AVISO_BLOQUEIA: Partial<Record<AvisoPrevia, BloqueioEmissao>> = {
 };
 
 /** Identificação de prévia e tomador variam por nota/emissão; não são "fiscais". */
-const TAGS_NAO_FISCAIS = new Set(['dhEmi', 'serie', 'nDPS', 'toma', 'CPF', 'xNome', 'vServ', 'verAplic']);
+const TAGS_NAO_FISCAIS = new Set(['dhEmi', 'serie', 'nDPS', 'toma', 'CPF', 'xNome', 'end', 'vServ', 'verAplic']);
 
 export function montarPlanoEmissao(input: {
   readonly previa: PreviaMensal;
@@ -267,7 +269,7 @@ function impressaoDoPlano(plano: {
     plano.prestadorCnpj,
     plano.fixada,
     plano.idsFixados,
-    plano.notas.map((n) => [n.tomadorCpf, n.tomadorNome, n.valorCents, [...n.campanhas]]).sort(),
+    plano.notas.map((n) => [n.tomadorCpf, n.tomadorNome, n.valorCents, [...n.campanhas], n.endereco]).sort(),
     plano.camposFiscais.map((c) => [c.tag, c.valor]).sort(),
   ]);
   return createHash('sha256').update(canonico).digest('hex');

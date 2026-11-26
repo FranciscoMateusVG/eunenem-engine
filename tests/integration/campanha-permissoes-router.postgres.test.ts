@@ -255,6 +255,7 @@ describe('per-action permission guards (Postgres, real router)', () => {
       expect(await membro.caller.recebedor.status({ idCampanha })).toEqual({
         configurado: true,
         metodo: 'pix',
+        dadosFiscaisCompletos: false,
       });
       expect(await owner.caller.recebedor.get({ idCampanha })).toMatchObject({
         cpfTitular: PIX.cpfTitular,

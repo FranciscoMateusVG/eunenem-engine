@@ -5,7 +5,7 @@ import type { NfseEmissoes } from '../../../../src/adapters/db-types.generated.j
 import type { Database } from '../../../../src/adapters/database.js';
 import { assinarDps, assinarPedidoEvento, carregarCertificado, type MaterialCertificado } from './assinatura.js';
 import type { NfseConfig } from './config.js';
-import { dhEmiSaoPaulo, montarDpsXml, montarIdDps, type TipoAmbiente } from './dps.js';
+import { dhEmiSaoPaulo, type EnderecoTomador, montarDpsXml, montarIdDps, type TipoAmbiente } from './dps.js';
 import { montarPedidoCancelamento, type MotivoCancelamento, TIPO_EVENTO_CANCELAMENTO } from './evento.js';
 import { montarPlanoEmissao, type NotaFixada, type NotaPlanejada, type PlanoEmissao } from './plano-emissao.js';
 import { carregarPreviaMensal, montarDpsDaNota } from './previa-mensal.js';
@@ -234,6 +234,7 @@ export async function gravarNotas(
             tomador_nome: nota.tomadorNome,
             valor_cents: nota.valorCents,
             campanhas: [...nota.campanhas],
+            tomador_endereco: nota.endereco === null ? null : JSON.stringify(nota.endereco),
             serie: input.serie,
             n_dps: nDps,
             id_dps: input.idDps(nDps),
@@ -275,6 +276,7 @@ function notaDaLinha(l: NonNullable<Linha>): NotaFixada {
     tomadorNome: l.tomador_nome,
     valorCents: Number(l.valor_cents),
     campanhas: [...l.campanhas].sort(),
+    endereco: (l.tomador_endereco as EnderecoTomador | null) ?? null,
     serie: l.serie,
     status: l.status as StatusEmissao,
   };
@@ -434,7 +436,7 @@ function dpsOuFalha(
   numeracao: { readonly serie: string; readonly nDPS: string },
 ) {
   const r = montarDpsDaNota({
-    tomador: { cpf: nota.tomadorCpf, nome: nota.tomadorNome },
+    tomador: { cpf: nota.tomadorCpf, nome: nota.tomadorNome, ...(nota.endereco ? { endereco: nota.endereco } : {}) },
     mes,
     resultadoCents: nota.valorCents,
     config,

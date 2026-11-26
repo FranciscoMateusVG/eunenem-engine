@@ -125,6 +125,7 @@ import {
   listarDespesasManuais,
 } from "../admin-despesas-manuais.js";
 import { carregarPreviaMensal, MesFuturoError } from "../nfse/previa-mensal.js";
+import { listarCadastrosIncompletos } from "../nfse/pendencias-cadastro.js";
 import {
   baixarDanfse,
   cancelarEmissao,
@@ -4777,7 +4778,16 @@ const NotaFiscalPlanoSchema = z.object({
   ambiente: z.enum(["1", "2"]),
   serie: z.string(),
   notas: z.array(
-    z.object({ tomadorCpf: z.string(), tomadorNome: z.string(), valorCents: z.number().int(), campanhas: z.array(z.string()) }),
+    z.object({
+      tomadorCpf: z.string(),
+      tomadorNome: z.string(),
+      valorCents: z.number().int(),
+      campanhas: z.array(z.string()),
+      /** aperture-xdylg — endereço que vai na DPS, se houver. */
+      endereco: z
+        .object({ cMun: z.string(), cep: z.string(), logradouro: z.string(), numero: z.string(), complemento: z.string().nullable().optional(), bairro: z.string() })
+        .nullable(),
+    }),
   ),
   puladas: z.array(z.object({ referencia: z.string(), motivo: z.string(), valorCents: z.number().int() })),
   fixada: z.boolean(),
@@ -5019,6 +5029,25 @@ const notaFiscalRouter = t.router({
       } catch (error: unknown) {
         return erroEmissao(error);
       }
+    }),
+
+  /** aperture-xdylg — listas com taxa no mês e cadastro fiscal incompleto (sem CPF na saída). */
+  cadastrosIncompletos: adminProcedure
+    .input(z.object({ mes: MesSchema }))
+    .output(
+      z.array(
+        z.object({
+          campanhaId: z.string(),
+          campanhaTitulo: z.string(),
+          responsaveis: z.array(z.object({ nome: z.string(), email: z.string() })),
+          taxaCents: z.number().int(),
+          motivos: z.array(z.enum(["sem_recebedor", "cpf_invalido", "nome_ausente", "sem_endereco"])),
+        }),
+      ),
+    )
+    .query(async ({ ctx, input }) => {
+      const lista = await listarCadastrosIncompletos(ctx.deps.db, { platformId: ID_PLATAFORMA_EUNENEM, mes: input.mes });
+      return lista.map((l) => ({ ...l, responsaveis: [...l.responsaveis], motivos: [...l.motivos] }));
     }),
 
   danfse: adminProcedure

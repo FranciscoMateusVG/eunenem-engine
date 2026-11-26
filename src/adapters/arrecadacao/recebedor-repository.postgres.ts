@@ -5,6 +5,7 @@ import type {
   TipoChavePix,
   TipoConta,
 } from '../../domain/arrecadacao/value-objects/dados-recebedor.js';
+import type { EnderecoFiscal } from '../../domain/arrecadacao/value-objects/endereco-fiscal.js';
 import type { IdCampanha, IdRecebedor } from '../../domain/arrecadacao/value-objects/ids.js';
 import type { Database } from '../database.js';
 import type { RecebedorRepository } from './recebedor-repository.js';
@@ -35,6 +36,14 @@ type RecebedorRow = {
   conta: string | null;
   conta_digito: string | null;
   tipo_conta: string | null;
+  endereco_cep: string | null;
+  endereco_logradouro: string | null;
+  endereco_numero: string | null;
+  endereco_complemento: string | null;
+  endereco_bairro: string | null;
+  endereco_cidade: string | null;
+  endereco_uf: string | null;
+  endereco_codigo_municipio_ibge: string | null;
   is_active: boolean;
   criada_em: Date;
 };
@@ -46,7 +55,40 @@ type RecebedorRow = {
  * variant-specific columns follow the exactly-one-populated rule enforced by
  * the row-level CHECK (migration 027, updated to include cpf_titular for pix).
  */
+function enderecoToColumns(e: EnderecoFiscal | undefined) {
+  return {
+    endereco_cep: e?.cep ?? null,
+    endereco_logradouro: e?.logradouro ?? null,
+    endereco_numero: e?.numero ?? null,
+    endereco_complemento: e?.complemento ?? null,
+    endereco_bairro: e?.bairro ?? null,
+    endereco_cidade: e?.cidade ?? null,
+    endereco_uf: e?.uf ?? null,
+    endereco_codigo_municipio_ibge: e?.codigoMunicipioIbge ?? null,
+  };
+}
+
+function enderecoFromRow(row: RecebedorRow): { enderecoFiscal?: EnderecoFiscal } {
+  if (row.endereco_cep === null) return {};
+  return {
+    enderecoFiscal: {
+      cep: row.endereco_cep,
+      logradouro: row.endereco_logradouro as string,
+      numero: row.endereco_numero as string,
+      complemento: row.endereco_complemento,
+      bairro: row.endereco_bairro as string,
+      cidade: row.endereco_cidade as string,
+      uf: row.endereco_uf as string,
+      codigoMunicipioIbge: row.endereco_codigo_municipio_ibge as string,
+    },
+  };
+}
+
 function dadosRecebedorToColumns(dados: DadosRecebedor) {
+  return { ...dadosRecebedorBaseColumns(dados), ...enderecoToColumns(dados.enderecoFiscal) };
+}
+
+function dadosRecebedorBaseColumns(dados: DadosRecebedor) {
   if (dados.metodo === 'pix') {
     return {
       metodo: 'pix' as const,
@@ -185,6 +227,7 @@ function toRecebedor(row: RecebedorRow): Recebedor {
           conta: row.conta as string,
           contaDigito: row.conta_digito as string,
           tipoConta: row.tipo_conta as TipoConta,
+          ...enderecoFromRow(row),
         }
       : {
           metodo: 'pix',
@@ -192,6 +235,7 @@ function toRecebedor(row: RecebedorRow): Recebedor {
           cpfTitular: row.cpf_titular as string,
           tipoChavePix: row.tipo_chave_pix as TipoChavePix,
           chavePix: row.chave_pix as string,
+          ...enderecoFromRow(row),
         };
 
   return {

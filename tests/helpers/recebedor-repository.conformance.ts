@@ -60,6 +60,57 @@ export function describeRecebedorRepositoryConformance(name: string, options: Co
       expect(await repo.findAtivoByCampanhaId(idCampanha)).toEqual(recebedor);
     });
 
+    it('round-trips the fiscal address (aperture-xdylg), with and without complemento', async () => {
+      for (const complemento of ['Apto 12', null]) {
+        const idCampanha = randomUUID();
+        await seedCampanha(idCampanha);
+        const recebedor = criarRecebedorInicial({
+          id: randomUUID(),
+          idCampanha,
+          dadosRecebedor: {
+            metodo: 'pix',
+            nomeTitular: 'Maria',
+            cpfTitular: '52998224725',
+            tipoChavePix: 'email',
+            chavePix: 'maria@exemplo.com',
+            enderecoFiscal: {
+              cep: '30130010',
+              logradouro: 'Av. Afonso Pena',
+              numero: '1000',
+              complemento,
+              bairro: 'Centro',
+              cidade: 'Belo Horizonte',
+              uf: 'MG',
+              codigoMunicipioIbge: '3106200',
+            },
+          },
+          criadaEm: new Date('2026-05-01T12:00:00.000Z'),
+        });
+        await repo.save(recebedor);
+        expect(await repo.findAtivoByCampanhaId(idCampanha)).toEqual(recebedor);
+      }
+    });
+
+    it('receiver without fiscal address reads back without the field', async () => {
+      const idCampanha = randomUUID();
+      await seedCampanha(idCampanha);
+      const recebedor = criarRecebedorInicial({
+        id: randomUUID(),
+        idCampanha,
+        dadosRecebedor: {
+          metodo: 'pix',
+          nomeTitular: 'Maria',
+          cpfTitular: '52998224725',
+          tipoChavePix: 'email',
+          chavePix: 'maria@exemplo.com',
+        },
+        criadaEm: new Date('2026-05-01T12:00:00.000Z'),
+      });
+      await repo.save(recebedor);
+      const lido = await repo.findAtivoByCampanhaId(idCampanha);
+      expect(lido?.dadosRecebedor).not.toHaveProperty('enderecoFiscal');
+    });
+
     it('round-trips a conta (bank-account) receiver', async () => {
       const idCampanha = randomUUID();
       await seedCampanha(idCampanha);
