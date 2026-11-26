@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import type { inferRouterOutputs } from '@trpc/server';
+import { resetAnalyticsIdentity } from '@/lib/analytics';
 import { useCampanhaEscrita } from '@/lib/campanha-escrita';
 import { painelHref, EUNENEM_SUPPORT_WHATSAPP_URL } from '@/lib/painelRoutes';
 import { trpc } from '@/lib/trpc';
@@ -13,6 +14,9 @@ import { useAcessoCampanha } from './useAcessoCampanha';
 type ConfiguracoesDTO = inferRouterOutputs<AppRouter>['configuracoes']['get'];
 /** Toggles de e-mail expostos por `configuracoes.get` (por usuário). */
 export type EmailToggleChave = keyof ConfiguracoesDTO['emails'];
+
+/** Tempo para a pessoa ler a confirmação antes de sair da área logada. */
+const REDIRECT_APOS_DESATIVAR_MS = 2500;
 
 export function ConfiguracoesBody({ slug }: PainelSectionBodyProps) {
   const id = useCampanhaEscrita();
@@ -44,13 +48,15 @@ export function ConfiguracoesBody({ slug }: PainelSectionBodyProps) {
     onError: (err) => toast.error(err.message || 'não consegui salvar — tenta de novo?'),
     onSettled: () => setSalvando((atual) => ({ ...atual, exibirRecados: false })),
   });
-  const excluirLista = trpc.configuracoes.excluirLista.useMutation({
-    onSuccess: () => window.location.replace('/campanhas'),
+  const desativar = trpc.usuario.desativarConta.useMutation({
+    onSuccess: () => {
+      resetAnalyticsIdentity();
+      window.setTimeout(() => window.location.assign('/'), REDIRECT_APOS_DESATIVAR_MS);
+    },
   });
 
   return (
     <ConfiguracoesView
-      key={id}
       slug={slug}
       idCampanha={id}
       pode={acesso.pode}
@@ -67,15 +73,11 @@ export function ConfiguracoesBody({ slug }: PainelSectionBodyProps) {
         setSalvando((atual) => ({ ...atual, exibirRecados: true }));
         privacidade.mutate({ idCampanha, exibirRecados: valor });
       }}
-      exclusao={{
-        permitida: acesso.papel === 'owner',
-        pendente: excluirLista.isPending || excluirLista.isSuccess,
-        erro:
-          excluirLista.error?.data?.code === 'INTERNAL_SERVER_ERROR'
-            ? 'Não consegui excluir a lista. Tente de novo.'
-            : excluirLista.error?.message ?? null,
-        onConfirmar: () => excluirLista.mutate({ idCampanha }),
-        onFechar: excluirLista.reset,
+      desativacao={{
+        pendente: desativar.isPending,
+        erro: desativar.error ? desativar.error.message || 'não consegui desativar a conta.' : null,
+        concluida: desativar.isSuccess,
+        onConfirmar: () => desativar.mutate(),
       }}
     />
   );
@@ -92,7 +94,7 @@ export interface ConfiguracoesViewProps {
   salvando: Partial<Record<EmailToggleChave | 'exibirRecados', boolean>>;
   onEmail: (chave: EmailToggleChave, valor: boolean) => void;
   onExibirRecados: (valor: boolean) => void;
-  exclusao: Omit<ExcluirListaDialogProps, 'tituloLista'> & { permitida: boolean };
+  desativacao: Omit<DesativarContaDialogProps, 'onFechar'>;
 }
 
 export function ConfiguracoesView(props: ConfiguracoesViewProps) {
@@ -170,100 +172,109 @@ export function ConfiguracoesView(props: ConfiguracoesViewProps) {
           {...emailToggle('presencas')}
         />
       </section>
-      {props.exclusao.permitida && config && idCampanha && (
-        <section className="config-card config-danger">
-          <h2>Excluir Listas</h2>
-          <p>Exclua a lista «{config.tituloLista}» do seu painel e tire a página dela do ar.</p>
-          <button
-            type="button"
-            className="perfil-btn perfil-btn-ghost"
-            onClick={() => setShowDelete(true)}
-          >
-            Excluir esta lista
-          </button>
-          {showDelete && (
-            <ExcluirListaDialog
-              tituloLista={config.tituloLista}
-              pendente={props.exclusao.pendente}
-              erro={props.exclusao.erro}
-              onConfirmar={props.exclusao.onConfirmar}
-              onFechar={() => {
-                setShowDelete(false);
-                props.exclusao.onFechar();
-              }}
-            />
-          )}
-        </section>
+      <section className="config-card config-danger">
+        <h2>Excluir conta</h2>
+        <p>
+          Desative sua conta quando quiser. Nada é apagado; a exclusão definitiva dos dados é
+          feita com o atendimento.
+        </p>
+        <button
+          type="button"
+          className="perfil-btn perfil-btn-ghost"
+          onClick={() => setShowDelete(true)}
+        >
+          Excluir minha conta
+        </button>
+      </section>
+      {showDelete && (
+        <DesativarContaDialog {...props.desativacao} onFechar={() => setShowDelete(false)} />
       )}
     </div>
   );
 }
 
-interface ExcluirListaDialogProps {
-  tituloLista: string;
+export interface DesativarContaDialogProps {
   pendente: boolean;
+  /** Mensagem do servidor (pendência financeira, login antigo…). */
   erro: string | null;
+  concluida: boolean;
   onConfirmar: () => void;
   onFechar: () => void;
 }
 
-export function ExcluirListaDialog({
-  tituloLista,
+export function DesativarContaDialog({
   pendente,
   erro,
+  concluida,
   onConfirmar,
   onFechar,
-}: ExcluirListaDialogProps) {
+}: DesativarContaDialogProps) {
   const dialog = useRef<HTMLDialogElement>(null);
   const [confirm, setConfirm] = useState(false);
   useEffect(() => {
     dialog.current?.showModal();
   }, []);
-
   return (
     <dialog
       ref={dialog}
       className="config-card config-modal"
       aria-labelledby="delete-title"
       onCancel={(e) => {
-        e.preventDefault();
-        if (!pendente) onFechar();
+        if (pendente || concluida) e.preventDefault();
+        else onFechar();
       }}
     >
-      <h2 id="delete-title">Excluir lista</h2>
-      <p>A lista «{tituloLista}» e os dados do evento vinculados a ela serão excluídos.</p>
-      <p>
-        Para solicitar a exclusão de uma lista com histórico financeiro, fale com o{' '}
-        <a href={EUNENEM_SUPPORT_WHATSAPP_URL}>atendimento</a>.
-      </p>
-      <label className="config-consent">
-        <input
-          type="checkbox"
-          checked={confirm}
-          disabled={pendente}
-          onChange={(e) => setConfirm(e.target.checked)}
-        />
-        Entendo que essa ação é definitiva e quero excluir esta lista.
-      </label>
-      {erro && <p role="alert">{erro}</p>}
-      <div className="config-actions">
-        <button
-          type="button"
-          className="perfil-btn perfil-btn-ghost"
-          onClick={onFechar}
-          disabled={pendente}
-        >
-          Cancelar
-        </button>
-        <button
-          type="button"
-          className="perfil-btn perfil-btn-primary"
-          onClick={onConfirmar}
-          disabled={!confirm || pendente}
-        >
-          {pendente ? 'Excluindo…' : 'Excluir lista'}
-        </button>
-      </div>
+      <h2 id="delete-title">Exclusão da conta</h2>
+      {concluida ? (
+        <p role="status">Sua conta foi desativada. Redirecionando para a página inicial…</p>
+      ) : (
+        <>
+          <p>
+            Sua conta será desativada e você sairá de todos os dispositivos. Nada é apagado:
+            campanhas, presentes e histórico financeiro ficam guardados.
+          </p>
+          <p>
+            Campanhas em que você é a única pessoa titular saem do ar. Se houver outra pessoa
+            titular, a campanha continua no ar com ela.
+          </p>
+          <p>
+            Não é possível desativar com saldo a sacar ou resgate em andamento. Por segurança,
+            pedimos que você tenha entrado há pouco tempo.
+          </p>
+          <p>
+            Para excluir seus dados definitivamente ou reativar a conta, fale com o{' '}
+            <a href={EUNENEM_SUPPORT_WHATSAPP_URL}>atendimento</a>.
+          </p>
+          <label className="config-consent">
+            <input
+              type="checkbox"
+              checked={confirm}
+              disabled={pendente}
+              onChange={(e) => setConfirm(e.target.checked)}
+            />
+            Entendo e quero desativar minha conta.
+          </label>
+          {erro && <p role="alert">{erro}</p>}
+          <div className="config-actions">
+            <button
+              type="button"
+              className="perfil-btn perfil-btn-ghost"
+              onClick={onFechar}
+              disabled={pendente}
+            >
+              Cancelar
+            </button>
+            <button
+              type="button"
+              className="perfil-btn perfil-btn-primary"
+              onClick={onConfirmar}
+              disabled={!confirm || pendente}
+            >
+              {pendente ? 'Desativando…' : 'Desativar minha conta'}
+            </button>
+          </div>
+        </>
+      )}
     </dialog>
   );
 }

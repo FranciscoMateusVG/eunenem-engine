@@ -9,7 +9,7 @@
  *   - `configuracoes.privacidade` — "Exibir recados publicamente" da campanha;
  *     exige `mensagens:gerenciar`. O mural público respeita o valor.
  *
- *   - `configuracoes.excluirLista` — exclusão da lista pelo titular.
+ * A desativação da conta é `usuario.desativarConta` (um único caminho).
  */
 import { initTRPC, TRPCError } from '@trpc/server';
 import { z } from 'zod/v4';
@@ -91,72 +91,7 @@ export const configuracoesRouter = t.router({
       preferencias(ctx).getPreferences(usuario.id, usuario.idPlataforma),
       ctx.deps.campanhaPrivacidadeRepository.exibeRecadosPublicamente(campanha.id),
     ]);
-    return { tituloLista: campanha.titulo, exibirRecados, emails: paraToggles(prefs) };
-  }),
-
-  excluirLista: t.procedure.input(campanhaInput).mutation(async ({ ctx, input }) => {
-    const { usuario, campanha } = await resolver(ctx, input.idCampanha);
-    const { deps } = ctx;
-    const erroFinanceiro = () =>
-      new TRPCError({
-        code: 'CONFLICT',
-        message: 'Esta lista tem histórico financeiro. Fale com o atendimento para solicitar a exclusão.',
-      });
-
-    try {
-      await deps.db.transaction().execute(async (trx) => {
-        const lista = await trx
-          .selectFrom('campanhas')
-          .select('id')
-          .where('id', '=', campanha.id)
-          .forUpdate()
-          .executeTakeFirst();
-        if (!lista) return;
-
-        const acesso = await deps.campanhaMembrosRepository.obterAcesso(
-          campanha.id,
-          usuario.idConta,
-          { trx },
-        );
-        if (acesso?.papel !== 'owner') {
-          throw new TRPCError({
-            code: 'FORBIDDEN',
-            message: 'Somente o titular pode excluir esta lista.',
-          });
-        }
-
-        // Pagamentos e contribuições têm FKs restritivas. Estas tabelas
-        // financeiras têm referência sem FK restritiva ou com cascata.
-        const [lancamento, repasse, resgate] = await Promise.all([
-          trx
-            .selectFrom('lancamentos_financeiros')
-            .select('id')
-            .where('id_campanha', '=', campanha.id)
-            .limit(1)
-            .executeTakeFirst(),
-          trx
-            .selectFrom('repasses_recebedor')
-            .select('id')
-            .where('id_campanha', '=', campanha.id)
-            .limit(1)
-            .executeTakeFirst(),
-          trx
-            .selectFrom('resgates_pendentes')
-            .select('id_campanha')
-            .where('id_campanha', '=', campanha.id)
-            .executeTakeFirst(),
-        ]);
-        if (lancamento || repasse || resgate) throw erroFinanceiro();
-
-        await deps.campanhaRepository.delete(campanha.id, { trx });
-      });
-    } catch (error) {
-      if (error instanceof Error && 'code' in error && error.code === '23503') {
-        throw erroFinanceiro();
-      }
-      throw error;
-    }
-    return { ok: true as const };
+    return { exibirRecados, emails: paraToggles(prefs) };
   }),
 
   emails: t.procedure.input(emailsInput).mutation(async ({ ctx, input }) => {
