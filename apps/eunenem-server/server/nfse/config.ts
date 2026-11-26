@@ -114,9 +114,9 @@ export interface NfseConfig {
    */
   readonly emissaoProducaoLiberada: boolean;
   /**
-   * NFSE_COMPETENCIA_MINIMA (AAAA-MM): primeira competência emitível. Só pode
-   * SUBIR o piso absoluto 2026-11 (decisão do contador); valor menor é
-   * ignorado pelo plano.
+   * NFSE_COMPETENCIA_MINIMA (AAAA-MM): primeira competência emitível EM
+   * PRODUÇÃO. Só pode SUBIR o piso absoluto 2026-11 (decisão do contador);
+   * valor menor é ignorado pelo plano. Homologação não tem piso.
    */
   readonly competenciaMinima: string;
   readonly problemas: readonly ProblemaConfig[];

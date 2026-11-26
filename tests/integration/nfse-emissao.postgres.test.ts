@@ -312,23 +312,39 @@ describe('planoEmissao — o que a confirmação mostra', () => {
     expect(posts()).toHaveLength(3);
   });
 
-  it('piso: outubro/2026 nunca; NFSE_COMPETENCIA_MINIMA só sobe o piso', async () => {
-    const outubro = await caller().planoEmissao({ mes: '2026-10' });
-    expect(outubro.bloqueios).toContain('competencia_anterior_ao_inicio');
-    const tentaBaixar = await caller({
-      env: env({ NFSE_COMPETENCIA_MINIMA: '2026-01' }),
-    }).planoEmissao({ mes: '2026-10' });
+  it('piso em produção: outubro/2026 nunca; NFSE_COMPETENCIA_MINIMA só sobe o piso', async () => {
+    const prod = (extra: NfseEnv = {}) =>
+      caller({ env: env({ NFSE_AMBIENTE: '1', NFSE_EMISSAO_PRODUCAO: 'liberada', ...extra }) });
+    expect((await prod().planoEmissao({ mes: '2026-10' })).bloqueios).toContain(
+      'competencia_anterior_ao_inicio',
+    );
+    const tentaBaixar = await prod({ NFSE_COMPETENCIA_MINIMA: '2026-01' }).planoEmissao({
+      mes: '2026-10',
+    });
     expect(tentaBaixar.bloqueios).toContain('competencia_anterior_ao_inicio');
     await seedDoisTomadores();
-    const subiu = caller({ env: env({ NFSE_COMPETENCIA_MINIMA: '2033-04' }) });
+    const subiu = prod({ NFSE_COMPETENCIA_MINIMA: '2033-04' });
     expect((await subiu.planoEmissao({ mes: MES })).bloqueios).toContain(
       'competencia_anterior_ao_inicio',
     );
     expect((await erroDe(emitir(subiu))).message).toContain('competencia_anterior_ao_inicio');
     expect(fake.requisicoes).toHaveLength(0);
-    expect((await caller().planoEmissao({ mes: MES })).bloqueios).not.toContain(
+    expect((await prod().planoEmissao({ mes: MES })).bloqueios).not.toContain(
       'competencia_anterior_ao_inicio',
     );
+  });
+
+  it('homologação ignora o piso: emite mês fechado anterior a 2026-11 (smoke)', async () => {
+    await seedDoisTomadores();
+    const homolog = caller({ env: env({ NFSE_COMPETENCIA_MINIMA: '2040-01' }) });
+    expect((await homolog.planoEmissao({ mes: MES })).bloqueios).toEqual([]);
+    expect((await homolog.planoEmissao({ mes: '2026-10' })).bloqueios).not.toContain(
+      'competencia_anterior_ao_inicio',
+    );
+    expect((await emitir(homolog)).resultados.map((r) => r.resultado)).toEqual([
+      'autorizada',
+      'autorizada',
+    ]);
   });
 
   it.each([
