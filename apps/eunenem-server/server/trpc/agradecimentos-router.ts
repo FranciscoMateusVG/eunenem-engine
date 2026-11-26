@@ -77,6 +77,14 @@ export const agradecimentosRouter = t.router({
     .mutation(async ({ ctx, input }) => {
       const { usuario, campanha } = await resolver(ctx, input.idCampanha);
       const { deps } = ctx;
+      // Fail closed: without a real transport nothing is consumed or marked.
+      const enviarEmail = deps.enviarEmailAgradecimento;
+      if (!enviarEmail) {
+        throw new TRPCError({
+          code: 'PRECONDITION_FAILED',
+          message: 'O envio de e-mails está indisponível no momento. Tente mais tarde.',
+        });
+      }
       const destinatarios = await resolverDestinatarios(deps.db, campanha.id, input.idsPagamento);
       if (!destinatarios) {
         throw new TRPCError({ code: 'NOT_FOUND', message: 'Presente não encontrado nesta lista.' });
@@ -101,7 +109,7 @@ export const agradecimentosRouter = t.router({
       let falhas = 0;
       for (const destinatario of destinatarios) {
         try {
-          await deps.enviarEmailAgradecimento(
+          await enviarEmail(
             renderAgradecimentoEmail({
               para: destinatario,
               titular: { nome: titular.nomeExibicao, email: titular.email },

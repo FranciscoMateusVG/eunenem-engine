@@ -22,7 +22,6 @@ import {
   type ServerDeps,
 } from '../../apps/eunenem-server/server/auth/setup.js';
 import { appRouter } from '../../apps/eunenem-server/server/trpc/router.js';
-import { EmailTransportNodemailer } from '../../src/adapters/email/email-transport.nodemailer.js';
 import { criarAuth } from '../../src/adapters/usuario/criar-auth.js';
 import { ID_PLATAFORMA_EUNENEM } from '../../src/index.js';
 import { createLifecycleSmtpSink } from '../helpers/lifecycle-smtp-sink.js';
@@ -36,7 +35,6 @@ let testDb: TestDatabase;
 let deps: ServerDeps;
 let seed: ReceitaLedgerSeed;
 let sink: Awaited<ReturnType<typeof createLifecycleSmtpSink>>;
-let transport: EmailTransportNodemailer;
 const magicLinks: string[] = [];
 
 beforeAll(async () => {
@@ -44,33 +42,24 @@ beforeAll(async () => {
   // into the shared DB other files truncate and count (e.g. the sitemap).
   testDb = await createTestDatabase({ isolated: true });
   sink = await createLifecycleSmtpSink();
-  transport = new EmailTransportNodemailer(
-    {
-      host: 'smtp.example.invalid',
-      port: 465,
-      secure: true,
-      user: randomUUID(),
-      pass: randomUUID(),
-      from: 'EuNeném <synthetic@example.invalid>',
-    },
+  // Real composition: SMTP env → buildServerDeps → EmailTransportNodemailer,
+  // pointed at the loopback sink (test endpoint is test-mode only).
+  deps = buildServerDeps(
+    loadEnv({
+      ...baseEnv(),
+      SMTP_HOST: 'smtp.example.invalid',
+      SMTP_PORT: '465',
+      SMTP_SECURE: 'true',
+      SMTP_USER: randomUUID(),
+      SMTP_PASS: randomUUID(),
+      SMTP_FROM: 'EuNeném <synthetic@example.invalid>',
+    }),
     { port: sink.port, ca: sink.ca },
   );
-  const base = buildServerDeps(
-    loadEnv({
-      BETTER_AUTH_SECRET: SECRET,
-      BETTER_AUTH_URL: ORIGIN,
-      TRUSTED_ORIGINS: ORIGIN,
-      DATABASE_URL: testDb.connectionUri,
-      NODE_ENV: 'test',
-      LEGACY_SITE_ORIGIN: 'https://eunenem.com',
-    }),
-  );
-  deps = { ...base, enviarEmailAgradecimento: (message) => transport.enviar(message) };
   seed = new ReceitaLedgerSeed(deps.db);
 }, 180_000);
 
 afterAll(async () => {
-  transport?.close();
   await sink?.close();
   await deps?.db.destroy();
   await testDb?.teardown();
@@ -78,7 +67,19 @@ afterAll(async () => {
 
 beforeEach(() => {
   sink.messages.length = 0;
+  sink.setMode('accept');
 });
+
+function baseEnv() {
+  return {
+    BETTER_AUTH_SECRET: SECRET,
+    BETTER_AUTH_URL: ORIGIN,
+    TRUSTED_ORIGINS: ORIGIN,
+    DATABASE_URL: testDb.connectionUri,
+    NODE_ENV: 'test',
+    LEGACY_SITE_ORIGIN: 'https://eunenem.com',
+  };
+}
 
 function authReal() {
   return criarAuth(deps.db, {
@@ -92,9 +93,9 @@ function authReal() {
   });
 }
 
-function caller(cookie: string) {
+function caller(cookie: string, comDeps: ServerDeps = deps) {
   return appRouter.createCaller({
-    deps: { ...deps, auth: authReal() },
+    deps: { ...comDeps, auth: authReal() },
     headers: new Headers({ cookie }),
     resHeaders: new Headers(),
   });
@@ -126,7 +127,7 @@ async function login(email = `agr-${randomUUID()}@example.com`) {
     .where('id_conta', '=', user.id_conta)
     .where('papel', '=', 'owner')
     .executeTakeFirstOrThrow();
-  return { caller: c, user, email, idCampanha };
+  return { caller: c, cookie, user, email, idCampanha };
 }
 
 /** A paid gift from `nome <email>` on the campanha (status aprovado by default). */
@@ -324,5 +325,61 @@ describe('agradecimentos.enviar', () => {
     await expect(
       owner.caller.agradecimentos.enviar({ idCampanha: owner.idCampanha, idsPagamento: [ana] }),
     ).resolves.toEqual({ enviados: 1, falhas: 0 });
+  });
+});
+
+describe('agradecimentos.enviar — falhas de entrega', () => {
+  it('SMTP recusa: conta como falha e o presente NÃO fica agradecido', async () => {
+    const owner = await login();
+    const ana = await presente(owner.idCampanha, { nome: 'Ana', email: 'ana@example.com' });
+    sink.setMode('reject');
+
+    await expect(
+      owner.caller.agradecimentos.enviar({ idCampanha: owner.idCampanha, idsPagamento: [ana] }),
+    ).resolves.toEqual({ enviados: 0, falhas: 1 });
+
+    const { pessoas } = await owner.caller.agradecimentos.destinatarios({
+      idCampanha: owner.idCampanha,
+    });
+    expect(pessoas[0]?.agradecidoEm).toBeNull();
+  });
+
+  it('sem SMTP configurado (fora do modo e2e explícito): recusa sem marcar nem consumir limite', async () => {
+    const semSmtp = buildServerDeps(loadEnv(baseEnv()));
+    try {
+      expect(semSmtp.enviarEmailAgradecimento).toBeNull();
+      const owner = await login();
+      const ana = await presente(owner.idCampanha, { nome: 'Ana', email: 'ana@example.com' });
+      const comSemSmtp = caller(owner.cookie, semSmtp);
+
+      await expect(
+        comSemSmtp.agradecimentos.enviar({ idCampanha: owner.idCampanha, idsPagamento: [ana] }),
+      ).rejects.toMatchObject({ code: 'PRECONDITION_FAILED' });
+
+      const registro = await deps.db
+        .selectFrom('agradecimentos_presentes')
+        .select('id_pagamento')
+        .where('id_pagamento', '=', ana)
+        .executeTakeFirst();
+      expect(registro).toBeUndefined();
+      const limite = await deps.db
+        .selectFrom('rate_limit')
+        .select('count')
+        .where('key', '=', `agradecer:${owner.user.id}`)
+        .executeTakeFirst();
+      expect(limite).toBeUndefined();
+      expect(sink.messages).toHaveLength(0);
+    } finally {
+      await semSmtp.db.destroy();
+    }
+  });
+
+  it('modo e2e explícito (E2E_EMAIL_NOOP=1, nunca em produção) habilita o envio sem SMTP', () => {
+    const e2e = buildServerDeps(loadEnv({ ...baseEnv(), E2E_EMAIL_NOOP: '1' }));
+    try {
+      expect(e2e.enviarEmailAgradecimento).toBeTypeOf('function');
+    } finally {
+      void e2e.db.destroy();
+    }
   });
 });

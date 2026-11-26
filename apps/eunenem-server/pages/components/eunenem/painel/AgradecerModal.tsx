@@ -79,7 +79,9 @@ export function AgradecerModal({
     },
     onError: (err) =>
       toast.error(
-        err.data?.code === "TOO_MANY_REQUESTS" || err.data?.code === "FORBIDDEN"
+        err.data?.code === "TOO_MANY_REQUESTS" ||
+          err.data?.code === "FORBIDDEN" ||
+          err.data?.code === "PRECONDITION_FAILED"
           ? err.message
           : "não consegui enviar o agradecimento — tenta de novo?",
       ),
