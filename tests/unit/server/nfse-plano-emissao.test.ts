@@ -3,6 +3,7 @@ import { parseNfseConfig } from '../../../apps/eunenem-server/server/nfse/config
 import {
   bloquearCompetenciaComPendencias,
   montarPlanoEmissao,
+  pisoDaCompetencia,
 } from '../../../apps/eunenem-server/server/nfse/plano-emissao.js';
 import type { PreviaMensal } from '../../../apps/eunenem-server/server/nfse/previa-mensal.js';
 
@@ -338,5 +339,64 @@ describe('leiaute RTC: endereço do tomador obrigatório (E0239 na produção re
 
   it('leiaute de produção: sem endereço continua emitindo (só CPF e nome)', () => {
     expect(montarPlanoEmissao({ previa: previa(), config: CONFIG }).notas).toHaveLength(1);
+  });
+});
+
+describe('pisoDaCompetencia — o que a tela usa para desligar "Emitir NFS-e"', () => {
+  const prod = (extra: Record<string, string> = {}) =>
+    parseNfseConfig({
+      ...CONFIG_ENV,
+      NFSE_AMBIENTE: '1',
+      NFSE_EMISSAO_PRODUCAO: 'liberada',
+      ...extra,
+    });
+
+  it('produção + 2026-10: abaixo do piso 2026-11', () => {
+    expect(pisoDaCompetencia(prod(), '2026-10')).toEqual({
+      competenciaMinima: '2026-11',
+      rotuloMinima: 'novembro/2026',
+      abaixoDoPiso: true,
+    });
+  });
+
+  it('produção + 2026-11: no piso, emitível', () => {
+    expect(pisoDaCompetencia(prod(), '2026-11')).toEqual({
+      competenciaMinima: '2026-11',
+      rotuloMinima: 'novembro/2026',
+      abaixoDoPiso: false,
+    });
+  });
+
+  it('produção: NFSE_COMPETENCIA_MINIMA só sobe o piso', () => {
+    expect(
+      pisoDaCompetencia(prod({ NFSE_COMPETENCIA_MINIMA: '2025-01' }), '2026-10').abaixoDoPiso,
+    ).toBe(true);
+    expect(pisoDaCompetencia(prod({ NFSE_COMPETENCIA_MINIMA: '2027-02' }), '2027-01')).toEqual({
+      competenciaMinima: '2027-02',
+      rotuloMinima: 'fevereiro/2027',
+      abaixoDoPiso: true,
+    });
+  });
+
+  it('homologação + 2026-10: sem piso', () => {
+    expect(pisoDaCompetencia(CONFIG, '2026-10')).toEqual({
+      competenciaMinima: null,
+      rotuloMinima: null,
+      abaixoDoPiso: false,
+    });
+  });
+
+  it('é a mesma decisão do bloqueio competencia_anterior_ao_inicio do plano', () => {
+    for (const config of [CONFIG, prod(), prod({ NFSE_COMPETENCIA_MINIMA: '2027-02' })]) {
+      for (const mes of ['2025-03', '2026-10', '2026-11', '2027-01', '2027-02']) {
+        const bloqueado = montarPlanoEmissao({
+          previa: previa({ mes }),
+          config,
+        }).bloqueios.includes('competencia_anterior_ao_inicio');
+        expect(pisoDaCompetencia(config, mes).abaixoDoPiso, `${config.ambiente.valor} ${mes}`).toBe(
+          bloqueado,
+        );
+      }
+    }
   });
 });

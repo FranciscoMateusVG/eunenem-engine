@@ -124,6 +124,7 @@ import {
   encerrarDespesaManual,
   listarDespesasManuais,
 } from "../admin-despesas-manuais.js";
+import { pisoDaCompetencia } from "../nfse/plano-emissao.js";
 import { carregarPreviaMensal, MesFuturoError } from "../nfse/previa-mensal.js";
 import { listarCadastrosIncompletos } from "../nfse/pendencias-cadastro.js";
 import {
@@ -4727,6 +4728,16 @@ const NotaFiscalPreviaSchema = z.object({
   mes: MesSchema,
   rotulo: z.string(),
   situacao: z.enum(["fechado", "em_andamento"]),
+  /**
+   * Piso de competência da emissão (só produção), decidido no servidor pela
+   * mesma regra do plano (`competencia_anterior_ao_inicio`). A tela usa para
+   * desligar "Emitir NFS-e" antes do clique.
+   */
+  pisoEmissao: z.object({
+    competenciaMinima: MesSchema.nullable(),
+    rotuloMinima: z.string().nullable(),
+    abaixoDoPiso: z.boolean(),
+  }),
   periodo: z.object({ de: LocalDateSchema, ate: LocalDateSchema }),
   timezone: z.literal("America/Sao_Paulo"),
   snapshotAt: z.string().datetime(),
@@ -4892,6 +4903,7 @@ const notaFiscalRouter = t.router({
       const { dps } = previa;
       return {
         ...previa,
+        pisoEmissao: pisoDaCompetencia(ctx.deps.nfse, previa.mes),
         titularConsultadoEm: previa.titularConsultadoEm.toISOString(),
         pendencias: [...previa.pendencias],
         notas: previa.notas.map(n => ({ ...n, dps: n.dps.status === "sem_valor" ? n.dps : n.dps.status === "config_incompleta" ? { ...n.dps, faltando:[...n.dps.faltando] } : {

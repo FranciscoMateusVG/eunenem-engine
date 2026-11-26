@@ -1,6 +1,7 @@
 import { createRequire } from 'node:module';
 import { describe, expect, it } from 'vitest';
 import {
+  AcaoEmitir,
   ConfirmacaoEmissao,
   type Emissao,
   FormularioCancelamento,
@@ -253,5 +254,46 @@ describe('FormularioCancelamento', () => {
     expect(html).toMatch(
       /<button type="submit"[^>]*disabled=""[^>]*>Confirmar cancelamento<\/button>/,
     );
+  });
+});
+
+describe('AcaoEmitir — botão "Emitir NFS-e" e o piso de competência (decidido no servidor)', () => {
+  const MSG_PISO = 'Competências anteriores a novembro/2026 não são emitidas por este sistema.';
+  const pisoProducao = (abaixoDoPiso: boolean) => ({
+    competenciaMinima: '2026-11',
+    rotuloMinima: 'novembro/2026',
+    abaixoDoPiso,
+  });
+  const semPiso = { competenciaMinima: null, rotuloMinima: null, abaixoDoPiso: false };
+  const acao = (props: {
+    mesFechado: boolean;
+    piso: typeof semPiso | ReturnType<typeof pisoProducao>;
+  }) => render(React.createElement(AcaoEmitir, { ...props, ocupado: false, onEmitir: nada }));
+  const botao = (html: string) => /<button[^>]*>Emitir NFS-e<\/button>/.exec(html)?.[0] ?? '';
+
+  it('produção + 2026-10 (fechado, abaixo do piso): botão desligado e explica', () => {
+    const html = acao({ mesFechado: true, piso: pisoProducao(true) });
+    expect(botao(html)).toContain('disabled=""');
+    expect(html).toContain(MSG_PISO);
+  });
+
+  it('produção + 2026-11 fechado: botão ligado, sem aviso de piso', () => {
+    const html = acao({ mesFechado: true, piso: pisoProducao(false) });
+    expect(botao(html)).not.toBe('');
+    expect(botao(html)).not.toContain('disabled=""');
+    expect(html).not.toContain(MSG_PISO);
+  });
+
+  it('homologação + 2026-10 fechado: botão ligado (sem piso)', () => {
+    const html = acao({ mesFechado: true, piso: semPiso });
+    expect(botao(html)).not.toBe('');
+    expect(botao(html)).not.toContain('disabled=""');
+    expect(html).not.toContain('não são emitidas por este sistema');
+  });
+
+  it('mês em andamento continua desligado com o aviso de sempre', () => {
+    const html = acao({ mesFechado: false, piso: semPiso });
+    expect(botao(html)).toContain('disabled=""');
+    expect(html).toContain('Só é possível emitir depois que o mês terminar.');
   });
 });
