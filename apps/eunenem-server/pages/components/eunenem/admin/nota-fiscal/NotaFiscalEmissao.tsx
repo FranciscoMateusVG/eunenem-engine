@@ -56,6 +56,7 @@ const MOTIVOS_PULADA: Record<string, string> = {
   nome_ausente: "Nome do titular ausente",
   nomes_divergentes_no_cpf: "Nomes divergentes para o mesmo CPF",
   tomador_cpf_nome: "CPF/nome do tomador inválido",
+  sem_endereco: "Sem endereço do titular (obrigatório no leiaute da Reforma)",
 };
 
 const TEXTO_STATUS: Record<Emissao["status"], string> = {
@@ -174,6 +175,7 @@ export function ConfirmacaoEmissao({
               <th scope="col" className="py-1 pr-3">Nome</th>
               <th scope="col" className="py-1 pr-3">CPF</th>
               <th scope="col" className="py-1 pr-3">Valor</th>
+              <th scope="col" className="py-1 pr-3">Endereço</th>
             </tr>
           </thead>
           <tbody>
@@ -182,6 +184,13 @@ export function ConfirmacaoEmissao({
                 <td className="py-1 pr-3 text-ink">{n.tomadorNome}</td>
                 <td className="py-1 pr-3 font-mono text-ink">{n.tomadorCpf}</td>
                 <td className="py-1 pr-3 font-mono text-ink">{formatBRL(n.valorCents)}</td>
+                <td className="py-1 pr-3 text-ink">
+                  {n.endereco ? (
+                    `${n.endereco.logradouro}, ${n.endereco.numero} — CEP ${n.endereco.cep}`
+                  ) : (
+                    <span className="text-amber-900">sem endereço (nota sai só com CPF e nome)</span>
+                  )}
+                </td>
               </tr>
             ))}
           </tbody>

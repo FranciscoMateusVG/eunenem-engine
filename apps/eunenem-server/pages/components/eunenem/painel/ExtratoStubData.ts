@@ -383,6 +383,8 @@ export function useStubCampanhaIdForSlug(_slug: string): {
    * embed.
    */
   hasRecebedor: boolean;
+  /** aperture-xdylg — CPF + endereço fiscal completos (resgate liberado). */
+  dadosFiscaisCompletos: boolean;
   isLoading: boolean;
   error: { message: string } | null;
 } {
@@ -402,6 +404,7 @@ export function useStubCampanhaIdForSlug(_slug: string): {
   return {
     idCampanha,
     hasRecebedor: recebedorQuery.data?.configurado ?? false,
+    dadosFiscaisCompletos: recebedorQuery.data?.dadosFiscaisCompletos ?? false,
     isLoading: me.isLoading || recebedorQuery.isLoading,
     error: me.error
       ? { message: me.error.message }

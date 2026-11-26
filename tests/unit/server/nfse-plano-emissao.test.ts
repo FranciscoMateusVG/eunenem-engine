@@ -288,18 +288,55 @@ describe('série reservada × configurada', () => {
   });
 });
 
-describe('leiaute RTC: NBS obrigatória (E0322 na produção restrita)', () => {
-  it('sem NFSE_CNBS bloqueia; com NFSE_CNBS libera; leiaute de produção não exige', () => {
-    const rtc = (extra: Record<string, string> = {}) =>
-      parseNfseConfig({ ...CONFIG_ENV, NFSE_LEIAUTE_DPS: 'rtc-2026-11', ...extra });
-    expect(montarPlanoEmissao({ previa: previa(), config: rtc() }).bloqueios).toContain(
+describe('leiaute RTC: endereço do tomador obrigatório (E0239 na produção restrita)', () => {
+  const RTC = parseNfseConfig({ ...CONFIG_ENV, NFSE_LEIAUTE_DPS: 'rtc-2026-11' });
+  const RTC_NBS = parseNfseConfig({
+    ...CONFIG_ENV,
+    NFSE_LEIAUTE_DPS: 'rtc-2026-11',
+    NFSE_CNBS: '109059000',
+  });
+  const endereco = {
+    cMun: '3106200',
+    cep: '30130003',
+    logradouro: 'Av. Afonso Pena',
+    numero: '1212',
+    bairro: 'Centro',
+  };
+
+  it('sem endereço: nota PULADA com motivo sem_endereco (não vai para a Receita)', () => {
+    const p = montarPlanoEmissao({ previa: previa(), config: RTC_NBS });
+    expect(p.notas).toEqual([]);
+    expect(p.puladas).toEqual([{ referencia: 'c1', motivo: 'sem_endereco', valorCents: 100 }]);
+    expect(p.bloqueios).toEqual(['sem_notas']);
+  });
+
+  it('com endereço: emite normalmente', () => {
+    const comEndereco = previa();
+    (comEndereco.notas[0] as { endereco: unknown }).endereco = endereco;
+    const p = montarPlanoEmissao({ previa: comEndereco, config: RTC_NBS });
+    expect(p.notas.map((n) => n.tomadorCpf)).toEqual(['52998224725']);
+    expect(p.puladas).toEqual([]);
+    expect(p.bloqueios).toEqual([]);
+  });
+
+  it('sem NFSE_CNBS o leiaute RTC bloqueia (E0322: NBS obrigatória com IBS/CBS)', () => {
+    const comEndereco = previa();
+    (comEndereco.notas[0] as { endereco: unknown }).endereco = endereco;
+    expect(montarPlanoEmissao({ previa: comEndereco, config: RTC }).bloqueios).toContain(
       'cnbs_obrigatorio',
     );
-    expect(
-      montarPlanoEmissao({ previa: previa(), config: rtc({ NFSE_CNBS: '109059000' }) }).bloqueios,
-    ).toEqual([]);
+    const comNbs = parseNfseConfig({
+      ...CONFIG_ENV,
+      NFSE_LEIAUTE_DPS: 'rtc-2026-11',
+      NFSE_CNBS: '109059000',
+    });
+    expect(montarPlanoEmissao({ previa: comEndereco, config: comNbs }).bloqueios).toEqual([]);
     expect(montarPlanoEmissao({ previa: previa(), config: CONFIG }).bloqueios).not.toContain(
       'cnbs_obrigatorio',
     );
+  });
+
+  it('leiaute de produção: sem endereço continua emitindo (só CPF e nome)', () => {
+    expect(montarPlanoEmissao({ previa: previa(), config: CONFIG }).notas).toHaveLength(1);
   });
 });

@@ -105,7 +105,7 @@ const ENV_COMPLETO: NfseEnv = {
   NFSE_MUNICIPIO_IBGE: IBGE,
   NFSE_CERT_BASE64: '',
   NFSE_CERT_PASSWORD: '',
-  // Leiaute de produção nos testes gerais (o RTC exige NBS/endereço).
+  // Leiaute de produção nos testes gerais; o RTC tem testes próprios.
   NFSE_LEIAUTE_DPS: 'producao-2026-02',
 };
 
@@ -706,6 +706,111 @@ describe('fixação concorrente da competência', () => {
     expect(plano.bloqueios).toContain('serie_divergente');
     expect((await erroDe(emitir(outra))).message).toContain('serie_divergente');
     expect(posts()).toHaveLength(2);
+  });
+});
+
+describe('endereço fiscal do tomador na DPS (aperture-xdylg)', () => {
+  it('recebedor com endereço: toma/end na DPS assinada e válida; sem endereço: só CPF e nome', async () => {
+    await seedDoisTomadores();
+    await sql`UPDATE recebedores SET endereco_cep = '30130010', endereco_logradouro = 'Av. Afonso Pena',
+      endereco_numero = '1000', endereco_complemento = 'Apto 12', endereco_bairro = 'Centro',
+      endereco_cidade = 'Belo Horizonte', endereco_uf = 'MG', endereco_codigo_municipio_ibge = '3106200'
+      WHERE cpf_titular = ${CPF_A}`.execute(testDb.db);
+    const plano = await caller().planoEmissao({ mes: MES });
+    expect(plano.notas.find((n) => n.tomadorCpf === CPF_A)?.endereco).toMatchObject({
+      cMun: '3106200',
+      cep: '30130010',
+    });
+    expect(plano.notas.find((n) => n.tomadorCpf === CPF_B)?.endereco).toBeNull();
+    await emitir();
+    const lista = await caller().emissoes({ mes: MES });
+    for (const e of lista) {
+      const { xml } = await caller().xml({ id: e.id, tipo: 'dps' });
+      if (!xml) throw new Error('sem XML');
+      expect(validateDpsDoLeiaute(xml).errors).toEqual([]);
+      if (e.tomadorCpf === CPF_A) {
+        expect(xml).toContain(
+          '<end><endNac><cMun>3106200</cMun><CEP>30130010</CEP></endNac><xLgr>Av. Afonso Pena</xLgr><nro>1000</nro><xCpl>Apto 12</xCpl><xBairro>Centro</xBairro></end>',
+        );
+      } else {
+        expect(xml).not.toContain('<end>');
+      }
+    }
+  });
+});
+describe('leiaute RTC (produção restrita): endereço obrigatório', () => {
+  it('sem endereço a nota é PULADA (sem_endereco); com endereço vai com toma/end e passa no pack RTC', async () => {
+    await seedDoisTomadores();
+    await sql`UPDATE recebedores SET endereco_cep = '30130003', endereco_logradouro = 'Av. Afonso Pena',
+      endereco_numero = '1212', endereco_bairro = 'Centro', endereco_cidade = 'Belo Horizonte',
+      endereco_uf = 'MG', endereco_codigo_municipio_ibge = '3106200' WHERE cpf_titular = ${CPF_A}`.execute(
+      testDb.db,
+    );
+    const rtc = caller({ env: env({ NFSE_LEIAUTE_DPS: 'rtc-2026-11', NFSE_CNBS: '109059000' }) });
+    const plano = await rtc.planoEmissao({ mes: MES });
+    expect(plano.notas.map((n) => n.tomadorCpf)).toEqual([CPF_A]);
+    expect(plano.puladas).toMatchObject([{ motivo: 'sem_endereco', valorCents: 500 }]);
+    expect((await emitir(rtc)).resultados.map((r) => [r.tomadorCpf, r.resultado])).toEqual([
+      [CPF_A, 'autorizada'],
+    ]);
+    const [enviada] = posts();
+    expect(enviada?.xml).toContain('</tpEmit><finNFSe>0</finNFSe>');
+    expect(enviada?.xml).toContain('<end><endNac><cMun>3106200</cMun><CEP>30130003</CEP></endNac>');
+    expect(validateDpsDoLeiaute(enviada?.xml ?? '').errors).toEqual([]);
+  });
+});
+
+describe('cadastros incompletos (aperture-xdylg)', () => {
+  async function responsavel(campanha: string, nome: string, email: string) {
+    const idConta = randomUUID();
+    const idUsuario = randomUUID();
+    await sql`INSERT INTO usuarios(id, id_conta, id_plataforma, email, nome_exibicao, slug)
+      VALUES (${idUsuario}::uuid, ${idConta}::uuid, ${ID_PLATAFORMA_EUNENEM}::uuid, ${email}, ${nome}, ${`s${idUsuario.slice(0, 12)}`})`.execute(
+      testDb.db,
+    );
+    await sql`INSERT INTO campanha_administradores(campanha_id, id_usuario) VALUES (${campanha}::uuid, ${idConta}::uuid)`.execute(
+      testDb.db,
+    );
+  }
+
+  it('lista listas com taxa no mês sem CPF válido / sem endereço / sem recebedor, sem expor CPF', async () => {
+    await seedDoisTomadores(); // A e B com CPF válido e sem endereço
+    await sql`UPDATE recebedores SET endereco_cep = '30130010', endereco_logradouro = 'Rua X', endereco_numero = '1',
+      endereco_bairro = 'Centro', endereco_cidade = 'BH', endereco_uf = 'MG', endereco_codigo_municipio_ibge = '3106200'
+      WHERE cpf_titular = ${CPF_B}`.execute(testDb.db);
+    const cpfRuim = await seed.campanha();
+    await seed.recebedor(cpfRuim, '12345678900', 'DV errado');
+    await seed.taxa({
+      campaignId: cpfRuim,
+      taxaCents: 300,
+      criadoEm: new Date('2033-03-08T15:00:00Z'),
+    });
+    await responsavel(cpfRuim, 'Dona da Lista', 'dona@exemplo.com');
+    const semRecebedor = await seed.campanha();
+    await seed.taxa({
+      campaignId: semRecebedor,
+      taxaCents: 50,
+      criadoEm: new Date('2033-03-09T15:00:00Z'),
+    });
+    // Taxa em outro mês: fora.
+    const outroMes = await seed.campanha();
+    await seed.taxa({
+      campaignId: outroMes,
+      taxaCents: 999,
+      criadoEm: new Date('2033-02-09T15:00:00Z'),
+    });
+
+    const lista = await caller().cadastrosIncompletos({ mes: MES });
+    expect(lista.map((l) => [l.taxaCents, l.motivos])).toEqual([
+      [1234, ['sem_endereco']],
+      [300, ['cpf_invalido', 'sem_endereco']],
+      [50, ['sem_recebedor']],
+    ]);
+    expect(lista.find((l) => l.campanhaId === cpfRuim)?.responsaveis).toEqual([
+      { nome: 'Dona da Lista', email: 'dona@exemplo.com' },
+    ]);
+    const json = JSON.stringify(lista);
+    for (const cpf of [CPF_A, CPF_B, '12345678900']) expect(json).not.toContain(cpf);
   });
 });
 

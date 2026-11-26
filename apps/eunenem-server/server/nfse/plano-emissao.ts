@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import type { NfseConfig } from './config.js';
-import type { TipoAmbiente } from './dps.js';
+import type { EnderecoTomador, TipoAmbiente } from './dps.js';
 import type { AvisoPrevia, CampoDps, PreviaMensal } from './previa-mensal.js';
 
 /**
@@ -42,6 +42,8 @@ export interface NotaPlanejada {
   readonly valorCents: number;
   /** Campanhas cuja receita compõe a nota (ordenadas). */
   readonly campanhas: readonly string[];
+  /** Endereço fiscal do tomador (aperture-xdylg), quando houver. Não entra na conferência de divergência (não é base de cálculo). */
+  readonly endereco: EnderecoTomador | null;
 }
 
 /** Nota já gravada para a competência por um clique anterior. */
@@ -76,7 +78,7 @@ export type PoliticaPendencias = (previa: PreviaMensal) => readonly BloqueioEmis
 export const agruparPorTomador: EstrategiaAgrupamento = (previa) =>
   previa.notas
     .filter((n) => n.dps.status === 'gerada')
-    .map((n) => ({ tomadorCpf: n.cpf, tomadorNome: n.nome, valorCents: n.resultadoCents, campanhas: [...n.campanhas].sort() }));
+    .map((n) => ({ tomadorCpf: n.cpf, tomadorNome: n.nome, valorCents: n.resultadoCents, campanhas: [...n.campanhas].sort(), endereco: n.endereco }));
 
 export interface NotaPulada {
   /** Campanha(s) ou CPF da pendência. */
@@ -140,7 +142,7 @@ const AVISO_BLOQUEIA: Partial<Record<AvisoPrevia, BloqueioEmissao>> = {
 };
 
 /** Identificação de prévia e tomador variam por nota/emissão; não são "fiscais". */
-const TAGS_NAO_FISCAIS = new Set(['dhEmi', 'serie', 'nDPS', 'toma', 'CPF', 'xNome', 'vServ', 'verAplic']);
+const TAGS_NAO_FISCAIS = new Set(['dhEmi', 'serie', 'nDPS', 'toma', 'CPF', 'xNome', 'end', 'vServ', 'verAplic']);
 
 export function montarPlanoEmissao(input: {
   readonly previa: PreviaMensal;
@@ -181,10 +183,16 @@ export function montarPlanoEmissao(input: {
   }
   if (config.ambiente.valor === '1' && !config.emissaoProducaoLiberada) bloqueios.add('producao_nao_liberada');
 
-  // Leiaute RTC com IBS/CBS: a NBS é obrigatória (E0322, smoke 26/11/2026);
-  // sem NFSE_CNBS a recusa é certa, então bloqueia antes de enviar.
-  if (config.leiauteDps.valor === 'rtc-2026-11' && config.cNBS.valor === null) bloqueios.add('cnbs_obrigatorio');
-  const recalculadas = agrupar(previa);
+  // Leiaute RTC: com IBS/CBS, a Receita exige o endereço do tomador (E0239,
+  // smoke 26/11/2026). Sem endereço a nota seria recusada com certeza: vira
+  // pendência pulada (aparece na confirmação e em "cadastros incompletos").
+  const exigeEndereco = config.leiauteDps.valor === 'rtc-2026-11';
+  // Leiaute RTC com IBS/CBS: a NBS é obrigatória (E0322); sem NFSE_CNBS a
+  // recusa é certa, então bloqueia antes de enviar.
+  if (exigeEndereco && config.cNBS.valor === null) bloqueios.add('cnbs_obrigatorio');
+  const agrupadas = agrupar(previa);
+  const semEndereco = exigeEndereco ? agrupadas.filter((n) => !n.endereco) : [];
+  const recalculadas = exigeEndereco ? agrupadas.filter((n) => n.endereco) : agrupadas;
   const fixada = fixadas.length > 0;
   const { divergencias, novas } = compararComFixadas(recalculadas, fixadas);
   if (divergencias.length > 0) bloqueios.add('competencia_divergente');
@@ -216,7 +224,10 @@ export function montarPlanoEmissao(input: {
   };
   return {
     ...base,
-    puladas: pendenciasDaPrevia(previa),
+    puladas: [
+      ...pendenciasDaPrevia(previa),
+      ...semEndereco.map((n) => ({ referencia: n.campanhas.join(','), motivo: 'sem_endereco', valorCents: n.valorCents })),
+    ],
     divergencias,
     impressao: impressaoDoPlano({ ...base, prestadorCnpj: config.prestadorCnpj, camposFiscais }),
     bloqueios: [...bloqueios],
@@ -274,7 +285,7 @@ function impressaoDoPlano(plano: {
     plano.prestadorCnpj,
     plano.fixada,
     plano.idsFixados,
-    plano.notas.map((n) => [n.tomadorCpf, n.tomadorNome, n.valorCents, [...n.campanhas]]).sort(),
+    plano.notas.map((n) => [n.tomadorCpf, n.tomadorNome, n.valorCents, [...n.campanhas], n.endereco]).sort(),
     plano.camposFiscais.map((c) => [c.tag, c.valor]).sort(),
   ]);
   return createHash('sha256').update(canonico).digest('hex');

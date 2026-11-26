@@ -2,6 +2,7 @@ import { keepPreviousData } from "@tanstack/react-query";
 import { type FormEvent, useCallback, useEffect, useId, useState } from "react";
 import { AdminShell } from "@/components/eunenem/admin/AdminShell";
 import { DddBadge } from "@/components/eunenem/admin/DddBadge";
+import { CadastrosIncompletos } from "@/components/eunenem/admin/nota-fiscal/CadastrosIncompletos";
 import { NotaFiscalEmissao } from "@/components/eunenem/admin/nota-fiscal/NotaFiscalEmissao";
 import { NotaFiscalPainel } from "@/components/eunenem/admin/nota-fiscal/NotaFiscalPainel";
 import { PagamentosTabs } from "@/components/eunenem/admin/PagamentosTabs";
@@ -83,6 +84,8 @@ export function AdminNotaFiscalPage() {
         ) : null}
 
         {mes && query.data ? <NotaFiscalEmissao mes={mes} mesFechado={query.data.situacao === "fechado"} /> : null}
+
+        {mes ? <CadastrosIncompletos mes={mes} /> : null}
 
         {!query.error && query.data ? (
           <div

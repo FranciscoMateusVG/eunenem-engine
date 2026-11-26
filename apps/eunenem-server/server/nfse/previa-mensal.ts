@@ -22,6 +22,7 @@ import {
   competenciaDoMes,
   dhEmiSaoPaulo,
   type DpsInput,
+  type EnderecoTomador,
   formatarValorDps,
   montarDpsXml,
   numeroDpsPrevia,
@@ -317,7 +318,7 @@ export interface NumeracaoDps {
 }
 
 export function montarDpsDaNota(input: {
-  readonly tomador?: { readonly cpf: string; readonly nome: string };
+  readonly tomador?: { readonly cpf: string; readonly nome: string; readonly endereco?: EnderecoTomador };
   readonly mes: string;
   readonly resultadoCents: number;
   readonly config: NfseConfig;
@@ -378,7 +379,7 @@ export function montarDpsDaNota(input: {
 }
 
 export function montarPreviaDps(input: {
-  readonly tomador?: { readonly cpf: string; readonly nome: string };
+  readonly tomador?: { readonly cpf: string; readonly nome: string; readonly endereco?: EnderecoTomador };
   readonly ordinal?: number;
   readonly mes: string;
   readonly resultadoCents: number;
@@ -397,7 +398,7 @@ export function montarPreviaDps(input: {
   if (nota.status !== 'pronta') return nota;
   const { dps, totTrib } = nota;
   const resultadoCents = dps.valores.vServCents;
-  const tomador = dps.tomador as { readonly cpf: string; readonly nome: string };
+  const tomador = dps.tomador as { readonly cpf: string; readonly nome: string; readonly endereco?: EnderecoTomador };
   const { xml, idDps } = montarDpsXml(dps);
   return {
     status: 'gerada',
@@ -406,6 +407,7 @@ export function montarPreviaDps(input: {
     campos: [...camposDaDps(dps, config, totTrib),
       { grupo:'Tomador',tag:'CPF',rotulo:'CPF do recebedor mais recente',valor:tomador.cpf,origem:'derivado',aConfirmar:true,nota:'Último recebedor cadastrado da campanha; decisão do operador para a prévia histórica.' },
       { grupo:'Tomador',tag:'xNome',rotulo:'Nome do recebedor mais recente',valor:tomador.nome,origem:'derivado',aConfirmar:true,nota:null },
+      { grupo:'Tomador',tag:'end',rotulo:'Endereço do tomador',valor:tomador.endereco ? `${tomador.endereco.logradouro}, ${tomador.endereco.numero}${tomador.endereco.complemento ? ` ${tomador.endereco.complemento}` : ''} — ${tomador.endereco.bairro} — CEP ${tomador.endereco.cep} — IBGE ${tomador.endereco.cMun}` : OMITIDO,origem:'derivado',aConfirmar:!tomador.endereco,nota:tomador.endereco ? null : 'Recebedor sem endereço fiscal: a DPS sai só com CPF e nome.' },
       { grupo:'Serviço',tag:'cTribMun',rotulo:'Código municipal',valor:'003',origem:'fixo',aConfirmar:false,nota:'Orientação do contador.' },
       { grupo:'IBS/CBS',tag:'IBSCBS',rotulo:'Classificação IBS/CBS',valor:'finNFSe=0; indFinal=1; cIndOp=100301; indDest=0; CST=000; cClassTrib=000001',origem:'fixo',aConfirmar:false,nota:'Alíquotas calculadas pelo Sistema Nacional, não informadas na DPS.' },
     ],
@@ -471,7 +473,7 @@ export type AvisoPrevia =
 export interface PreviaMensal {
   readonly titularConsultadoEm: Date;
   readonly pendencias: readonly PendenciaTomador[];
-  readonly notas: readonly { cpf: string; nome: string; resultadoCents: number; houveTroca: boolean; campanhas: readonly string[]; dps: PreviaMensal['dps'] }[];
+  readonly notas: readonly { cpf: string; nome: string; resultadoCents: number; houveTroca: boolean; campanhas: readonly string[]; endereco: EnderecoTomador | null; dps: PreviaMensal['dps'] }[];
   readonly mes: string;
   readonly rotulo: string;
   readonly situacao: SituacaoMes;
@@ -564,9 +566,9 @@ async function previaMensal(
   const titulares = await carregarTomadoresMes(db, platformId, competencia.de, competencia.ate);
   const notas: PreviaMensal['notas'][number][] = [];
   for (const [i, tomador] of titulares.tomadores.entries()) {
-    const gerada = montarPreviaDps({ mes, resultadoCents: tomador.resultadoCents, config, now, tomador, ordinal:i+1 });
+    const gerada = montarPreviaDps({ mes, resultadoCents: tomador.resultadoCents, config, now, tomador: { cpf: tomador.cpf, nome: tomador.nome, ...(tomador.endereco ? { endereco: tomador.endereco } : {}) }, ordinal:i+1 });
     const dpsNota = gerada.status === 'gerada' ? { ...gerada, ...assinarPrevia(gerada.xml, gerada.idDps, config) } : gerada;
-    notas.push({ houveTroca:tomador.houveTroca, campanhas:[...tomador.campanhas].sort(), cpf:tomador.cpf, nome:tomador.nome, resultadoCents:tomador.resultadoCents, dps:dpsNota });
+    notas.push({ houveTroca:tomador.houveTroca, campanhas:[...tomador.campanhas].sort(), endereco:tomador.endereco, cpf:tomador.cpf, nome:tomador.nome, resultadoCents:tomador.resultadoCents, dps:dpsNota });
   }
   if ((notas.length > 0 || titulares.pendencias.length === 0) && notas.every(n => n.resultadoCents <= 0)) avisos.push('resultado_nao_positivo');
   for (const nota of notas) {

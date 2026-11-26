@@ -179,6 +179,17 @@ async function buildRig(): Promise<TestRig> {
       cpfTitular: '39053344705',
       nomeTitular: 'Titular Teste',
       celularTitular: '31999999999',
+      // aperture-xdylg — resgate exige endereço fiscal.
+      enderecoFiscal: {
+        cep: '30130010',
+        logradouro: 'Av. Afonso Pena',
+        numero: '1000',
+        complemento: null,
+        bairro: 'Centro',
+        cidade: 'Belo Horizonte',
+        uf: 'MG',
+        codigoMunicipioIbge: '3106200',
+      },
     } as never,
     isActive: true,
     criadaEm: new Date(),

@@ -33,7 +33,8 @@
 
 import { initTRPC, TRPCError } from "@trpc/server";
 import { z } from "zod";
-import type { DadosRecebedor } from "../../../../src/domain/arrecadacao/value-objects/dados-recebedor.js";
+import { cpfValido, type DadosRecebedor } from "../../../../src/domain/arrecadacao/value-objects/dados-recebedor.js";
+import { EnderecoFiscalSchema } from "../../../../src/domain/arrecadacao/value-objects/endereco-fiscal.js";
 import type { IdCampanha } from "../../../../src/domain/arrecadacao/value-objects/ids.js";
 import { randomUUID } from "node:crypto";
 import {
@@ -41,6 +42,7 @@ import {
   ArrecadacaoCampanhaNaoEncontradaError,
   ArrecadacaoInputInvalidoError,
   ArrecadacaoNaoAutorizadoError,
+  ArrecadacaoRecebedorAlteradoConcorrentementeError,
   ArrecadacaoRecebedorJaExisteError,
   ArrecadacaoRecebedorNaoEncontradoError,
   CheckoutRecebedorNaoPagavelViaPixError,
@@ -341,6 +343,10 @@ function toTRPCError(err: unknown): TRPCError {
       message: "recebedor_nao_pagavel_via_pix",
       cause: err,
     });
+  }
+  // aperture-xdylg — outra operação trocou o recebedor ativo no meio.
+  if (err instanceof ArrecadacaoRecebedorAlteradoConcorrentementeError) {
+    return new TRPCError({ code: "CONFLICT", message: "recebedor_alterado_concorrentemente", cause: err });
   }
   // aperture-0bynm — recebedor.criar mapping.
   if (err instanceof ArrecadacaoRecebedorJaExisteError) {
@@ -759,6 +765,13 @@ const transferenciaRouter = t.router({
             'Cadastre os dados de recebimento (PIX ou conta) antes de solicitar a transferência.',
           );
         }
+        // aperture-xdylg — dados fiscais do tomador da NFS-e (CPF + endereço)
+        // são obrigatórios para resgatar (decisão do contador, 26/11/2026).
+        if (!dadosFiscaisCompletos(recebedorAtivo.dadosRecebedor)) {
+          throw new FinanceiroInputInvalidoError(
+            'Complete os dados fiscais (CPF e endereço do titular) antes de solicitar a transferência.',
+          );
+        }
 
         const idRepasse = randomUUID();
         const repasse = await solicitarRepasseRecebedor(
@@ -908,7 +921,14 @@ const recebedorGetProcedure = t.procedure
 const RecebedorStatusOutputSchema = z.object({
   configurado: z.boolean(),
   metodo: z.enum(["pix", "conta"]).nullable(),
+  /** aperture-xdylg — CPF válido + endereço fiscal: pode resgatar. */
+  dadosFiscaisCompletos: z.boolean(),
 });
+
+/** aperture-xdylg — o que a NFS-e precisa do tomador: CPF válido e endereço. */
+function dadosFiscaisCompletos(dados: DadosRecebedor): boolean {
+  return cpfValido(dados.cpfTitular) && dados.enderecoFiscal !== undefined;
+}
 
 const recebedorStatusProcedure = t.procedure
   .input(RecebedorGetInputSchema)
@@ -922,6 +942,7 @@ const recebedorStatusProcedure = t.procedure
       return {
         configurado: ativo !== undefined && ativo !== null,
         metodo: ativo?.dadosRecebedor.metodo ?? null,
+        dadosFiscaisCompletos: ativo ? dadosFiscaisCompletos(ativo.dadosRecebedor) : false,
       };
     } catch (err) {
       throw toTRPCError(err);
@@ -959,6 +980,13 @@ const recebedorAtualizarProcedure = t.procedure
         );
       }
 
+      // aperture-xdylg — editores que não conhecem o endereço fiscal (dados
+      // bancários) não o apagam: sem `enderecoFiscal` no input, mantém o gravado.
+      const enderecoGravado = ativo?.dadosRecebedor.enderecoFiscal;
+      if (input.dadosRecebedor.enderecoFiscal === undefined && enderecoGravado !== undefined) {
+        input = { ...input, dadosRecebedor: { ...input.dadosRecebedor, enderecoFiscal: enderecoGravado } };
+      }
+
       if (!ativo) {
         await criarRecebedorParaCampanha(
           {
@@ -986,11 +1014,54 @@ const recebedorAtualizarProcedure = t.procedure
           clock: ctx.deps.clock,
           observability: ctx.deps.observability,
         },
-        { idCampanha, dadosRecebedor: input.dadosRecebedor },
+        // aperture-xdylg — CAS: o endereço preservado acima veio DESTE ativo;
+        // se outra operação trocou o recebedor no meio, recusa (CONFLICT).
+        { idCampanha, dadosRecebedor: input.dadosRecebedor, idRecebedorEsperado: ativo.id },
       );
       // aperture-kj9el #4b — a full edit also clears any pending marker.
       await ctx.deps.resgatePendenteRepository.limparPendente(idCampanha);
       return input.dadosRecebedor;
+    } catch (err) {
+      throw toTRPCError(err);
+    }
+  });
+
+// ────────────────────────────────────────────────────────────────────
+//  recebedor.atualizarEnderecoFiscal (aperture-xdylg) — completa os dados
+//  fiscais do recebedor ATIVO (nova versão, histórico preservado) sem mexer
+//  em CPF nem nos dados de pagamento. Tela pedida no momento do resgate.
+// ────────────────────────────────────────────────────────────────────
+
+const recebedorAtualizarEnderecoFiscalProcedure = t.procedure
+  .input(z.object({ idCampanha: z.string().uuid(), enderecoFiscal: EnderecoFiscalSchema }))
+  .output(RecebedorStatusOutputSchema)
+  .mutation(async ({ ctx, input }) => {
+    try {
+      await resolverCampanhaComPermissao(ctx, input.idCampanha, "recebedor:gerenciar");
+      const idCampanha = input.idCampanha as IdCampanha;
+      const ativo = await ctx.deps.recebedorRepository.findAtivoByCampanhaId(idCampanha);
+      if (!ativo) {
+        throw new ArrecadacaoInputInvalidoError(
+          'Cadastre os dados de recebimento (PIX ou conta) antes do endereço fiscal.',
+        );
+      }
+      const dadosRecebedor: DadosRecebedor = { ...ativo.dadosRecebedor, enderecoFiscal: input.enderecoFiscal };
+      await alterarDadosRecebedorCampanha(
+        {
+          campanhaRepository: ctx.deps.campanhaRepository,
+          recebedorRepository: ctx.deps.recebedorRepository,
+          clock: ctx.deps.clock,
+          observability: ctx.deps.observability,
+        },
+        // CAS: o endereço é mesclado sobre ESTE recebedor; se outra aba trocou
+        // os dados de pagamento no meio, recusa em vez de restaurar os antigos.
+        { idCampanha, dadosRecebedor, idRecebedorEsperado: ativo.id },
+      );
+      return {
+        configurado: true,
+        metodo: dadosRecebedor.metodo,
+        dadosFiscaisCompletos: dadosFiscaisCompletos(dadosRecebedor),
+      };
     } catch (err) {
       throw toTRPCError(err);
     }
@@ -1047,6 +1118,7 @@ export const recebedorRouter = t.router({
   get: recebedorGetProcedure,
   status: recebedorStatusProcedure,
   atualizar: recebedorAtualizarProcedure,
+  atualizarEnderecoFiscal: recebedorAtualizarEnderecoFiscalProcedure,
   getResgatePendente: getResgatePendenteProcedure,
   marcarResgatePendente: marcarResgatePendenteProcedure,
   extrato: extratoRouter,

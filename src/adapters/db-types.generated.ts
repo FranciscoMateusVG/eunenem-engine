@@ -395,6 +395,7 @@ export interface NfseEmissoes {
   status: string;
   tentativas: Generated<number>;
   tomador_cpf: string;
+  tomador_endereco: Json | null;
   tomador_nome: string;
   valor_cents: Int8;
 }
@@ -617,6 +618,14 @@ export interface Recebedores {
   conta_digito: string | null;
   cpf_titular: string | null;
   criada_em: Generated<Timestamp>;
+  endereco_bairro: string | null;
+  endereco_cep: string | null;
+  endereco_cidade: string | null;
+  endereco_codigo_municipio_ibge: string | null;
+  endereco_complemento: string | null;
+  endereco_logradouro: string | null;
+  endereco_numero: string | null;
+  endereco_uf: string | null;
   id: string;
   is_active: Generated<boolean>;
   metodo: string;
