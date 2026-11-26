@@ -42,6 +42,7 @@ import {
   ArrecadacaoCampanhaNaoEncontradaError,
   ArrecadacaoInputInvalidoError,
   ArrecadacaoNaoAutorizadoError,
+  ArrecadacaoRecebedorAlteradoConcorrentementeError,
   ArrecadacaoRecebedorJaExisteError,
   ArrecadacaoRecebedorNaoEncontradoError,
   CheckoutRecebedorNaoPagavelViaPixError,
@@ -342,6 +343,10 @@ function toTRPCError(err: unknown): TRPCError {
       message: "recebedor_nao_pagavel_via_pix",
       cause: err,
     });
+  }
+  // aperture-xdylg — outra operação trocou o recebedor ativo no meio.
+  if (err instanceof ArrecadacaoRecebedorAlteradoConcorrentementeError) {
+    return new TRPCError({ code: "CONFLICT", message: "recebedor_alterado_concorrentemente", cause: err });
   }
   // aperture-0bynm — recebedor.criar mapping.
   if (err instanceof ArrecadacaoRecebedorJaExisteError) {
@@ -1046,7 +1051,9 @@ const recebedorAtualizarEnderecoFiscalProcedure = t.procedure
           clock: ctx.deps.clock,
           observability: ctx.deps.observability,
         },
-        { idCampanha, dadosRecebedor },
+        // CAS: o endereço é mesclado sobre ESTE recebedor; se outra aba trocou
+        // os dados de pagamento no meio, recusa em vez de restaurar os antigos.
+        { idCampanha, dadosRecebedor, idRecebedorEsperado: ativo.id },
       );
       return {
         configurado: true,

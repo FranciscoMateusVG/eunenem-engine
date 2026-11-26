@@ -3,6 +3,7 @@ import type { ReadableSpan } from '@opentelemetry/sdk-trace-base';
 import { beforeEach, describe, expect, it } from 'vitest';
 import type { RecebedorRepository } from '../../src/adapters/arrecadacao/recebedor-repository.js';
 import { criarRecebedorInicial } from '../../src/domain/arrecadacao/entities/recebedor.js';
+import { ArrecadacaoRecebedorAlteradoConcorrentementeError } from '../../src/errors/arrecadacao/recebedor-alterado-concorrentemente.error.js';
 import type { createArrecadacaoMemoryRepos } from './arrecadacao-repos.js';
 import { makeCampanha } from './campanha-repository.conformance.js';
 
@@ -89,6 +90,36 @@ export function describeRecebedorRepositoryConformance(name: string, options: Co
         await repo.save(recebedor);
         expect(await repo.findAtivoByCampanhaId(idCampanha)).toEqual(recebedor);
       }
+    });
+
+    it('a second ACTIVE receiver for the same campanha is a typed concurrency error (aperture-xdylg)', async () => {
+      const idCampanha = randomUUID();
+      await seedCampanha(idCampanha);
+      const dados = {
+        metodo: 'pix' as const,
+        nomeTitular: 'Maria',
+        cpfTitular: '52998224725',
+        tipoChavePix: 'email' as const,
+        chavePix: 'maria@exemplo.com',
+      };
+      await repo.save(
+        criarRecebedorInicial({
+          id: randomUUID(),
+          idCampanha,
+          dadosRecebedor: dados,
+          criadaEm: new Date(),
+        }),
+      );
+      await expect(
+        repo.save(
+          criarRecebedorInicial({
+            id: randomUUID(),
+            idCampanha,
+            dadosRecebedor: dados,
+            criadaEm: new Date(),
+          }),
+        ),
+      ).rejects.toBeInstanceOf(ArrecadacaoRecebedorAlteradoConcorrentementeError);
     });
 
     it('receiver without fiscal address reads back without the field', async () => {

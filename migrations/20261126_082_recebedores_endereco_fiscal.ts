@@ -27,9 +27,10 @@ export async function up(db: Kysely<unknown>): Promise<void> {
           AND endereco_complemento IS NULL AND endereco_bairro IS NULL AND endereco_cidade IS NULL
           AND endereco_uf IS NULL AND endereco_codigo_municipio_ibge IS NULL)
         OR
-        (endereco_cep ~ '^[0-9]{8}$' AND endereco_logradouro IS NOT NULL AND endereco_numero IS NOT NULL
+        (endereco_cep IS NOT NULL AND endereco_cep ~ '^[0-9]{8}$'
+          AND endereco_logradouro IS NOT NULL AND endereco_numero IS NOT NULL
           AND endereco_bairro IS NOT NULL AND endereco_cidade IS NOT NULL AND endereco_uf IS NOT NULL
-          AND endereco_codigo_municipio_ibge ~ '^[0-9]{7}$')
+          AND endereco_codigo_municipio_ibge IS NOT NULL AND endereco_codigo_municipio_ibge ~ '^[0-9]{7}$')
       )
   `.execute(db);
   await sql`ALTER TABLE nfse_emissoes ADD COLUMN tomador_endereco jsonb`.execute(db);

@@ -1,6 +1,7 @@
 import { SpanStatusCode, trace } from '@opentelemetry/api';
 import type { Recebedor } from '../../domain/arrecadacao/entities/recebedor.js';
 import type { IdCampanha, IdRecebedor } from '../../domain/arrecadacao/value-objects/ids.js';
+import { ArrecadacaoRecebedorAlteradoConcorrentementeError } from '../../errors/arrecadacao/recebedor-alterado-concorrentemente.error.js';
 import type { RecebedorRepository } from './recebedor-repository.js';
 import type { ArrecadacaoRepositoryContext } from './repository-context.js';
 
@@ -18,6 +19,13 @@ export class RecebedorRepositoryMemory implements RecebedorRepository {
     return tracer.startActiveSpan('db.arrecadacao_recebedores.save', async (span) => {
       span.setAttributes({ ...DB_ATTRS, 'db.operation.name': 'UPSERT' });
       try {
+        // Mesma regra do índice parcial do Postgres: um ativo por campanha.
+        const outroAtivo = [...this.recebedores.values()].some(
+          (r) => r.idCampanha === recebedor.idCampanha && r.isActive && r.id !== recebedor.id,
+        );
+        if (recebedor.isActive && outroAtivo) {
+          throw new ArrecadacaoRecebedorAlteradoConcorrentementeError(recebedor.idCampanha);
+        }
         this.recebedores.set(recebedor.id, recebedor);
         span.setStatus({ code: SpanStatusCode.OK });
       } catch (error: unknown) {

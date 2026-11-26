@@ -7,6 +7,7 @@ import type {
 } from '../../domain/arrecadacao/value-objects/dados-recebedor.js';
 import type { EnderecoFiscal } from '../../domain/arrecadacao/value-objects/endereco-fiscal.js';
 import type { IdCampanha, IdRecebedor } from '../../domain/arrecadacao/value-objects/ids.js';
+import { ArrecadacaoRecebedorAlteradoConcorrentementeError } from '../../errors/arrecadacao/recebedor-alterado-concorrentemente.error.js';
 import type { Database } from '../database.js';
 import type { RecebedorRepository } from './recebedor-repository.js';
 import type { ArrecadacaoRepositoryContext } from './repository-context.js';
@@ -150,6 +151,12 @@ export class RecebedorRepositoryPostgres implements RecebedorRepository {
       } catch (error: unknown) {
         span.recordException(error as Error);
         span.setStatus({ code: SpanStatusCode.ERROR });
+        // Índice parcial "um ativo por campanha": outra operação ativou um
+        // recebedor primeiro (aperture-xdylg).
+        const pg = error as { code?: string; constraint?: string };
+        if (pg.code === '23505' && pg.constraint === 'recebedores_campanha_ativo_unique') {
+          throw new ArrecadacaoRecebedorAlteradoConcorrentementeError(recebedor.idCampanha);
+        }
         throw error;
       } finally {
         span.end();

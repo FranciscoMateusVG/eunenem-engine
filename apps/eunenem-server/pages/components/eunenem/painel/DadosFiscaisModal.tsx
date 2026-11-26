@@ -1,4 +1,4 @@
-import { type FormEvent, useId, useState } from "react";
+import { type FormEvent, useId, useRef, useState } from "react";
 import { trpc } from "@/lib/trpc.js";
 
 /**
@@ -68,6 +68,53 @@ export async function buscarCep(
   }
 }
 
+const CAMPOS_DO_CEP = ["logradouro", "bairro", "cidade", "uf", "codigoMunicipioIbge"] as const;
+const digitosCep = (cep: string) => cep.replace(/\D/g, "");
+
+/**
+ * Aplica a resposta do ViaCEP ao formulário ATUAL com segurança:
+ *   - CEP mudou desde a consulta → resposta velha, ignora;
+ *   - campo editado à mão enquanto a consulta corria → mantém o da pessoa;
+ *   - valor vazio do ViaCEP nunca apaga o que já existe.
+ */
+export function aplicarRespostaCep(
+  atual: EnderecoForm,
+  pedido: { readonly cep: string; readonly antes: EnderecoForm },
+  achado: Partial<EnderecoForm>,
+): EnderecoForm {
+  if (digitosCep(atual.cep) !== digitosCep(pedido.cep)) return atual;
+  const novo = { ...atual };
+  for (const campo of CAMPOS_DO_CEP) {
+    const valor = achado[campo];
+    if (!valor || atual[campo] !== pedido.antes[campo]) continue;
+    novo[campo] = valor;
+  }
+  return novo;
+}
+
+export type ResultadoBuscaCep = "aplicada" | "nao_encontrado" | "obsoleta" | "ignorada";
+
+/**
+ * Controlador das consultas de CEP (usado pelo formulário): só a consulta
+ * MAIS RECENTE pode mexer no formulário; respostas fora de ordem são
+ * descartadas. `aplicar` recebe um atualizador sobre o estado corrente.
+ */
+export function criarBuscaCep(buscar: (cep: string) => Promise<Partial<EnderecoForm> | null>) {
+  let geracao = 0;
+  return async (
+    antes: EnderecoForm,
+    aplicar: (atualizar: (atual: EnderecoForm) => EnderecoForm) => void,
+  ): Promise<ResultadoBuscaCep> => {
+    if (digitosCep(antes.cep).length !== 8) return "ignorada";
+    const minha = ++geracao;
+    const achado = await buscar(antes.cep);
+    if (minha !== geracao) return "obsoleta";
+    if (!achado) return "nao_encontrado";
+    aplicar((atual) => aplicarRespostaCep(atual, { cep: antes.cep, antes }, achado));
+    return "aplicada";
+  };
+}
+
 /** Mesmo critério mínimo do servidor, para habilitar o botão. */
 export function enderecoPreenchido(e: EnderecoForm): boolean {
   return (
@@ -102,25 +149,14 @@ export function DadosFiscaisForm({
   const [cepAviso, setCepAviso] = useState<string | null>(null);
   const set = (campo: keyof EnderecoForm) => (valor: string) => setForm((f) => ({ ...f, [campo]: valor }));
 
+  const buscaCep = useRef(criarBuscaCep(buscar));
   const aoSairDoCep = async () => {
-    if (form.cep.replace(/\D/g, "").length !== 8) return;
+    if (digitosCep(form.cep).length !== 8) return;
     setBuscando(true);
-    const achado = await buscar(form.cep);
+    const r = await buscaCep.current(form, (atualizar) => setForm(atualizar));
+    if (r === "obsoleta") return;
     setBuscando(false);
-    if (!achado) {
-      setCepAviso("Não encontramos esse CEP automaticamente. Preencha o endereço à mão.");
-      return;
-    }
-    setCepAviso(null);
-    // Não sobrescreve o que a pessoa já digitou com vazio do ViaCEP.
-    setForm((f) => ({
-      ...f,
-      logradouro: achado.logradouro || f.logradouro,
-      bairro: achado.bairro || f.bairro,
-      cidade: achado.cidade || f.cidade,
-      uf: achado.uf || f.uf,
-      codigoMunicipioIbge: achado.codigoMunicipioIbge || f.codigoMunicipioIbge,
-    }));
+    setCepAviso(r === "nao_encontrado" ? "Não encontramos esse CEP automaticamente. Preencha o endereço à mão." : null);
   };
 
   const enviar = (ev: FormEvent) => {

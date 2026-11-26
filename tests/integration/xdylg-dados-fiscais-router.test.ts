@@ -279,4 +279,52 @@ describe('aperture-xdylg — dados fiscais do recebedor', () => {
       enderecoFiscal: { codigoMunicipioIbge: '3106200', uf: 'MG' },
     });
   });
+
+  it('barreira: edição bancária concorrente entre a leitura e a gravação do endereço → CONFLICT, PIX novo preservado', async () => {
+    // Quantas leituras do ativo um atualizarEnderecoFiscal faz (permissão,
+    // campanha, snapshot do router, releitura do caso de uso): a ÚLTIMA é a
+    // releitura do caso de uso, depois do snapshot.
+    const contar = await buildRig();
+    await contar.caller.recebedor.atualizar({ idCampanha: contar.idCampanha, dadosRecebedor: PIX });
+    let total = 0;
+    const lerContando = contar.recebedorRepository.findAtivoByCampanhaId.bind(
+      contar.recebedorRepository,
+    );
+    contar.recebedorRepository.findAtivoByCampanhaId = async (...args) => {
+      total += 1;
+      return lerContando(...args);
+    };
+    await contar.caller.recebedor.atualizarEnderecoFiscal({
+      idCampanha: contar.idCampanha,
+      enderecoFiscal: ENDERECO,
+    });
+    expect(total).toBeGreaterThanOrEqual(2);
+
+    const rig = await buildRig();
+    await rig.caller.recebedor.atualizar({ idCampanha: rig.idCampanha, dadosRecebedor: PIX });
+    const repo = rig.recebedorRepository;
+    const original = repo.findAtivoByCampanhaId.bind(repo);
+    let leituras = 0;
+    repo.findAtivoByCampanhaId = async (...args) => {
+      leituras += 1;
+      if (leituras === total) {
+        // Outra aba troca a chave PIX logo antes da releitura do caso de uso.
+        repo.findAtivoByCampanhaId = original;
+        await rig.caller.recebedor.atualizar({
+          idCampanha: rig.idCampanha,
+          dadosRecebedor: { ...PIX, chavePix: 'nova@exemplo.com' },
+        });
+      }
+      return original(...args);
+    };
+    await expect(
+      rig.caller.recebedor.atualizarEnderecoFiscal({
+        idCampanha: rig.idCampanha,
+        enderecoFiscal: ENDERECO,
+      }),
+    ).rejects.toMatchObject({ code: 'CONFLICT' });
+    const ativo = await original(rig.idCampanha as never);
+    expect(ativo?.dadosRecebedor).toMatchObject({ chavePix: 'nova@exemplo.com' });
+    expect(ativo?.dadosRecebedor).not.toHaveProperty('enderecoFiscal');
+  });
 });

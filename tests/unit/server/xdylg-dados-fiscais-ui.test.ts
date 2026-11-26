@@ -5,9 +5,12 @@ import {
   TabelaCadastrosIncompletos,
 } from '../../../apps/eunenem-server/pages/components/eunenem/admin/nota-fiscal/CadastrosIncompletos.js';
 import {
+  aplicarRespostaCep,
   buscarCep,
+  criarBuscaCep,
   DadosFiscaisForm,
   ENDERECO_VAZIO,
+  type EnderecoForm,
   enderecoPreenchido,
 } from '../../../apps/eunenem-server/pages/components/eunenem/painel/DadosFiscaisModal.js';
 
@@ -66,6 +69,110 @@ describe('buscarCep (ViaCEP)', () => {
   it('IBGE malformado do ViaCEP não é aproveitado', async () => {
     const r = await buscarCep('30130010', fetchFalso({ uf: 'MG', ibge: '31062' }).impl);
     expect(r?.codigoMunicipioIbge).toBe('');
+  });
+});
+
+describe('controlador de CEP (respostas fora de ordem, edição durante a busca)', () => {
+  function adiada<T>() {
+    let resolver!: (v: T) => void;
+    const promessa = new Promise<T>((r) => {
+      resolver = r;
+    });
+    return { promessa, resolver };
+  }
+  const respostaA = {
+    logradouro: 'Rua A',
+    bairro: 'Bairro A',
+    cidade: 'Cidade A',
+    uf: 'SP',
+    codigoMunicipioIbge: '3550308',
+  };
+  const respostaB = {
+    logradouro: 'Rua B',
+    bairro: 'Bairro B',
+    cidade: 'Belo Horizonte',
+    uf: 'MG',
+    codigoMunicipioIbge: '3106200',
+  };
+
+  /** Estado do formulário + o `aplicar` que o componente usa (setState com atualizador). */
+  function formulario(inicial: EnderecoForm) {
+    let atual = inicial;
+    return {
+      get: () => atual,
+      set: (campos: Partial<EnderecoForm>) => {
+        atual = { ...atual, ...campos };
+      },
+      aplicar: (atualizar: (f: EnderecoForm) => EnderecoForm) => {
+        atual = atualizar(atual);
+      },
+    };
+  }
+
+  it('CEP A e depois B; B responde primeiro, A atrasado é DESCARTADO', async () => {
+    const pendentes = new Map<string, ReturnType<typeof adiada<Partial<EnderecoForm> | null>>>();
+    const buscar = (cep: string) => {
+      const d = adiada<Partial<EnderecoForm> | null>();
+      pendentes.set(cep.replace(/\D/g, ''), d);
+      return d.promessa;
+    };
+    const busca = criarBuscaCep(buscar);
+    const f = formulario({ ...ENDERECO_VAZIO, cep: '01001000' });
+    const a = busca(f.get(), f.aplicar);
+    f.set({ cep: '30130010' });
+    const b = busca(f.get(), f.aplicar);
+    pendentes.get('30130010')?.resolver(respostaB);
+    expect(await b).toBe('aplicada');
+    pendentes.get('01001000')?.resolver(respostaA);
+    expect(await a).toBe('obsoleta');
+    expect(f.get()).toMatchObject({ cep: '30130010', ...respostaB });
+  });
+
+  it('resposta chega depois de a pessoa trocar o CEP (sem nova busca): ignorada', async () => {
+    let resolver!: (v: Partial<EnderecoForm>) => void;
+    const busca = criarBuscaCep(
+      () =>
+        new Promise((r) => {
+          resolver = r;
+        }),
+    );
+    const f = formulario({ ...ENDERECO_VAZIO, cep: '01001000' });
+    const p = busca(f.get(), f.aplicar);
+    f.set({ cep: '3013' }); // digitando outro CEP, ainda incompleto
+    resolver(respostaA);
+    await p;
+    expect(f.get().logradouro).toBe('');
+    expect(f.get().codigoMunicipioIbge).toBe('');
+  });
+
+  it('campo editado à mão enquanto a busca corria não é sobrescrito', async () => {
+    let resolver!: (v: Partial<EnderecoForm>) => void;
+    const busca = criarBuscaCep(
+      () =>
+        new Promise((r) => {
+          resolver = r;
+        }),
+    );
+    const f = formulario({ ...ENDERECO_VAZIO, cep: '30130010' });
+    const p = busca(f.get(), f.aplicar);
+    f.set({ logradouro: 'Rua digitada à mão' });
+    resolver(respostaB);
+    expect(await p).toBe('aplicada');
+    expect(f.get()).toMatchObject({
+      logradouro: 'Rua digitada à mão',
+      bairro: 'Bairro B',
+      codigoMunicipioIbge: '3106200',
+    });
+  });
+
+  it('aplicarRespostaCep: vazio do ViaCEP nunca apaga o que existe', () => {
+    const atual = { ...ENDERECO_VAZIO, cep: '30130010', bairro: 'Meu bairro' };
+    const r = aplicarRespostaCep(
+      atual,
+      { cep: '30130-010', antes: atual },
+      { bairro: '', logradouro: 'Rua B' },
+    );
+    expect(r).toMatchObject({ bairro: 'Meu bairro', logradouro: 'Rua B' });
   });
 });
 

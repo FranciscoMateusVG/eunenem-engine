@@ -843,6 +843,7 @@ export type {
 } from './adapters/email/lifecycle-email-repository.js';
 export type { PendenciasDesativacaoRepository } from './adapters/usuario/pendencias-desativacao.js';
 export type { PendenciaDesativacao } from './domain/usuario/value-objects/pendencia-desativacao.js';
+export { ArrecadacaoRecebedorAlteradoConcorrentementeError } from './errors/arrecadacao/recebedor-alterado-concorrentemente.error.js';
 export { ArrecadacaoRecebedorJaExisteError } from './errors/arrecadacao/recebedor-ja-existe.error.js';
 // Plan 0016 Phase 2 (aperture-eg1s2): cart-multi-campanha error.
 export { CarrinhoMultiplasCampanhasError } from './errors/checkout/carrinho-multiplas-campanhas.error.js';
