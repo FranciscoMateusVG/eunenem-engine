@@ -36,7 +36,7 @@ const TEXTO_BLOQUEIO: Record<string, string> = {
   certificado_vencido: "O certificado está vencido.",
   tot_trib_pendente: "Total aproximado de tributos incompatível com o regime.",
   competencia_anterior_ao_inicio:
-    "Competência anterior ao início da emissão (novembro/2026). Outubro/2026 e anteriores nunca são emitidos por aqui.",
+    "Em produção, competências anteriores ao início da emissão (novembro/2026) nunca são emitidas por aqui. Outubro/2026 e anteriores: nunca.",
   pendencias_de_tomador:
     "Há campanhas sem CPF/nome válido do recebedor. Enquanto houver pendência, nenhuma nota do mês é emitida.",
   producao_nao_liberada:

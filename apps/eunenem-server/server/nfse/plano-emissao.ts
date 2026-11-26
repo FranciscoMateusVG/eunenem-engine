@@ -16,7 +16,8 @@ import type { AvisoPrevia, CampoDps, PreviaMensal } from './previa-mensal.js';
  *     válido (`pularPendencias`); elas aparecem na confirmação e podem ser
  *     emitidas depois na mesma competência, quando os dados estiverem
  *     completos. `bloquearCompetenciaComPendencias` segue disponível.
- *   - PISO: nenhuma competência antes de 2026-11 (outubro/2026 nunca).
+ *   - PISO (só em produção): nenhuma competência antes de 2026-11 (outubro/2026
+ *     nunca). Homologação aceita qualquer mês fechado.
  *
  * NOTAS GRAVADAS: cada clique grava as notas que vai enviar (CPF, valor,
  * campanhas) antes de enviar. Um clique posterior NÃO reparte de novo o que
@@ -162,7 +163,9 @@ export function montarPlanoEmissao(input: {
     else avisos.push(aviso);
   }
   for (const b of politica(previa)) bloqueios.add(b);
-  if (previa.mes < minima) bloqueios.add('competencia_anterior_ao_inicio');
+  // O piso vale só em PRODUÇÃO (tpAmb=1). Homologação não tem valor fiscal e
+  // precisa aceitar qualquer mês fechado para o smoke test (glados, 26/11).
+  if (config.ambiente.valor === '1' && previa.mes < minima) bloqueios.add('competencia_anterior_ao_inicio');
 
   if (config.prestadorCnpj === null || config.municipioIbge === null) bloqueios.add('config_incompleta');
   // Falta de configuração fiscal (não de tomador) numa nota é problema global.

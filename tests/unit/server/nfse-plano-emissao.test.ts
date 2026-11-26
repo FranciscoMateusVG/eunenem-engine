@@ -121,18 +121,38 @@ describe('montarPlanoEmissao', () => {
     ).toContain('competencia_divergente');
   });
 
-  it('piso absoluto 2026-11: outubro/2026 bloqueado mesmo com NFSE_COMPETENCIA_MINIMA menor', () => {
+  it('piso 2026-11 vale SÓ em produção: outubro/2026 bloqueado mesmo com NFSE_COMPETENCIA_MINIMA menor', () => {
+    const prod = (extra: Record<string, string> = {}) =>
+      parseNfseConfig({
+        ...CONFIG_ENV,
+        NFSE_AMBIENTE: '1',
+        NFSE_EMISSAO_PRODUCAO: 'liberada',
+        ...extra,
+      });
     const out = previa({ mes: '2026-10' });
-    expect(montarPlanoEmissao({ previa: out, config: CONFIG }).bloqueios).toContain(
-      'competencia_anterior_ao_inicio',
-    );
-    const baixo = parseNfseConfig({ ...CONFIG_ENV, NFSE_COMPETENCIA_MINIMA: '2025-01' });
-    expect(montarPlanoEmissao({ previa: out, config: baixo }).bloqueios).toContain(
+    expect(montarPlanoEmissao({ previa: out, config: prod() }).bloqueios).toContain(
       'competencia_anterior_ao_inicio',
     );
     expect(
-      montarPlanoEmissao({ previa: previa({ mes: '2026-11' }), config: CONFIG }).bloqueios,
-    ).not.toContain('competencia_anterior_ao_inicio');
+      montarPlanoEmissao({ previa: out, config: prod({ NFSE_COMPETENCIA_MINIMA: '2025-01' }) })
+        .bloqueios,
+    ).toContain('competencia_anterior_ao_inicio');
+    expect(
+      montarPlanoEmissao({ previa: previa({ mes: '2026-11' }), config: prod() }).bloqueios,
+    ).toEqual([]);
+  });
+
+  it('homologação: qualquer mês fechado, inclusive outubro/2026 e antes (smoke)', () => {
+    for (const mes of ['2026-10', '2025-03']) {
+      expect(
+        montarPlanoEmissao({ previa: previa({ mes }), config: CONFIG }).bloqueios,
+        mes,
+      ).toEqual([]);
+    }
+    const comPiso = parseNfseConfig({ ...CONFIG_ENV, NFSE_COMPETENCIA_MINIMA: '2033-01' });
+    expect(
+      montarPlanoEmissao({ previa: previa({ mes: '2026-10' }), config: comPiso }).bloqueios,
+    ).toEqual([]);
   });
 
   it('estratégia injetada (ex.: consolidada) troca as notas sem mexer nos bloqueios', () => {

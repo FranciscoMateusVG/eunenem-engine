@@ -1,0 +1,111 @@
+/**
+ * nfse-smoke-seed (aperture-wp6j6) — prepara o smoke de HOMOLOGAÇÃO da NFS-e
+ * num Postgres LOCAL: UMA campanha sintética com UM recebedor fictício (CPF
+ * de teste com DV válido, nome e endereço fictícios) e UMA taxa da plataforma
+ * num mês passado. Nenhum CPF de cliente real vai para o ambiente de testes
+ * da Receita.
+ *
+ * Segurança:
+ *   - recusa DATABASE_URL que não seja localhost/127.0.0.1;
+ *   - recusa se o mês escolhido já tem taxa de OUTRA campanha (a emissão
+ *     pegaria esses tomadores também) — escolha outro --mes;
+ *   - idempotente: se a campanha sintética do mês já existe, não cria outra.
+ *
+ * Uso (da raiz):
+ *   DATABASE_URL=postgresql://frame:frame@localhost:54320/frame \
+ *     pnpm tsx scripts/nfse-smoke-seed.ts [--mes 2025-01] [--taxa 1234]
+ */
+import { parseArgs } from 'node:util';
+import { sql } from 'kysely';
+import { createDatabase } from '../src/adapters/database.js';
+import { ID_PLATAFORMA_EUNENEM } from '../src/index.js';
+import { ReceitaLedgerSeed } from '../tests/helpers/receita-ledger-seed.js';
+
+/** CPF de teste (DV válido), amplamente usado como exemplo; não é de cliente. */
+const CPF_FICTICIO = '52998224725';
+const TITULO = 'NFSE SMOKE SINTETICO';
+
+async function main(): Promise<void> {
+  const { values } = parseArgs({
+    options: {
+      mes: { type: 'string', default: '2025-01' },
+      taxa: { type: 'string', default: '1234' },
+    },
+  });
+  const mes = values.mes ?? '2025-01';
+  const taxaCents = Number(values.taxa);
+  if (!/^20\d{2}-(0[1-9]|1[0-2])$/.test(mes)) throw new Error('--mes deve ser AAAA-MM');
+  if (!Number.isSafeInteger(taxaCents) || taxaCents <= 0)
+    throw new Error('--taxa deve ser centavos > 0');
+
+  const url = process.env.DATABASE_URL ?? '';
+  const host = (() => {
+    try {
+      return new URL(url).hostname;
+    } catch {
+      return '';
+    }
+  })();
+  if (host !== 'localhost' && host !== '127.0.0.1') {
+    throw new Error(
+      'Recusado: DATABASE_URL precisa apontar para um Postgres local (localhost/127.0.0.1).',
+    );
+  }
+
+  const db = createDatabase(url);
+  try {
+    const de = `${mes}-01`;
+    const [ano, m] = mes.split('-').map(Number) as [number, number];
+    const ate = m === 12 ? `${ano + 1}-01-01` : `${ano}-${String(m + 1).padStart(2, '0')}-01`;
+    const noMes = (
+      await sql<{ campanha_id: string; titulo: string }>`
+      SELECT DISTINCT c.id AS campanha_id, c.titulo
+      FROM lancamentos_financeiros l
+      JOIN pagamentos p ON p.id = l.id_pagamento
+      JOIN campanhas c ON c.id = p.intencao_id_campanha
+      WHERE l.tipo = 'credito_receita_plataforma'
+        AND l.criado_em >= (${de}::date::timestamp AT TIME ZONE 'America/Sao_Paulo')
+        AND l.criado_em < (${ate}::date::timestamp AT TIME ZONE 'America/Sao_Paulo')
+    `.execute(db)
+    ).rows;
+    const outras = noMes.filter((r) => r.titulo !== `${TITULO} ${mes}`);
+    if (outras.length > 0) {
+      throw new Error(
+        `Recusado: ${outras.length} outra(s) campanha(s) têm taxa em ${mes}. Use outro --mes.`,
+      );
+    }
+    if (noMes.length > 0) {
+      console.log(
+        `[nfse-smoke-seed] já semeado para ${mes} (campanha ${noMes[0]?.campanha_id}). Nada feito.`,
+      );
+      return;
+    }
+
+    const seed = new ReceitaLedgerSeed(db);
+    const idCampanha = await seed.campanha(ID_PLATAFORMA_EUNENEM);
+    await sql`UPDATE campanhas SET titulo = ${`${TITULO} ${mes}`} WHERE id = ${idCampanha}::uuid`.execute(
+      db,
+    );
+    await sql`
+      INSERT INTO recebedores (id, campanha_id, metodo, nome_titular, cpf_titular, tipo_chave_pix, chave_pix, is_active, criada_em)
+      VALUES (gen_random_uuid(), ${idCampanha}::uuid, 'pix', 'Tomador Ficticio de Teste', ${CPF_FICTICIO}, 'email',
+        'smoke@example.invalid', true, now())
+    `.execute(db);
+    // Meio do mês, 15h UTC (12h em São Paulo): longe das bordas.
+    await seed.taxa({
+      campaignId: idCampanha,
+      taxaCents,
+      criadoEm: new Date(`${mes}-15T15:00:00Z`),
+    });
+    console.log(
+      `[nfse-smoke-seed] campanha ${idCampanha}: taxa de ${taxaCents} centavos em ${mes}, tomador fictício.`,
+    );
+  } finally {
+    await db.destroy();
+  }
+}
+
+main().catch((e: unknown) => {
+  console.error(`[nfse-smoke-seed] ${e instanceof Error ? e.message : String(e)}`);
+  process.exitCode = 1;
+});
