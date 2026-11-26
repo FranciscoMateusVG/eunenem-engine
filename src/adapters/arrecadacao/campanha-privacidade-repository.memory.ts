@@ -29,6 +29,7 @@ async function comSpan<T>(nome: string, operacao: string, fn: () => Promise<T>):
 /** Memory twin of the Postgres adapter: no entry = recados visible. */
 export class CampanhaPrivacidadeRepositoryMemory implements CampanhaPrivacidadeRepository {
   private readonly exibirRecados = new Map<string, boolean>();
+  private readonly mensagens = new Map<string, string | null>();
 
   async exibeRecadosPublicamente(idCampanha: IdCampanha): Promise<boolean> {
     return comSpan(
@@ -41,6 +42,23 @@ export class CampanhaPrivacidadeRepositoryMemory implements CampanhaPrivacidadeR
   async definirExibirRecados(idCampanha: IdCampanha, exibir: boolean): Promise<void> {
     return comSpan('definirExibirRecados', 'UPSERT', async () => {
       this.exibirRecados.set(idCampanha, exibir);
+    });
+  }
+
+  async mensagemAgradecimento(idCampanha: IdCampanha): Promise<string | null> {
+    return comSpan(
+      'mensagemAgradecimento',
+      'SELECT',
+      async () => this.mensagens.get(idCampanha) ?? null,
+    );
+  }
+
+  async definirMensagemAgradecimento(
+    idCampanha: IdCampanha,
+    mensagem: string | null,
+  ): Promise<void> {
+    return comSpan('definirMensagemAgradecimento', 'UPSERT', async () => {
+      this.mensagens.set(idCampanha, mensagem);
     });
   }
 }

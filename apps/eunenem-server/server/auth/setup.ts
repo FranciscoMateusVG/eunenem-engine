@@ -44,6 +44,7 @@ import {
   ListaDeConvidadosRepositoryPostgres,
   type LivroFinanceiroRepository,
   LivroFinanceiroRepositoryPostgres,
+  type EmailMessage,
   type EmailTransport,
   EmailTransportNodemailer,
   EmailTransportNoop,
@@ -146,6 +147,8 @@ export interface ServerDeps {
   readonly contextoCompartilhamentoOnboarding?: (usuarioId: string, idConta: string, plataformaId: string) => Promise<{ idsProprias: string[]; idCompartilhada: string | null }>;
   readonly consumirConvitesVerificados?: (usuarioId: string, plataformaId: string) => Promise<void>;
   readonly enviarConviteCampanha: (email: string) => Promise<void>;
+  /** aperture-bqvb5 — thank-you email to a gift giver (rendered by the router). */
+  readonly enviarEmailAgradecimento: (message: EmailMessage) => Promise<void>;
   readonly auth: Auth;
   readonly authService: AuthService;
   readonly usuarioRepository: UsuarioRepository;
@@ -1340,6 +1343,7 @@ export function buildServerDeps(
     enviarConviteCampanha: async (email: string) => {
       await emailTransport.enviar(renderCampaignInviteEmail(email, env.BETTER_AUTH_URL));
     },
+    enviarEmailAgradecimento: (message) => emailTransport.enviar(message),
     db,
     auth,
     authService,

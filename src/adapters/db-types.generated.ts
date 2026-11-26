@@ -41,6 +41,12 @@ export interface Accounts {
   user_id: string;
 }
 
+export interface AgradecimentosPresentes {
+  agradecido_em: Timestamp;
+  id_campanha: string;
+  id_pagamento: string;
+}
+
 export interface CampanhaAdministradores {
   campanha_id: string;
   id_usuario: string;
@@ -80,6 +86,7 @@ export interface CampanhaPrivacidade {
   atualizado_em: Generated<Timestamp>;
   campanha_id: string;
   exibir_recados: Generated<boolean>;
+  mensagem_agradecimento: string | null;
 }
 
 export interface Campanhas {
@@ -722,6 +729,7 @@ export interface Verifications {
 
 export interface DB {
   accounts: Accounts;
+  agradecimentos_presentes: AgradecimentosPresentes;
   campanha_administradores: CampanhaAdministradores;
   campanha_compartilhamento_audit: CampanhaCompartilhamentoAudit;
   campanha_convites: CampanhaConvites;

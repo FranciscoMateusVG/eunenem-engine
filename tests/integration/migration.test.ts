@@ -484,6 +484,26 @@ describe('Migration round-trip', () => {
     //    this sequence must start at the LATEST migration and walk earlier.
     //    Adding a new migration on top REQUIRES prepending its down-step here.
 
+    // 080 agradecimentos_presentes + campanha_privacidade.mensagem_agradecimento (aperture-bqvb5).
+    const agradecimentos = async () =>
+      (
+        await sql<{
+          name: string | null;
+        }>`SELECT to_regclass('agradecimentos_presentes')::text AS name`.execute(db)
+      ).rows[0]?.name;
+    const mensagemCol = async () =>
+      (
+        await sql<{ data_type: string }>`SELECT data_type FROM information_schema.columns
+          WHERE table_name = 'campanha_privacidade' AND column_name = 'mensagem_agradecimento'`.execute(
+          db,
+        )
+      ).rows[0]?.data_type;
+    expect(await agradecimentos()).toBe('agradecimentos_presentes');
+    expect(await mensagemCol()).toBe('text');
+    expect((await migrator.migrateDown()).error).toBeUndefined();
+    expect(await agradecimentos()).toBeNull();
+    expect(await mensagemCol()).toBeUndefined();
+
     // 077 repasse attempt 'reenvio_inter' operation.
     expect((await migrator.migrateDown()).error).toBeUndefined();
 
