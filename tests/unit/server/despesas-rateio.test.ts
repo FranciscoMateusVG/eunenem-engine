@@ -1,7 +1,11 @@
-import { expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import {
   type DespesaManual,
+  datasDeCobranca,
+  descreverRecorrencia,
+  diasManuais,
   diasRecorrentesRateados,
+  valorDaCobranca,
 } from '../../../apps/eunenem-server/pages/lib/despesasManuais.js';
 import { agregarDespesas } from '../../../apps/eunenem-server/pages/lib/despesasPainel.js';
 import { agregarLucro } from '../../../apps/eunenem-server/pages/lib/lucroPainel.js';
@@ -123,5 +127,74 @@ it('lucro positivo menor que a meta já a cobre; semana negativa não a cobre', 
   expect(s.find((x) => x.de === '2026-10-12')).toMatchObject({
     valorCents: -500,
     faltamCents: 500,
+  });
+});
+
+describe('9nmdo — periodicidade e correção de um mês', () => {
+  const tri: DespesaManual = {
+    ...despesa('2026-11-01'),
+    diaCobranca: 5,
+    intervaloMeses: 3,
+    valores: [{ vigenteDesde: '2026-11-01', valorCents: 92_000 }],
+  };
+
+  it('cobra no mês do início e a cada N meses, atravessando o ano', () => {
+    expect(datasDeCobranca(tri, { de: '2026-01-01', ate: '2027-12-01' })).toEqual([
+      '2026-11-05',
+      '2027-02-05',
+      '2027-05-05',
+      '2027-08-05',
+      '2027-11-05',
+    ]);
+    expect(
+      datasDeCobranca({ ...tri, intervaloMeses: 2 }, { de: '2027-01-01', ate: '2027-05-01' }),
+    ).toEqual(['2027-01-05', '2027-03-05']);
+  });
+
+  it('rateio espalha a cobrança pelos N meses do ciclo, no centavo', () => {
+    // nov+dez+jan = 30+31+31 = 92 dias → 1.000/dia.
+    const ciclo = diasRecorrentesRateados([tri], { de: '2026-11-01', ate: '2027-02-01' });
+    expect(ciclo).toHaveLength(92);
+    expect(ciclo.reduce((s, d) => s + d.manualCents, 0)).toBe(92_000);
+    expect(ciclo.every((d) => d.manualCents === 1_000)).toBe(true);
+    expect(ciclo.reduce((s, d) => s + d.ocorrencias, 0)).toBe(1);
+    // Janela no meio do ciclo: só dezembro, sem a cobrança (que foi em novembro).
+    const dez = diasRecorrentesRateados([tri], { de: '2026-12-01', ate: '2027-01-01' });
+    expect(dez.reduce((s, d) => s + d.manualCents, 0)).toBe(31_000);
+    expect(dez.reduce((s, d) => s + d.ocorrencias, 0)).toBe(0);
+    // cobrancasAte antes da cobrança: o ciclo ainda não conta.
+    expect(
+      diasRecorrentesRateados([tri], { de: '2026-12-01', ate: '2027-01-01' }, '2026-11-04'),
+    ).toEqual([]);
+  });
+
+  it('correção substitui o valor só daquela cobrança; a mais recente vale', () => {
+    const d: DespesaManual = {
+      ...despesa('2026-08-01'),
+      diaCobranca: 4,
+      valores: [{ vigenteDesde: '2026-08-01', valorCents: 10_000 }],
+      ajustes: [
+        { competencia: '2026-09-04', valorCents: 12_500, nota: 'a' },
+        { competencia: '2026-09-04', valorCents: 11_000, nota: 'b' },
+      ],
+    };
+    expect(valorDaCobranca(d, '2026-08-04')).toBe(10_000);
+    expect(valorDaCobranca(d, '2026-09-04')).toBe(11_000);
+    expect(
+      diasManuais([d], { de: '2026-08-01', ate: '2026-11-01' }).map((x) => x.manualCents),
+    ).toEqual([10_000, 11_000, 10_000]);
+    const set = diasRecorrentesRateados([d], { de: '2026-09-01', ate: '2026-10-01' });
+    expect(set.reduce((s, x) => s + x.manualCents, 0)).toBe(11_000);
+  });
+
+  it('descreve a periodicidade', () => {
+    const f = (x: string) => x;
+    expect(descreverRecorrencia({ ...tri }, f)).toBe('trimestral · todo dia 5 · desde 2026-11-01');
+    expect(descreverRecorrencia({ ...tri, intervaloMeses: 1 }, f)).toBe(
+      'mensal · todo dia 5 · desde 2026-11-01',
+    );
+    expect(descreverRecorrencia({ ...tri, intervaloMeses: 5 }, f)).toBe(
+      'a cada 5 meses · todo dia 5 · desde 2026-11-01',
+    );
   });
 });

@@ -2514,6 +2514,18 @@ h4 {
 .lista-foot-actions-end {
   margin-left: auto;
 }
+/* aperture-bqvb5 — on narrow phones (320px) "Cancelar" + "Adicionar à lista"
+   are wider than the modal, and the modal's overflow:hidden clipped the
+   primary button. Let the actions take the full row and wrap. */
+@media (max-width: 480px) {
+  .lista-foot-actions {
+    width: 100%;
+    flex-wrap: wrap;
+  }
+  .lista-foot-actions .btn {
+    flex: 1 1 auto;
+  }
+}
 
 /* =================================================================
  * aperture-17cls — "Adicionar à minha lista" tabbed modal.
@@ -8365,6 +8377,10 @@ button.painel-topbar-link:hover {
 .config-modal-backdrop { position: fixed; inset: 0; z-index: 100; background: #33233380; padding: 16px; display: grid; place-items: center; }
 .config-modal { width: 100%; max-width: 540px; max-height: 90dvh; overflow-y: auto; }
 .config-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+/* aperture-bqvb5 — mensagem padrão de agradecimento. 16px avoids iOS zoom. */
+.config-textarea { width: 100%; box-sizing: border-box; margin-top: 8px; padding: 10px 12px; border: 1.5px solid var(--line); border-radius: 14px; background: var(--cream); color: var(--plum); font: inherit; font-size: 16px; line-height: 1.5; resize: vertical; }
+.config-textarea:focus { outline: none; border-color: var(--lilac); background: var(--paper); }
+.config-textarea:disabled { opacity: .7; }
 .config-consent { display: flex; align-items: flex-start; gap: 8px; font-size: 13px; line-height: 1.5; }
 .config-consent input { width: 20px; height: 20px; flex-shrink: 0; }
 dialog.config-modal { margin: auto; color: var(--ink); border: 1px solid var(--line); width: calc(100% - 32px); }
@@ -8394,6 +8410,78 @@ dialog.config-modal::backdrop { background: #33233380; }
   font-size: 23px; line-height: 1.08; display: -webkit-box;
   -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
 }
+.camp-card-title-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+}
+.camp-card-title-row .camp-card-name {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.camp-card-rename {
+  position: relative;
+  z-index: 2;
+  display: grid;
+  place-items: center;
+  flex: 0 0 36px;
+  width: 36px;
+  height: 36px;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--plum);
+  cursor: pointer;
+}
+.camp-card-rename:hover { background: var(--lilac-soft); }
+.camp-card-rename:focus-visible { outline: 2px solid var(--lilac-deep); }
+dialog.camp-modal-rename {
+  position: fixed;
+  inset: 0;
+  margin: auto;
+  max-width: calc(100% - 32px);
+}
+dialog.camp-modal-rename::backdrop { background: rgba(51, 35, 51, 0.5); }
+/* aperture-bqvb5 — archived list: greyed card + "arquivada" tag. The painel
+   link still works; only the public page is offline. */
+.camp-card.is-arquivada {
+  filter: grayscale(1);
+  opacity: 0.72;
+  box-shadow: none;
+}
+.camp-card.is-arquivada .camp-tape { opacity: 0.35; }
+.camp-card-arquivada {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  align-self: flex-start;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--cream-2, #f1ece8);
+  color: var(--ink-soft);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.camp-card-arquivar {
+  position: relative;
+  z-index: 2;
+  align-self: flex-start;
+  min-height: 32px;
+  padding: 4px 0;
+  border: 0;
+  background: none;
+  color: var(--lilac-deep);
+  font-family: var(--font-dm-sans), system-ui, sans-serif;
+  font-size: 12px;
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+.camp-card-arquivar:disabled { cursor: progress; opacity: 0.6; }
 .camp-grid .camp-card-mimos { font-size: 11px; margin-top: 0; }
 .camp-grid .camp-cta {
   position: absolute; inset: 0; display: block; width: auto; min-height: 0;

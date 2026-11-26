@@ -1,5 +1,5 @@
 import { readPixStatus } from './pix-status.js';
-import { campanhaNoAr, isCampaignPublicOwner } from './campaign-public-address.js';
+import { campanhaNoAr, campanhaPublicaPadrao, isCampaignPublicOwner } from './campaign-public-address.js';
 import { createHash, randomBytes } from 'node:crypto';
 import { initTRPC, TRPCError } from '@trpc/server';
 import { z } from 'zod/v4';
@@ -319,7 +319,7 @@ async function resolvePaginaBySlug(
       throw new TRPCError({ code: 'NOT_FOUND', message: 'Pagina nao encontrada' });
     }
   } else {
-    campanha = await deps.campanhaRepository.findByAdministrador(usuario.idConta);
+    campanha = await campanhaPublicaPadrao(ctx, usuario.idConta);
     if (!campanha) {
       throw new TRPCError({ code: 'NOT_FOUND', message: 'Pagina nao encontrada' });
     }

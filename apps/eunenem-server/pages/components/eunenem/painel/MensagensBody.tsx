@@ -5,7 +5,9 @@ import type { PainelSectionBodyProps } from "@/PainelSectionPage";
 import { useCampanhaEscrita } from "@/lib/campanha-escrita.js";
 import { useCampanhaRota } from "@/lib/campanha-rota.js";
 import { trpc } from "@/lib/trpc";
+import { AgradecerModal } from "./AgradecerModal";
 import { ComPermissao } from "./ComPermissao";
+import { useAcessoCampanha } from "./useAcessoCampanha";
 
 // aperture-5v766 Phase B + aperture-kih74 swap-over — admin mensagens page
 // against Rex's Phase A backend (PR #199).
@@ -43,12 +45,9 @@ interface AdminRecadoProjection {
   contribuicaoNome: string | null;
 }
 
-// AGRADECER scope decision (aperture-5v766 spec §6):
-// The button stays visible as an affordance — hiding it would erase a
-// signal the operator and contribuintes both expect. On click we surface a
-// sonner toast "em breve" so the affordance is honest about its stub state.
-// The eventual AGRADECER path needs operator spec (P3 follow-up); when
-// that ships, the toast swap becomes a real mutation.
+// AGRADECER (aperture-bqvb5): opens the thank-you composer (AgradecerModal)
+// with this recado's giver preselected. Shown only with
+// `mensagens:gerenciar`, the permission the send itself requires.
 
 const SHADOW_SM = "0 2px 10px rgba(107, 60, 94, 0.06)";
 const SHADOW_MD = "0 14px 36px rgba(107, 60, 94, 0.1)";
@@ -237,7 +236,7 @@ function RecadoCard({
 }: {
   r: AdminRecadoProjection;
   onMarcarLida: (idPagamento: string) => void;
-  onAgradecer: (r: AdminRecadoProjection) => void;
+  onAgradecer?: ((r: AdminRecadoProjection) => void) | undefined;
   isMarkingLida: boolean;
 }) {
   const pal = avatarFor(r.contribuinteNome);
@@ -424,6 +423,7 @@ function RecadoCard({
                 <IconCheck size={13} /> marcar lida
               </button>
             )}
+            {onAgradecer && (
             <button
               type="button"
               onClick={() => onAgradecer(r)}
@@ -450,6 +450,7 @@ function RecadoCard({
             >
               <IconHeart size={13} /> agradecer ♡
             </button>
+            )}
           </div>
         </div>
       </div>
@@ -528,10 +529,14 @@ function MensagensBodyConteudo({ slug }: PainelSectionBodyProps) {
     toast.success("tudo lido ♡");
   };
 
-  const handleAgradecer = (_r: AdminRecadoProjection) => {
-    // AGRADECER stub — see file-header decision. Surface affordance, no action.
-    toast("agradecer — em breve ♡");
-  };
+  const acesso = useAcessoCampanha(idCampanhaEscrita);
+  const [agradecer, setAgradecer] = useState<{ open: boolean; idPagamento: string | null }>({
+    open: false,
+    idPagamento: null,
+  });
+  const handleAgradecer = acesso.pode("mensagens:gerenciar")
+    ? (r: AdminRecadoProjection) => setAgradecer({ open: true, idPagamento: r.idPagamento })
+    : undefined;
 
   const filterChips: readonly [typeof filter, string, number][] = [
     ["all", "todas", counts.todas],
@@ -777,6 +782,14 @@ function MensagensBodyConteudo({ slug }: PainelSectionBodyProps) {
           ))
         )}
       </div>
+      {idCampanhaEscrita && (
+        <AgradecerModal
+          idCampanha={idCampanhaEscrita}
+          open={agradecer.open}
+          idPagamentoInicial={agradecer.idPagamento}
+          onClose={() => setAgradecer({ open: false, idPagamento: null })}
+        />
+      )}
     </section>
   );
 }

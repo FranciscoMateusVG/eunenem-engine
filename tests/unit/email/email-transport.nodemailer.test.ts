@@ -152,6 +152,23 @@ describe('EmailTransportNodemailer per-auth-message click tracking', () => {
     expect(sendMail).toHaveBeenNthCalledWith(2, { from: 'sender@example.invalid', ...ordinary });
   });
 
+  it('passes an optional Reply-To through to SMTP (aperture-bqvb5)', async () => {
+    const { transport, sendMail } = captureTransport('smtp.example.invalid');
+    await transport.enviar({
+      to: 'recipient@example.invalid',
+      subject: 'obrigada',
+      html: 'obrigada',
+      replyTo: 'titular@example.invalid',
+    });
+    expect(sendMail).toHaveBeenCalledExactlyOnceWith({
+      from: 'sender@example.invalid',
+      to: 'recipient@example.invalid',
+      subject: 'obrigada',
+      html: 'obrigada',
+      replyTo: 'titular@example.invalid',
+    });
+  });
+
   it('keeps generic SMTP usable for messages without an opt-out requirement', async () => {
     const { transport, sendMail } = captureTransport('smtp.example.invalid');
     await transport.enviar({

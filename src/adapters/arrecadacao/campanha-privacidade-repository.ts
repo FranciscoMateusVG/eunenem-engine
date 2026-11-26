@@ -7,4 +7,7 @@ import type { IdCampanha } from '../../domain/arrecadacao/value-objects/ids.js';
 export interface CampanhaPrivacidadeRepository {
   exibeRecadosPublicamente(idCampanha: IdCampanha): Promise<boolean>;
   definirExibirRecados(idCampanha: IdCampanha, exibir: boolean): Promise<void>;
+  /** aperture-bqvb5 — mensagem padrão de agradecimento (null = usar a sugerida). */
+  mensagemAgradecimento(idCampanha: IdCampanha): Promise<string | null>;
+  definirMensagemAgradecimento(idCampanha: IdCampanha, mensagem: string | null): Promise<void>;
 }

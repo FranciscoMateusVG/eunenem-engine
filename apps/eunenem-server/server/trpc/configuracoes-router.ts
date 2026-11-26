@@ -19,6 +19,7 @@ import {
   type LifecycleEmailType,
 } from '../../../../src/adapters/email/lifecycle-email-preferences.postgres.js';
 import type { IdCampanha } from '../../../../src/index.js';
+import { MENSAGEM_AGRADECIMENTO_SUGERIDA } from '../auth/agradecimento-email.js';
 import type { TrpcContext } from './context.js';
 import {
   PermissaoCampanhaNegadaError,
@@ -87,11 +88,18 @@ async function resolver(ctx: TrpcContext, idCampanha: string, gerenciarMensagens
 export const configuracoesRouter = t.router({
   get: t.procedure.input(campanhaInput).query(async ({ ctx, input }) => {
     const { usuario, campanha } = await resolver(ctx, input.idCampanha);
-    const [prefs, exibirRecados] = await Promise.all([
+    const [prefs, exibirRecados, mensagemAgradecimento] = await Promise.all([
       preferencias(ctx).getPreferences(usuario.id, usuario.idPlataforma),
       ctx.deps.campanhaPrivacidadeRepository.exibeRecadosPublicamente(campanha.id),
+      ctx.deps.campanhaPrivacidadeRepository.mensagemAgradecimento(campanha.id),
     ]);
-    return { exibirRecados, emails: paraToggles(prefs) };
+    return {
+      exibirRecados,
+      emails: paraToggles(prefs),
+      // aperture-bqvb5 — null = a lista usa a mensagem sugerida.
+      mensagemAgradecimento,
+      mensagemAgradecimentoSugerida: MENSAGEM_AGRADECIMENTO_SUGERIDA,
+    };
   }),
 
   emails: t.procedure.input(emailsInput).mutation(async ({ ctx, input }) => {
@@ -112,5 +120,18 @@ export const configuracoesRouter = t.router({
       const { campanha } = await resolver(ctx, input.idCampanha, true);
       await ctx.deps.campanhaPrivacidadeRepository.definirExibirRecados(campanha.id as IdCampanha, input.exibirRecados);
       return { exibirRecados: input.exibirRecados };
+    }),
+
+  /** aperture-bqvb5 — mensagem padrão de agradecimento; vazio/null volta à sugerida. */
+  mensagemAgradecimento: t.procedure
+    .input(campanhaInput.extend({ mensagem: z.string().trim().max(5000).nullable() }))
+    .mutation(async ({ ctx, input }) => {
+      const { campanha } = await resolver(ctx, input.idCampanha, true);
+      const mensagem = input.mensagem ? input.mensagem : null;
+      await ctx.deps.campanhaPrivacidadeRepository.definirMensagemAgradecimento(
+        campanha.id as IdCampanha,
+        mensagem,
+      );
+      return { mensagemAgradecimento: mensagem };
     }),
 });

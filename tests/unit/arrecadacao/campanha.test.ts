@@ -47,6 +47,7 @@ const baseCampanha = {
   titulo: 'Campanha',
   slug: null,
   slugAlteradoEm: null,
+  arquivadaEm: null,
   opcoes: [] as const,
   criadaEm: new Date('2026-01-01T00:00:00.000Z'),
 };
@@ -304,6 +305,8 @@ describe('criarCampanhaSemRecebedor', () => {
     });
     expect(Object.keys(campanha).sort()).toEqual(
       [
+        // aperture-bqvb5: archive timestamp (defaults to null).
+        'arquivadaEm',
         'criadaEm',
         'dadosRecebedor',
         'id',

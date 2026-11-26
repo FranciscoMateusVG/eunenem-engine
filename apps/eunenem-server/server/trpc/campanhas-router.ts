@@ -105,6 +105,12 @@ const CampanhaNovaDTOSchema = z.object({
    * the card's "completar" affordance, and may use it as the display name.
    */
   nomeBebe: z.string().nullable(),
+  /**
+   * aperture-bqvb5 — ISO-8601 instant the titular archived the list, or null
+   * while it is active. Archived lists stay in Minhas Listas (greyed out) and
+   * in every painel screen; only the public page goes offline.
+   */
+  arquivadaEm: z.string().nullable(),
 });
 
 const CampanhaLegadoDTOSchema = z.object({
@@ -123,11 +129,11 @@ const CampanhasListOutputSchema = z.object({
 export type CampanhasListOutput = z.infer<typeof CampanhasListOutputSchema>;
 
 /**
- * `campanhas.criar` input — name-only (aperture-x0unf NOVA LISTA V1). Bounds
+ * Title input shared by `campanhas.criar` and `campanhas.renomear`. Bounds
  * mirror the domain `CriarCampanhaInputSchema.titulo` (trimmed, 1..200) so a
  * bad title is a clean tRPC BAD_REQUEST before the use-case runs.
  */
-const CriarCampanhaInputDTOSchema = z.object({
+const TituloCampanhaInput = z.object({
   titulo: z.string().trim().min(1, 'Titulo nao pode ser vazio').max(200),
 });
 
@@ -148,7 +154,55 @@ function toCardDTO(
     campanhaSlug: campanha.slug,
     slugJaAlterado: campanha.slugAlteradoEm !== null,
     nomeBebe,
+    arquivadaEm: campanha.arquivadaEm?.toISOString() ?? null,
   };
+}
+
+/**
+ * aperture-bqvb5 — arquiva (`arquivar=true`) ou desarquiva a lista. Só a
+ * titular; mesmo cerco de concorrência de `renomear` (FOR UPDATE serializa
+ * com exclusão e mudanças de acesso). Nada é apagado: pagamentos, extrato e
+ * repasses seguem intactos; só a página pública sai do ar.
+ */
+async function definirArquivamento(
+  ctx: TrpcContext,
+  idCampanha: string,
+  arquivar: boolean,
+): Promise<{ id: string; arquivadaEm: string | null }> {
+  try {
+    const { usuario, campanha } = await resolverCampanhaAdministrada(ctx, idCampanha);
+    const { deps } = ctx;
+    return await deps.db.transaction().execute(async (trx) => {
+      const lista = await trx
+        .selectFrom('campanhas')
+        .select('id')
+        .where('id', '=', campanha.id)
+        .forUpdate()
+        .executeTakeFirst();
+      if (!lista) throw new CampanhaAcessoNegadoError('Lista indisponível.');
+      const acesso = await deps.campanhaMembrosRepository.obterAcesso(
+        campanha.id,
+        usuario.idConta,
+        { trx },
+      );
+      if (acesso?.papel !== 'owner') {
+        throw new TRPCError({
+          code: 'FORBIDDEN',
+          message: arquivar
+            ? 'Somente quem criou a lista pode arquivá-la.'
+            : 'Somente quem criou a lista pode desarquivá-la.',
+        });
+      }
+      const arquivadaEm = arquivar ? deps.clock() : null;
+      await deps.campanhaRepository.definirArquivadaEm(campanha.id, arquivadaEm, { trx });
+      return { id: campanha.id, arquivadaEm: arquivadaEm?.toISOString() ?? null };
+    });
+  } catch (err) {
+    if (err instanceof CampanhaAcessoNegadoError) {
+      throw new TRPCError({ code: 'UNAUTHORIZED', message: 'Lista indisponível.', cause: err });
+    }
+    throw err;
+  }
 }
 
 // ── campanha slug (aperture-aphk8) ─────────────────────────────────────────
@@ -312,7 +366,7 @@ export const campanhasRouter = t.router({
    * without its initial 'presente' opção.
    */
   criar: t.procedure
-    .input(CriarCampanhaInputDTOSchema)
+    .input(TituloCampanhaInput)
     .output(CampanhaNovaDTOSchema)
     .mutation(async ({ ctx, input }): Promise<z.infer<typeof CampanhaNovaDTOSchema>> => {
       const { deps, headers } = ctx;
@@ -398,6 +452,56 @@ export const campanhasRouter = t.router({
           : new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'unknown_error' });
       }
     }),
+
+  renomear: t.procedure
+    .input(TituloCampanhaInput.extend({ idCampanha: z.string().uuid() }))
+    .mutation(async ({ ctx, input }) => {
+      try {
+        const { usuario, campanha } = await resolverCampanhaAdministrada(ctx, input.idCampanha);
+        const { deps } = ctx;
+        return await deps.db.transaction().execute(async (trx) => {
+          // Serializa com a exclusão e as alterações de acesso da mesma lista.
+          const lista = await trx
+            .selectFrom('campanhas')
+            .select('id')
+            .where('id', '=', campanha.id)
+            .forUpdate()
+            .executeTakeFirst();
+          if (!lista) throw new CampanhaAcessoNegadoError('Lista indisponível.');
+          const acesso = await deps.campanhaMembrosRepository.obterAcesso(
+            campanha.id,
+            usuario.idConta,
+            { trx },
+          );
+          if (acesso?.papel !== 'owner') {
+            throw new TRPCError({
+              code: 'FORBIDDEN',
+              message: 'Somente quem criou a lista pode renomeá-la.',
+            });
+          }
+
+          return await trx
+            .updateTable('campanhas')
+            .set({ titulo: input.titulo })
+            .where('id', '=', campanha.id)
+            .returning(['id', 'titulo'])
+            .executeTakeFirstOrThrow();
+        });
+      } catch (err) {
+        if (err instanceof CampanhaAcessoNegadoError) {
+          throw new TRPCError({ code: 'UNAUTHORIZED', message: 'Lista indisponível.', cause: err });
+        }
+        throw err;
+      }
+    }),
+
+  arquivar: t.procedure
+    .input(z.object({ idCampanha: z.string().uuid() }))
+    .mutation(({ ctx, input }) => definirArquivamento(ctx, input.idCampanha, true)),
+
+  desarquivar: t.procedure
+    .input(z.object({ idCampanha: z.string().uuid() }))
+    .mutation(({ ctx, input }) => definirArquivamento(ctx, input.idCampanha, false)),
 
   /**
    * Claim/replace a campanha's own URL slug (aperture-aphk8). Owner-gated

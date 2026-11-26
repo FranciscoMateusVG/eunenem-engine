@@ -41,6 +41,12 @@ export interface Accounts {
   user_id: string;
 }
 
+export interface AgradecimentosPresentes {
+  agradecido_em: Timestamp;
+  id_campanha: string;
+  id_pagamento: string;
+}
+
 export interface CampanhaAdministradores {
   campanha_id: string;
   id_usuario: string;
@@ -80,9 +86,11 @@ export interface CampanhaPrivacidade {
   atualizado_em: Generated<Timestamp>;
   campanha_id: string;
   exibir_recados: Generated<boolean>;
+  mensagem_agradecimento: string | null;
 }
 
 export interface Campanhas {
+  arquivada_em: Timestamp | null;
   criada_em: Generated<Timestamp>;
   id: string;
   id_plataforma: string;
@@ -218,8 +226,19 @@ export interface DespesasManuais {
   id: Generated<string>;
   id_plataforma: string;
   inicio: Timestamp | null;
+  intervalo_meses: Generated<number>;
   nome: string;
   recorrencia: string;
+}
+
+export interface DespesasManuaisAjustes {
+  amount_cents: Int8;
+  competencia: Timestamp;
+  criado_em: Generated<Timestamp>;
+  criado_por: string;
+  despesa_id: string;
+  id: Generated<string>;
+  nota: string;
 }
 
 export interface DespesasManuaisValores {
@@ -722,6 +741,7 @@ export interface Verifications {
 
 export interface DB {
   accounts: Accounts;
+  agradecimentos_presentes: AgradecimentosPresentes;
   campanha_administradores: CampanhaAdministradores;
   campanha_compartilhamento_audit: CampanhaCompartilhamentoAudit;
   campanha_convites: CampanhaConvites;
@@ -740,6 +760,7 @@ export interface DB {
   convidados: Convidados;
   convites: Convites;
   despesas_manuais: DespesasManuais;
+  despesas_manuais_ajustes: DespesasManuaisAjustes;
   despesas_manuais_valores: DespesasManuaisValores;
   email_feedback: EmailFeedback;
   eventos: Eventos;

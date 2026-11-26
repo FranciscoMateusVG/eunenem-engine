@@ -159,6 +159,12 @@ describe('Despesas manuais — formulário', () => {
     expect(html).not.toContain('name="data"');
     expect(t).toContain('Mensal');
     expect(t).toContain('Única');
+    // 9nmdo: periodicidade da cobrança recorrente.
+    expect(html).toContain('name="intervaloMeses"');
+    expect(t).toContain('Todo mês');
+    expect(t).toContain('A cada 2 meses (bimestral)');
+    expect(t).toContain('A cada 3 meses (trimestral)');
+    expect(t).toContain('A cada 12 meses (anual)');
   });
 
   it('única: só a data da despesa, sem dia de cobrança nem início/fim', () => {
@@ -201,6 +207,8 @@ describe('Despesas manuais — lista', () => {
   const despesas: DespesaManualData[] = [
     {
       ...SERVIDOR,
+      intervaloMeses: 1,
+      ajustes: [],
       valores: [
         { vigenteDesde: '2026-08-01', valorCents: 10_000 },
         { vigenteDesde: '2026-11-01', valorCents: 12_000 },
@@ -213,11 +221,13 @@ describe('Despesas manuais — lista', () => {
       categoria: null,
       recorrencia: 'unica',
       diaCobranca: null,
+      intervaloMeses: 1,
       inicio: null,
       fim: null,
       data: '2026-09-30',
       valores: [{ vigenteDesde: '2026-09-30', valorCents: 1_100 }],
       valorAtualCents: 1_100,
+      ajustes: [],
     },
     {
       ...SERVIDOR,
@@ -225,6 +235,8 @@ describe('Despesas manuais — lista', () => {
       nome: 'Ferramenta antiga',
       categoria: null,
       fim: '2026-09-30',
+      intervaloMeses: 1,
+      ajustes: [],
       valorAtualCents: 5_000,
       valores: [{ vigenteDesde: '2026-08-01', valorCents: 5_000 }],
     },
@@ -238,6 +250,7 @@ describe('Despesas manuais — lista', () => {
         onAlterarValor: () => {},
         onEncerrar: () => {},
         onExcluir: () => {},
+        onCorrigirMes: () => {},
       }),
     );
     const servidor = texto(trecho(html, 'despesa-manual-a', '</li>'));
@@ -262,6 +275,56 @@ describe('Despesas manuais — lista', () => {
     expect(antiga).toContain('encerrada');
     expect(antiga).not.toContain('Encerrar');
     expect(antiga).toContain('Excluir');
+    // Cobranças passadas de despesa encerrada ainda podem ser corrigidas.
+    expect(antiga).toContain('Corrigir mês');
+    expect(servidor).toContain('Corrigir mês');
+    expect(dominio).not.toContain('Corrigir mês');
+  });
+
+  it('9nmdo: periodicidade e correções com valor previsto, nota e histórico', () => {
+    const base = despesas[0];
+    if (!base) throw new Error('fixture');
+    const tri: DespesaManualData = {
+      ...base,
+      intervaloMeses: 3,
+      ajustes: [
+        {
+          competencia: '2026-09-04',
+          valorCents: 12_500,
+          valorOriginalCents: 10_000,
+          nota: 'Banda extra',
+          vigente: false,
+          criadoEm: '2026-09-05T12:00:00.000Z',
+        },
+        {
+          competencia: '2026-09-04',
+          valorCents: 11_000,
+          valorOriginalCents: 10_000,
+          nota: 'Fatura revisada',
+          vigente: true,
+          criadoEm: '2026-09-06T12:00:00.000Z',
+        },
+      ],
+    };
+    const html = render(
+      React.createElement(DespesasManuaisLista, {
+        despesas: [tri],
+        hoje: HOJE,
+        onAlterarValor: () => {},
+        onEncerrar: () => {},
+        onExcluir: () => {},
+        onCorrigirMes: () => {},
+      }),
+    );
+    const t = texto(trecho(html, 'despesa-manual-a', '</li>'));
+    expect(t).toContain('trimestral · todo dia 4 · desde 01/08/2026');
+    const ajustes = texto(trecho(html, 'despesa-ajustes-a', '</ul>'));
+    expect(ajustes).toContain(
+      'Cobrança de 04/09/2026: R$ 110,00 (previsto R$ 100,00, diferença +R$ 10,00) — Fatura revisada',
+    );
+    expect(ajustes).toContain('substituída');
+    expect(ajustes).toContain('R$ 125,00');
+    expect(ajustes).toContain('Banda extra');
   });
 
   it('sem despesas: diz isso', () => {
@@ -272,6 +335,7 @@ describe('Despesas manuais — lista', () => {
         onAlterarValor: () => {},
         onEncerrar: () => {},
         onExcluir: () => {},
+        onCorrigirMes: () => {},
       }),
     );
     expect(texto(html)).toContain('Nenhuma despesa recorrente ou manual cadastrada.');

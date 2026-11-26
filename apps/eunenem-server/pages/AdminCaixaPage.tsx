@@ -14,8 +14,8 @@ import { trpc } from "@/lib/trpc.js";
 /**
  * /admin/pagamentos/caixa — Fluxo de caixa (aperture-zoxel).
  *
- * Quanto dinheiro ENTROU (pagamentos aprovados) e quanto SAIU (repasses já
- * transferidos), por dia/semana/mês em America/Sao_Paulo. Repasses aprovados
+ * Quanto dinheiro ENTROU (pagamentos aprovados) e quanto SAIU (resgates aceitos
+ * pelo banco — aperture-9nmdo), por dia/semana/mês em America/Sao_Paulo. Repasses aprovados
  * mas ainda não transferidos e os em verificação aparecem à parte e NÃO
  * contam como saída. LEITURA PURA: nada aqui move dinheiro nem altera dado.
  * O período vive na query string (`?de=&ate=&g=`), lido após hidratar.
@@ -95,8 +95,8 @@ export function AdminCaixaPage() {
         <header className="space-y-2">
           <h1 className="text-3xl font-semibold tracking-tight text-ink">Fluxo de caixa</h1>
           <p className="max-w-3xl text-[14px] text-ink-soft">
-            Quanto dinheiro entrou (pagamentos aprovados) e quanto saiu (repasses já transferidos
-            para as famílias). Datas no horário de São Paulo. Esta tela só mostra números: não
+            Quanto dinheiro entrou (pagamentos aprovados) e quanto saiu (resgates das famílias
+            aceitos pelo banco, os mesmos da tela de resgates). Datas no horário de São Paulo. Esta tela só mostra números: não
             envia nem altera nenhum pagamento ou repasse.
           </p>
         </header>

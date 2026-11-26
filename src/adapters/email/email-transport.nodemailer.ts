@@ -99,6 +99,7 @@ export class EmailTransportNodemailer implements EmailTransport {
           subject: message.subject,
           html: message.html,
           ...(message.text ? { text: message.text } : {}),
+          ...(message.replyTo ? { replyTo: message.replyTo } : {}),
           ...(message.disableClickTracking || message.disableOpenTracking
             ? {
                 headers: {
