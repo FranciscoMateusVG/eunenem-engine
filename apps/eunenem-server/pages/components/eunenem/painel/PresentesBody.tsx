@@ -22,6 +22,7 @@ import {
   type PixType,
 } from "@/lib/mocks/bancarios";
 import { trpc } from "@/lib/trpc";
+import { AgradecerModal } from "./AgradecerModal";
 // aperture-9abwt: deep-leaf import (zod-only, pg-free) — same rationale as
 // BancariosBody.tsx (the barrel drags the Postgres adapter's `pg` import
 // into the browser bundle).
@@ -224,6 +225,7 @@ function adaptRow(row: ExtratoRowDTO): PresentesTx {
   const t = isoSafe.slice(11, 16);
   return {
     id: row.idLancamento,
+    idPagamento: row.idPagamento,
     d,
     t,
     type: "in",
@@ -626,7 +628,16 @@ function TicketRow({ tx, onPick }: { tx: PresentesTx; onPick: (tx: PresentesTx) 
 }
 
 // ── Detail drawer ────────────────────────────────────────────────────────────
-function DetailDrawer({ tx, onClose }: { tx: PresentesTx | null; onClose: () => void }) {
+function DetailDrawer({
+  tx,
+  onClose,
+  onAgradecer,
+}: {
+  tx: PresentesTx | null;
+  onClose: () => void;
+  /** aperture-bqvb5 — absent when the viewer can't send thank-you emails. */
+  onAgradecer?: ((tx: PresentesTx) => void) | undefined;
+}) {
   const [shown, setShown] = useState<PresentesTx | null>(null);
   useEffect(() => {
     if (tx) setShown(tx);
@@ -736,11 +747,22 @@ function DetailDrawer({ tx, onClose }: { tx: PresentesTx | null; onClose: () => 
               disponível ("disponivel") and aguardando liberação
               ("aguardando"). The pre-existing estornado guard stays (no
               thank-you on a reversed payment). */}
-          {isIn && t.status !== "estornado" && t.status !== "tEnviada" && (
-            <button type="button" className="ex-btn-primary block" onClick={onClose}>
-              enviar agradecimento à {firstName}
-            </button>
-          )}
+          {/* aperture-bqvb5 — opens the thank-you composer with this giver
+              preselected (anonymous gifts have no one to email). */}
+          {isIn &&
+            t.status !== "estornado" &&
+            t.status !== "tEnviada" &&
+            onAgradecer &&
+            t.idPagamento &&
+            t.guest !== "(anônimo)" && (
+              <button
+                type="button"
+                className="ex-btn-primary block"
+                onClick={() => onAgradecer(t)}
+              >
+                enviar agradecimento à {firstName}
+              </button>
+            )}
           {/* aperture-qp4mq — BAIXAR COMPROVANTE button removed. No PDF
               download in scope; the IconDownload import was kept dead-code
               free by removing both the button + its handler. If a receipt
@@ -1617,6 +1639,9 @@ function PresentesBodyConteudo(props: PainelSectionBodyProps) {
   const [transferOpen, setTransferOpen] = useState(false);
   const [resgatadoOpen, setResgatadoOpen] = useState(false);
   const [activeStatuses, setActiveStatuses] = useState<PresentesStatus[]>([]);
+  // aperture-bqvb5 — thank-you composer; `agradecerIdPagamento` preselects a giver.
+  const [agradecerOpen, setAgradecerOpen] = useState(false);
+  const [agradecerIdPagamento, setAgradecerIdPagamento] = useState<string | null>(null);
 
   // slug → idCampanha resolution. Stub today (djb2-derived); swap target is
   // the real campanha-by-slug lookup when Rex's contract exposes one.
@@ -1788,6 +1813,20 @@ function PresentesBodyConteudo(props: PainelSectionBodyProps) {
                 nothing to transfer"). The all-or-nothing confirm modal
                 inside doesn't expose an amount input — there's no
                 partial-withdrawal UI ever (locked decision s03dr). */}
+            {acesso.pode("mensagens:gerenciar") && transactions.length > 0 && (
+              <div className="ex-sheet-cta-row">
+                <button
+                  type="button"
+                  className="ex-sheet-cta"
+                  onClick={() => {
+                    setAgradecerIdPagamento(null);
+                    setAgradecerOpen(true);
+                  }}
+                >
+                  agradecer presentes ♡
+                </button>
+              </div>
+            )}
             {acesso.pode("saque:solicitar") && (
             <div className="ex-sheet-cta-row">
               <button
@@ -1848,7 +1887,27 @@ function PresentesBodyConteudo(props: PainelSectionBodyProps) {
         </section>
       </div>
 
-      <DetailDrawer tx={openTx} onClose={() => setOpenTx(null)} />
+      <DetailDrawer
+        tx={openTx}
+        onClose={() => setOpenTx(null)}
+        onAgradecer={
+          acesso.pode("mensagens:gerenciar")
+            ? (tx) => {
+                setOpenTx(null);
+                setAgradecerIdPagamento(tx.idPagamento ?? null);
+                setAgradecerOpen(true);
+              }
+            : undefined
+        }
+      />
+      {idCampanha && (
+        <AgradecerModal
+          idCampanha={idCampanha}
+          open={agradecerOpen}
+          idPagamentoInicial={agradecerIdPagamento}
+          onClose={() => setAgradecerOpen(false)}
+        />
+      )}
       <TransferModal
         open={transferOpen}
         saldo={summary.disponivel}

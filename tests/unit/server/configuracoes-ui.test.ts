@@ -24,6 +24,8 @@ function props(over: Partial<ConfiguracoesViewProps> = {}): ConfiguracoesViewPro
       tituloLista,
       exibirRecados: true,
       emails: { presentes: true, recados: true, presencas: true },
+      mensagemAgradecimento: null,
+      mensagemAgradecimentoSugerida: 'Oi, {nome}! Gratidão ♡',
     },
     carregando: false,
     erroAoCarregar: false,
@@ -32,6 +34,7 @@ function props(over: Partial<ConfiguracoesViewProps> = {}): ConfiguracoesViewPro
     onEmail: noop,
     onExibirRecados: noop,
     exclusao: { permitida: true, pendente: false, erro: null, onConfirmar: noop, onFechar: noop },
+    agradecimento: { salvando: false, onSalvar: noop },
     ...over,
   };
 }
@@ -65,6 +68,8 @@ describe('ConfiguracoesView', () => {
           tituloLista,
           exibirRecados: false,
           emails: { presentes: true, recados: true, presencas: true },
+          mensagemAgradecimento: null,
+          mensagemAgradecimentoSugerida: 'Oi, {nome}! Gratidão ♡',
         },
       }),
     );
@@ -103,6 +108,8 @@ describe('ConfiguracoesView', () => {
           tituloLista,
           exibirRecados: true,
           emails: { presentes: true, recados: false, presencas: true },
+          mensagemAgradecimento: null,
+          mensagemAgradecimentoSugerida: 'Oi, {nome}! Gratidão ♡',
         },
       }),
     );
@@ -156,5 +163,32 @@ describe('ExcluirListaDialog', () => {
     const html = dialog({ erro: 'Esta lista tem histórico financeiro.' });
     expect(html).toContain('role="alert"');
     expect(html).toContain('Esta lista tem histórico financeiro.');
+  });
+});
+
+describe('ConfiguracoesView — mensagem de agradecimento (aperture-bqvb5)', () => {
+  const campo = (html: string) =>
+    html.match(
+      /<textarea[^>]*aria-label="Mensagem de agradecimento"[^>]*>[^<]*<\/textarea>/,
+    )?.[0] ?? '';
+
+  it('mostra a mensagem configurada, ou a sugerida quando não há', () => {
+    const configurada = render(
+      props({
+        config: {
+          ...(props().config as NonNullable<ConfiguracoesViewProps['config']>),
+          mensagemAgradecimento: 'Valeu, {nome}!',
+        },
+      }),
+    );
+    expect(campo(configurada)).toContain('Valeu, {nome}!');
+    expect(campo(render(props()))).toContain('Oi, {nome}! Gratidão ♡');
+  });
+
+  it('só quem gerencia mensagens edita', () => {
+    expect(campo(render(props()))).not.toContain('disabled');
+    expect(campo(render(props({ pode: (acao) => acao !== 'mensagens:gerenciar' })))).toContain(
+      'disabled',
+    );
   });
 });

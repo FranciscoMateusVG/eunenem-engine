@@ -44,6 +44,7 @@ import {
   ListaDeConvidadosRepositoryPostgres,
   type LivroFinanceiroRepository,
   LivroFinanceiroRepositoryPostgres,
+  type EmailMessage,
   type EmailTransport,
   EmailTransportNodemailer,
   EmailTransportNoop,
@@ -146,6 +147,12 @@ export interface ServerDeps {
   readonly contextoCompartilhamentoOnboarding?: (usuarioId: string, idConta: string, plataformaId: string) => Promise<{ idsProprias: string[]; idCompartilhada: string | null }>;
   readonly consumirConvitesVerificados?: (usuarioId: string, plataformaId: string) => Promise<void>;
   readonly enviarConviteCampanha: (email: string) => Promise<void>;
+  /**
+   * aperture-bqvb5 — thank-you email to a gift giver (rendered by the router).
+   * `null` when SMTP is not configured (outside the explicit E2E seam): the
+   * send fails closed instead of "succeeding" through the no-op transport.
+   */
+  readonly enviarEmailAgradecimento: ((message: EmailMessage) => Promise<void>) | null;
   readonly auth: Auth;
   readonly authService: AuthService;
   readonly usuarioRepository: UsuarioRepository;
@@ -562,6 +569,14 @@ const ServerEnvSchema = z
      */
     E2E_DISABLE_PIX_RECONCILIATION_WORKER: z.string().default(''),
     /**
+     * TEST-ONLY seam (aperture-bqvb5). Thank-you emails fail closed without
+     * SMTP: `enviarEmailAgradecimento` is null and the router refuses, so a
+     * gift is never marked thanked when nothing was sent. The local Playwright
+     * servers have no SMTP; `'1'` lets them exercise the flow through the
+     * no-op transport. Forbidden in production by the superRefine below.
+     */
+    E2E_EMAIL_NOOP: z.string().default(''),
+    /**
      * aperture-vvh2j — automated PIX repasse rail selector. `'fake'` (default)
      * binds the deterministic in-process TransferenciaProviderFake; `'inter'`
      * selects the real Banco Inter PIX transfer adapter. The real adapter does
@@ -796,6 +811,14 @@ const ServerEnvSchema = z
           path: ['E2E_FAKE_PAGAMENTO_PROVIDER'],
           message:
             'E2E_FAKE_PAGAMENTO_PROVIDER must NOT be set in production — it is a test-only DI seam that stubs the real Stripe payment provider (aperture-07x5c).',
+        });
+      }
+      if (env.E2E_EMAIL_NOOP.length > 0) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['E2E_EMAIL_NOOP'],
+          message:
+            'E2E_EMAIL_NOOP must NOT be set in production — thank-you emails must fail closed without SMTP (aperture-bqvb5).',
         });
       }
       if (env.E2E_DISABLE_PIX_RECONCILIATION_WORKER.length > 0) {
@@ -1340,6 +1363,10 @@ export function buildServerDeps(
     enviarConviteCampanha: async (email: string) => {
       await emailTransport.enviar(renderCampaignInviteEmail(email, env.BETTER_AUTH_URL));
     },
+    enviarEmailAgradecimento:
+      smtpConfigured || (env.NODE_ENV !== 'production' && env.E2E_EMAIL_NOOP === '1')
+        ? (message: EmailMessage) => emailTransport.enviar(message)
+        : null,
     db,
     auth,
     authService,

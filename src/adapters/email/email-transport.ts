@@ -35,6 +35,12 @@ export interface EmailMessage {
   readonly disableClickTracking?: boolean;
   /** Disable per-message open pixels (lifecycle mail). */
   readonly disableOpenTracking?: boolean;
+  /**
+   * Optional Reply-To address (aperture-bqvb5): a thank-you sent on behalf of
+   * the list owner routes the guest's reply to her, not to the no-reply From.
+   * Validated by the caller, like `to`.
+   */
+  readonly replyTo?: string;
 }
 
 export interface EmailTransport {

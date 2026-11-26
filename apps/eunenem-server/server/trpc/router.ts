@@ -20,6 +20,7 @@ import { compartilhamentoRouter } from './compartilhamento-router.js';
  */
 import { initTRPC } from '@trpc/server';
 import { adminRouter } from './admin-router.js';
+import { agradecimentosRouter } from './agradecimentos-router.js';
 import { authRouter } from './auth-router.js';
 import { campanhaMembrosRouter } from './campanha-membros-router.js';
 import { campanhasRouter } from './campanhas-router.js';
@@ -48,6 +49,7 @@ export const appRouter = t.router({
     return ['maçã', 'banana', 'morango', 'abacaxi', 'manga'] as const;
   }),
   admin: adminRouter,
+  agradecimentos: agradecimentosRouter,
   auth: authRouter,
   campanhaMembros: campanhaMembrosRouter,
   campanhas: campanhasRouter,

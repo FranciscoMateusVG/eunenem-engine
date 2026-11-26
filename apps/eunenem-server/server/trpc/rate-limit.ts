@@ -128,6 +128,49 @@ export async function enforceRateLimit(
 }
 
 /**
+ * aperture-bqvb5 — budgeted variant: consumes `cost` units at once (e.g. one
+ * per email recipient) and, unlike `consumeRateLimit`, consumes NOTHING when
+ * the request would exceed `max`, so a rejected batch never eats the budget
+ * of a smaller retry. Throws TOO_MANY_REQUESTS with the same generic message.
+ */
+export async function enforceRateLimitBudget(
+  db: Database,
+  { key, max, windowMs, cost, clock = () => new Date() }: RateLimitOptions & { readonly cost: number },
+): Promise<void> {
+  if (key.length === 0 || key.length > 255) {
+    throw new Error(`rate-limit key must be 1-255 chars (varchar(255)); got ${key.length}`);
+  }
+  const tooMany = () =>
+    new TRPCError({
+      code: 'TOO_MANY_REQUESTS',
+      message: 'Muitas tentativas. Aguarde alguns instantes e tente novamente.',
+    });
+  if (!Number.isInteger(cost) || cost < 1 || cost > max) throw tooMany();
+
+  const now = clock().getTime();
+  const resetBoundary = now - windowMs;
+  // The conditional DO UPDATE leaves the row untouched (and returns nothing)
+  // when the open window cannot absorb `cost`.
+  const result = await sql<{ count: number }>`
+    INSERT INTO rate_limit (id, key, count, last_request)
+    VALUES (${cryptoRandomId()}, ${key}, ${cost}, ${now})
+    ON CONFLICT (key) DO UPDATE
+    SET
+      count = CASE
+        WHEN rate_limit.last_request <= ${resetBoundary} THEN ${cost}
+        ELSE rate_limit.count + ${cost}
+      END,
+      last_request = CASE
+        WHEN rate_limit.last_request <= ${resetBoundary} THEN ${now}
+        ELSE rate_limit.last_request
+      END
+    WHERE rate_limit.last_request <= ${resetBoundary} OR rate_limit.count + ${cost} <= ${max}
+    RETURNING count
+  `.execute(db);
+  if (result.rows.length === 0) throw tooMany();
+}
+
+/**
  * UUID-v4 generator for the rate_limit.id primary key. We could collide
  * the id space with BetterAuth's (it uses the same `id` PK) — varchar(36)
  * is wide enough, and UUIDs don't collide in practice.
