@@ -27,6 +27,7 @@ const NOW = new Date('2037-10-05T15:00:00.000Z');
 let testDb: TestDatabase;
 
 async function limpar() {
+  await sql`DELETE FROM despesas_manuais_ajustes`.execute(testDb.db);
   await sql`DELETE FROM despesas_manuais_valores`.execute(testDb.db);
   await sql`DELETE FROM despesas_manuais`.execute(testDb.db);
 }
@@ -42,8 +43,15 @@ afterAll(async () => {
 
 beforeEach(limpar);
 
-function caller(opts: { sessao?: boolean; allowlist?: string[]; now?: Date } = {}) {
-  const auth = adminAuthOverrides();
+function caller(
+  opts: {
+    sessao?: boolean;
+    allowlist?: string[];
+    now?: Date;
+    auth?: ReturnType<typeof adminAuthOverrides>;
+  } = {},
+) {
+  const auth = opts.auth ?? adminAuthOverrides();
   const deps = {
     ...auth.depsOverrides,
     ...(opts.allowlist ? { adminAllowedEmails: new Set(opts.allowlist) } : {}),
@@ -458,4 +466,202 @@ it('q1w45: HTTP não exclui despesa de outra plataforma e concorrência preserva
     testDb.db,
   );
   expect(row.rows[0]?.deleted).toBe(false);
+});
+
+describe('9nmdo — periodicidade (a cada N meses)', () => {
+  it('trimestral cai no mês do início e a cada 3 meses; listar devolve a periodicidade', async () => {
+    await admin().criar({
+      nome: 'Trimestral',
+      valorCents: 10_000,
+      tipo: { recorrencia: 'mensal', diaCobranca: 4, inicio: '2037-04-01', intervaloMeses: 3 },
+    });
+    const p = await painel();
+    expect(mes(p, '2037-04-01').manualCents).toBe(10_000);
+    expect(mes(p, '2037-05-01').manualCents).toBe(0);
+    expect(mes(p, '2037-06-01').manualCents).toBe(0);
+    expect(mes(p, '2037-07-01').manualCents).toBe(10_000);
+    expect(mes(p, '2037-08-01').manualCents).toBe(0);
+    expect(mes(p, '2037-09-01').manualCents).toBe(0);
+    expect(mes(p, '2037-10-01').manualCents).toBe(10_000);
+    const { despesas } = await admin().listar();
+    expect(despesas[0]).toMatchObject({ recorrencia: 'mensal', intervaloMeses: 3 });
+  });
+
+  it('sem periodicidade continua mensal (intervaloMeses = 1)', async () => {
+    await mensal('Mensal', 1_000, 4, '2037-08-01');
+    const { despesas } = await admin().listar();
+    expect(despesas[0]?.intervaloMeses).toBe(1);
+    expect(mes(await painel(), '2037-09-01').manualCents).toBe(1_000);
+  });
+
+  it('rateio semanal espalha a cobrança pelos N meses que ela cobre (caixa no dia da cobrança)', async () => {
+    // 184.000 por 3 meses (out+nov+dez = 92 dias) = 2.000/dia.
+    await admin().criar({
+      nome: 'Trimestral',
+      valorCents: 184_000,
+      tipo: { recorrencia: 'mensal', diaCobranca: 4, inicio: '2037-10-01', intervaloMeses: 3 },
+    });
+    const p = await painel();
+    expect(mes(p, '2037-10-01').manualCents).toBe(184_000);
+    // semana 28/09–04/10: 01..04/10 = 4 dias.
+    expect(p.semanas[0]?.manualCents).toBe(8_000);
+  });
+
+  it('valida periodicidade 1–12', async () => {
+    for (const intervaloMeses of [0, 13]) {
+      await expect(
+        admin().criar({
+          nome: 'X',
+          valorCents: 1_000,
+          tipo: { recorrencia: 'mensal', diaCobranca: 4, inicio: '2037-04-01', intervaloMeses },
+        }),
+      ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    }
+  });
+});
+
+describe('9nmdo — correção do valor de um mês, com nota', () => {
+  it('corrige só aquele mês, mantém o valor original visível e guarda o histórico', async () => {
+    const { id } = await mensal('Servidor', 10_000, 4, '2037-08-01');
+    await admin().corrigirMes({ id, mes: '2037-09', valorCents: 12_500, nota: 'Banda extra' });
+    let p = await painel();
+    expect(mes(p, '2037-08-01').manualCents).toBe(10_000);
+    expect(mes(p, '2037-09-01').manualCents).toBe(12_500);
+    expect(mes(p, '2037-10-01').manualCents).toBe(10_000);
+
+    await admin().corrigirMes({
+      id,
+      mes: '2037-09',
+      valorCents: 11_000,
+      nota: 'Fatura revisada pelo fornecedor',
+    });
+    p = await painel();
+    expect(mes(p, '2037-09-01').manualCents).toBe(11_000);
+
+    const d = (await admin().listar()).despesas.find((x) => x.id === id);
+    expect(d?.valores).toEqual([{ vigenteDesde: '2037-08-01', valorCents: 10_000 }]);
+    expect(d?.ajustes).toEqual([
+      expect.objectContaining({
+        competencia: '2037-09-04',
+        valorCents: 12_500,
+        valorOriginalCents: 10_000,
+        nota: 'Banda extra',
+        vigente: false,
+      }),
+      expect.objectContaining({
+        competencia: '2037-09-04',
+        valorCents: 11_000,
+        valorOriginalCents: 10_000,
+        nota: 'Fatura revisada pelo fornecedor',
+        vigente: true,
+      }),
+    ]);
+    const rows = await sql<{ criado_por: string }>`
+      SELECT criado_por FROM despesas_manuais_ajustes`.execute(testDb.db);
+    expect(rows.rows).toHaveLength(2);
+    expect(rows.rows.every((r) => /^[0-9a-f-]{36}$/.test(r.criado_por))).toBe(true);
+  });
+
+  it('correção pode zerar o mês e entra no rateio semanal pelo valor corrigido', async () => {
+    const now = new Date('2037-10-31T15:00:00Z');
+    const c = caller({ now }).admin.despesas;
+    const { id } = await c.manuais.criar({
+      nome: 'Resto',
+      valorCents: 31_000,
+      tipo: { recorrencia: 'mensal', diaCobranca: 1, inicio: '2037-09-01' },
+    });
+    await c.manuais.corrigirMes({ id, mes: '2037-10', valorCents: 62_000, nota: 'Dobrou' });
+    await c.manuais.corrigirMes({ id, mes: '2037-09', valorCents: 0, nota: 'Cortesia' });
+    const p = await c.painel();
+    expect(mes(p, '2037-10-01').manualCents).toBe(62_000);
+    expect(mes(p, '2037-09-01').manualCents).toBe(0);
+    expect(p.semanas.reduce((s, x) => s + x.manualCents, 0)).toBe(62_000);
+  });
+
+  it('rejeita nota vazia, mês sem cobrança, despesa única e id inexistente', async () => {
+    const { id } = await admin().criar({
+      nome: 'Trimestral',
+      valorCents: 10_000,
+      tipo: { recorrencia: 'mensal', diaCobranca: 4, inicio: '2037-04-01', intervaloMeses: 3 },
+    });
+    await expect(
+      admin().corrigirMes({ id, mes: '2037-07', valorCents: 1, nota: '   ' }),
+    ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    // Fora do ciclo trimestral.
+    await expect(
+      admin().corrigirMes({ id, mes: '2037-08', valorCents: 1, nota: 'x' }),
+    ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    // Antes do início.
+    await expect(
+      admin().corrigirMes({ id, mes: '2037-01', valorCents: 1, nota: 'x' }),
+    ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    const u = await unica('Domínio', 1_000, '2037-09-30');
+    await expect(
+      admin().corrigirMes({ id: u.id, mes: '2037-09', valorCents: 1, nota: 'x' }),
+    ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    await expect(
+      admin().corrigirMes({
+        id: '00000000-0000-4000-8000-000000000000',
+        mes: '2037-09',
+        valorCents: 1,
+        nota: 'x',
+      }),
+    ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    const n = await sql<{ n: string }>`SELECT COUNT(*) AS n FROM despesas_manuais_ajustes`.execute(
+      testDb.db,
+    );
+    expect(Number(n.rows[0]?.n)).toBe(0);
+  });
+
+  it('ator gravado é exatamente o usuário da sessão admin', async () => {
+    const auth = adminAuthOverrides();
+    const sessao = await auth.depsOverrides.authService.validarSessao('admin-test-session-token');
+    if (!sessao) throw new Error('sem sessão de teste');
+    const c = caller({ auth }).admin.despesas.manuais;
+    const { id } = await c.criar({
+      nome: 'Servidor',
+      valorCents: 10_000,
+      tipo: { recorrencia: 'mensal', diaCobranca: 4, inicio: '2037-08-01' },
+    });
+    await c.corrigirMes({ id, mes: '2037-09', valorCents: 1, nota: 'x' });
+    const rows = await sql<{ criado_por: string }>`
+      SELECT criado_por FROM despesas_manuais_ajustes WHERE despesa_id = ${id}::uuid`.execute(
+      testDb.db,
+    );
+    expect(rows.rows).toEqual([{ criado_por: sessao.idUsuario }]);
+  });
+
+  it('não corrige despesa de outra plataforma nem despesa excluída (NOT_FOUND, nada gravado)', async () => {
+    const outra = await mensal('Outra plataforma', 10_000, 4, '2037-08-01');
+    await sql`UPDATE despesas_manuais SET id_plataforma = '30000000-0000-4000-8000-000000000099'
+      WHERE id = ${outra.id}::uuid`.execute(testDb.db);
+    await expect(
+      admin().corrigirMes({ id: outra.id, mes: '2037-09', valorCents: 1, nota: 'x' }),
+    ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    const excluida = await mensal('Excluída', 10_000, 4, '2037-08-01');
+    expect((await excluirHttp(excluida.id)).status).toBe(200);
+    await expect(
+      admin().corrigirMes({ id: excluida.id, mes: '2037-09', valorCents: 1, nota: 'x' }),
+    ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    const n = await sql<{ n: string }>`SELECT COUNT(*) AS n FROM despesas_manuais_ajustes`.execute(
+      testDb.db,
+    );
+    expect(Number(n.rows[0]?.n)).toBe(0);
+  });
+
+  it('exige admin', async () => {
+    const { id } = await mensal('Servidor', 10_000, 4, '2037-08-01');
+    const fora = caller({ allowlist: ['outra-pessoa@example.com'] }).admin.despesas.manuais;
+    await expect(
+      fora.corrigirMes({ id, mes: '2037-09', valorCents: 1, nota: 'x' }),
+    ).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    await expect(
+      caller({ sessao: false }).admin.despesas.manuais.corrigirMes({
+        id,
+        mes: '2037-09',
+        valorCents: 1,
+        nota: 'x',
+      }),
+    ).rejects.toMatchObject({ code: 'UNAUTHORIZED' });
+  });
 });

@@ -21,6 +21,7 @@ import {
   semanaAtual,
 } from '../apps/eunenem-server/pages/lib/receitaPeriodo.js';
 import { createDatabase, type Database } from '../src/adapters/database.js';
+import { PROVIDER_FEES_SINCE } from '../src/use-cases/pagamentos/provider-fee-sync.js';
 import { ReceitaLedgerSeed } from '../tests/helpers/receita-ledger-seed.js';
 import { expect, test } from './fixtures.js';
 import { browserCookieFor, mintMagicLinkSession } from './magic-link-auth.js';
@@ -131,6 +132,9 @@ test('5qoz0: Despesas — KPIs por provedor, cobertura pendente e não vinculada
     };
 
     // Meses anteriores: uma tarifa Stripe e uma Inter por mês (série visível).
+    // PIX com tarifa vinculada desde o início da coleta (o do mês atual incluso).
+    const desdeColeta = localDateInSaoPaulo(PROVIDER_FEES_SINCE);
+    let pixVinculadosDesde = 1;
     let deMes = mes.de;
     for (let k = 1; k <= 11; k++) {
       deMes = `${addDays(deMes, -1).slice(0, 8)}01`;
@@ -151,6 +155,7 @@ test('5qoz0: Despesas — KPIs por provedor, cobertura pendente e não vinculada
         provedor: 'inter',
       });
       await tarifa('inter', 99 * (k + 5), dia, pix.idPagamento);
+      if (addDays(deMes, 9) >= desdeColeta) pixVinculadosDesde++;
     }
 
     // Mês atual, dentro da semana corrente quando possível.
@@ -247,9 +252,9 @@ test('5qoz0: Despesas — KPIs por provedor, cobertura pendente e não vinculada
           /1 tarifa · R\$[\s ]1,50 \(fora do total\)/,
         );
         await expect(page.getByTestId('despesas-mes')).toHaveCount(12);
-        // Inter: os PIX desde 01/09/2026 (setembro e o mês atual) têm tarifa vinculada.
+        // Inter: todos os PIX desde o início da coleta têm tarifa vinculada.
         await expect(page.getByTestId('despesas-cobertura-inter')).toContainText(
-          '2 confirmadas · nenhuma pendente',
+          `${pixVinculadosDesde} confirmadas · nenhuma pendente`,
         );
         // Stripe tem pendência no mês: subtotal marcado, total incompleto.
         await expect(
@@ -291,6 +296,37 @@ test('5qoz0: Despesas — KPIs por provedor, cobertura pendente e não vinculada
           db,
         );
         expect(auditoria.rows).toEqual([{ deleted: true, actor: true }]);
+
+        // 9nmdo: trimestral pelo form real; corrigir o mês atual com nota muda só
+        // aquela cobrança e mostra o previsto ao lado. Excluída no fim (estado limpo).
+        const nomeTri = `Trimestral sintética ${tag}`;
+        await form.getByLabel('Mensal', { exact: true }).check();
+        await form.getByLabel('Nome', { exact: true }).fill(nomeTri);
+        await form.getByLabel('Valor (R$)', { exact: true }).fill('20,00');
+        await form.getByRole('combobox', { name: /Periodicidade/ }).selectOption('3');
+        await form.getByLabel('Dia de cobrança (1–28)', { exact: true }).fill('1');
+        await form.getByLabel('Início', { exact: true }).fill(mes.de);
+        await form.getByRole('button', { name: 'Cadastrar despesa' }).click();
+        const tri = page.locator('li[data-testid^="despesa-manual-"]').filter({ hasText: nomeTri });
+        await expect(tri).toContainText('trimestral · todo dia 1');
+        await expect(kpiMes.getByTestId('despesas-kpi-total')).toContainText(brl(2566));
+        await tri.getByRole('button', { name: 'Corrigir mês' }).click();
+        const correcao = tri.getByTestId('despesa-correcao-form');
+        await correcao.getByLabel('Valor cobrado (R$)').fill('30,00');
+        await correcao.getByLabel('Nota (por que o valor foi diferente)').fill('Uso extra no mês');
+        await correcao.getByRole('button', { name: 'Salvar correção' }).click();
+        const [ano, mm] = mes.de.split('-');
+        await expect(tri).toContainText(`Cobrança de 01/${mm}/${ano}:`);
+        await expect(tri).toContainText('Uso extra no mês');
+        await expect(tri).toContainText(/previsto R\$\s20,00, diferença \+R\$\s10,00/);
+        await expect(kpiMes.getByTestId('despesas-kpi-total')).toContainText(brl(3566));
+        await tri.getByRole('button', { name: 'Excluir', exact: true }).click();
+        await tri
+          .getByRole('alertdialog', { name: 'Excluir despesa' })
+          .getByRole('button', { name: 'Confirmar exclusão' })
+          .click();
+        await expect(tri).toHaveCount(0);
+        await expect(kpiMes.getByTestId('despesas-kpi-total')).toContainText(brl(566));
 
         await page.screenshot({ path: testInfo.outputPath(`despesas-${tag}.png`), fullPage: true });
         await semOverflow(page, `/admin/pagamentos/despesas ${tag}`);

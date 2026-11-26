@@ -1,11 +1,15 @@
 import { sql } from "kysely";
 import type { Database } from "../../../src/adapters/database.js";
 import {
+  type AjusteCobranca,
+  datasDeCobranca,
   type DespesaManual,
+  INTERVALO_MESES_MAX,
   type Recorrencia,
   type VigenciaValor,
   valorVigente,
 } from "../pages/lib/despesasManuais.js";
+import { addMonthsToMonthStart } from "../pages/lib/receitaPeriodo.js";
 
 /**
  * Admin — despesas recorrentes/manuais (aperture-0ngn4).
@@ -17,6 +21,10 @@ import {
  *
  * Nada é reescrito: mudar o valor insere uma vigência nova, posterior à
  * última; encerrar grava `fim` uma vez. Não há exclusão.
+ *
+ * aperture-9nmdo: mensal pode cobrar a cada N meses (`intervalo_meses`), e o
+ * valor de UMA cobrança pode ser corrigido com nota (`despesas_manuais_ajustes`,
+ * só inserção: a correção mais recente vale, as anteriores ficam no histórico).
  */
 
 
@@ -24,10 +32,24 @@ export class DespesaManualInvalida extends Error {}
 export class DespesaManualNaoEncontrada extends Error {}
 export class DespesaManualJaEncerrada extends Error {}
 
-export interface DespesaManualListada extends DespesaManual {
+export interface AjusteListado extends AjusteCobranca {
+  /** Valor previsto da cobrança pelas vigências (o que a correção substitui). */
+  readonly valorOriginalCents: number;
+  /** A correção mais recente daquela cobrança (a que conta). */
+  readonly vigente: boolean;
+  readonly criadoEm: Date;
+}
+
+export interface DespesaManualCarregada extends DespesaManual {
+  readonly intervaloMeses: number;
+  readonly ajustes: readonly (AjusteCobranca & { readonly criadoEm: Date })[];
+  readonly criadoEm: Date;
+}
+
+export interface DespesaManualListada extends Omit<DespesaManualCarregada, "ajustes"> {
   /** Valor vigente hoje (SP); antes do início, o primeiro valor. */
   readonly valorAtualCents: number;
-  readonly criadoEm: Date;
+  readonly ajustes: readonly AjusteListado[];
 }
 
 interface DespesaRow {
@@ -36,6 +58,7 @@ interface DespesaRow {
   categoria: string | null;
   recorrencia: string;
   dia_cobranca: number | null;
+  intervalo_meses: number;
   inicio: string | null;
   fim: string | null;
   data: string | null;
@@ -46,6 +69,14 @@ interface ValorRow {
   despesa_id: string;
   vigente_desde: string;
   amount_cents: string | number;
+}
+
+interface AjusteRow {
+  despesa_id: string;
+  competencia: string;
+  amount_cents: string | number;
+  nota: string;
+  criado_em: Date;
 }
 
 function toRecorrencia(value: string): Recorrencia {
@@ -63,9 +94,9 @@ function toCents(value: string | number): number {
 export async function carregarDespesasManuais(
   db: Database,
   platformId: string,
-): Promise<(DespesaManual & { readonly criadoEm: Date })[]> {
+): Promise<DespesaManualCarregada[]> {
   const despesas = await sql<DespesaRow>`
-    SELECT id, nome, categoria, recorrencia, dia_cobranca,
+    SELECT id, nome, categoria, recorrencia, dia_cobranca, intervalo_meses,
       to_char(inicio, 'YYYY-MM-DD') AS inicio,
       to_char(fim, 'YYYY-MM-DD') AS fim,
       to_char(data, 'YYYY-MM-DD') AS data,
@@ -81,6 +112,24 @@ export async function carregarDespesasManuais(
     WHERE d.id_plataforma = ${platformId}::uuid AND d.excluida_em IS NULL
     ORDER BY v.despesa_id, v.vigente_desde
   `.execute(db);
+  const ajustes = await sql<AjusteRow>`
+    SELECT a.despesa_id, to_char(a.competencia, 'YYYY-MM-DD') AS competencia,
+      a.amount_cents, a.nota, a.criado_em
+    FROM despesas_manuais_ajustes a
+    JOIN despesas_manuais d ON d.id = a.despesa_id
+    WHERE d.id_plataforma = ${platformId}::uuid AND d.excluida_em IS NULL
+    ORDER BY a.despesa_id, a.criado_em, a.id
+  `.execute(db);
+  const ajustesPorDespesa = new Map<string, (AjusteCobranca & { criadoEm: Date })[]>();
+  for (const a of ajustes.rows) {
+    const lista = ajustesPorDespesa.get(a.despesa_id) ?? [];
+    const valorCents = Number(a.amount_cents);
+    if (!Number.isSafeInteger(valorCents) || valorCents < 0) {
+      throw new Error("admin_despesas_manuais_ajuste_invalido");
+    }
+    lista.push({ competencia: a.competencia, valorCents, nota: a.nota, criadoEm: a.criado_em });
+    ajustesPorDespesa.set(a.despesa_id, lista);
+  }
   const porDespesa = new Map<string, VigenciaValor[]>();
   for (const v of valores.rows) {
     const lista = porDespesa.get(v.despesa_id) ?? [];
@@ -93,10 +142,12 @@ export async function carregarDespesasManuais(
     categoria: d.categoria,
     recorrencia: toRecorrencia(d.recorrencia),
     diaCobranca: d.dia_cobranca,
+    intervaloMeses: d.intervalo_meses,
     inicio: d.inicio,
     fim: d.fim,
     data: d.data,
     valores: porDespesa.get(d.id) ?? [],
+    ajustes: ajustesPorDespesa.get(d.id) ?? [],
     criadoEm: d.criado_em,
   }));
 }
@@ -106,16 +157,26 @@ export async function listarDespesasManuais(
   input: { readonly platformId: string; readonly hoje: string },
 ): Promise<DespesaManualListada[]> {
   const despesas = await carregarDespesasManuais(db, input.platformId);
-  return despesas.map((d) => ({
-    ...d,
-    valorAtualCents: valorVigente(d.valores, input.hoje) ?? d.valores[0]?.valorCents ?? 0,
-  }));
+  return despesas.map((d) => {
+    const ultimo = new Map<string, number>();
+    d.ajustes.forEach((a, i) => ultimo.set(a.competencia, i));
+    return {
+      ...d,
+      valorAtualCents: valorVigente(d.valores, input.hoje) ?? d.valores[0]?.valorCents ?? 0,
+      ajustes: d.ajustes.map((a, i) => ({
+        ...a,
+        valorOriginalCents: valorVigente(d.valores, a.competencia) ?? 0,
+        vigente: ultimo.get(a.competencia) === i,
+      })),
+    };
+  });
 }
 
 export type TipoDespesaManual =
   | {
       readonly recorrencia: "mensal";
       readonly diaCobranca: number;
+      readonly intervaloMeses?: number | undefined;
       readonly inicio: string;
       readonly fim?: string | undefined;
     }
@@ -140,15 +201,21 @@ export async function criarDespesaManual(
       throw new DespesaManualInvalida("dia_cobranca_invalido");
     }
     if (t.fim && t.fim < t.inicio) throw new DespesaManualInvalida("fim_antes_do_inicio");
+    const n = t.intervaloMeses ?? 1;
+    if (!Number.isInteger(n) || n < 1 || n > INTERVALO_MESES_MAX) {
+      throw new DespesaManualInvalida("intervalo_meses_invalido");
+    }
   }
   const primeiraVigencia = t.recorrencia === "mensal" ? t.inicio : t.data;
   return db.transaction().execute(async (trx) => {
     const res = await sql<{ id: string }>`
       INSERT INTO despesas_manuais
-        (id_plataforma, nome, categoria, recorrencia, dia_cobranca, inicio, fim, data)
+        (id_plataforma, nome, categoria, recorrencia, dia_cobranca, intervalo_meses,
+         inicio, fim, data)
       VALUES (
         ${input.platformId}::uuid, ${nome}, ${categoria}, ${t.recorrencia},
         ${t.recorrencia === "mensal" ? t.diaCobranca : null},
+        ${t.recorrencia === "mensal" ? (t.intervaloMeses ?? 1) : 1},
         ${t.recorrencia === "mensal" ? t.inicio : null}::date,
         ${t.recorrencia === "mensal" ? (t.fim ?? null) : null}::date,
         ${t.recorrencia === "unica" ? t.data : null}::date
@@ -237,5 +304,49 @@ export async function excluirDespesaManual(db: Database, input: {platformId:stri
     await travar(trx,input.platformId,input.id);
     await sql`UPDATE despesas_manuais SET excluida_em=now(),excluida_por=${input.actorId}::uuid
       WHERE id=${input.id}::uuid AND id_plataforma=${input.platformId}::uuid`.execute(trx);
+  });
+}
+
+/**
+ * Corrige o valor da cobrança de um mês (`mes` = "YYYY-MM"), com nota. Só
+ * insere: a vigência e as correções anteriores ficam intactas e visíveis.
+ */
+export async function corrigirMesDespesaManual(
+  db: Database,
+  input: {
+    readonly platformId: string;
+    readonly id: string;
+    readonly mes: string;
+    readonly valorCents: number;
+    readonly nota: string;
+    readonly actorId: string;
+  },
+): Promise<{ competencia: string }> {
+  const nota = input.nota.trim();
+  if (!nota) throw new DespesaManualInvalida("nota_obrigatoria");
+  if (!Number.isSafeInteger(input.valorCents) || input.valorCents < 0) {
+    throw new DespesaManualInvalida("valor_invalido");
+  }
+  return db.transaction().execute(async (trx) => {
+    await travar(trx, input.platformId, input.id);
+    const despesa = (await carregarDespesasManuais(trx, input.platformId)).find(
+      (d) => d.id === input.id,
+    );
+    if (!despesa) throw new DespesaManualNaoEncontrada("despesa_nao_encontrada");
+    if (despesa.recorrencia !== "mensal") {
+      throw new DespesaManualInvalida("despesa_unica_nao_tem_correcao_mensal");
+    }
+    const de = `${input.mes}-01`;
+    const competencia = datasDeCobranca(despesa, { de, ate: addMonthsToMonthStart(de, 1) })[0];
+    if (!competencia || valorVigente(despesa.valores, competencia) === null) {
+      throw new DespesaManualInvalida("sem_cobranca_no_mes");
+    }
+    await sql`
+      INSERT INTO despesas_manuais_ajustes
+        (despesa_id, competencia, amount_cents, nota, criado_por)
+      VALUES (${input.id}::uuid, ${competencia}::date, ${input.valorCents}, ${nota},
+        ${input.actorId}::uuid)
+    `.execute(trx);
+    return { competencia };
   });
 }

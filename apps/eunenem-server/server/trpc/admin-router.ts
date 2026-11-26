@@ -110,6 +110,7 @@ import { caixaParaCsv, nomeArquivoCaixa } from "../../pages/lib/caixaCsv.js";
 import { CAIXA_GRANULARIDADES } from "../../pages/lib/caixaPeriodo.js";
 import {
   alterarValorDespesaManual,
+  corrigirMesDespesaManual,
   criarDespesaManual,
   excluirDespesaManual,
   DespesaManualInvalida,
@@ -4844,6 +4845,8 @@ const TipoDespesaManualSchema = z.discriminatedUnion("recorrencia", [
   z.object({
     recorrencia: z.literal("mensal"),
     diaCobranca: z.number().int().min(1).max(28),
+    /** aperture-9nmdo: cobra a cada N meses a partir do mês do início. */
+    intervaloMeses: z.number().int().min(1).max(12).optional(),
     inicio: LocalDateSchema,
     fim: LocalDateSchema.optional(),
   }),
@@ -4856,11 +4859,23 @@ const DespesaManualSchema = z.object({
   categoria: z.string().nullable(),
   recorrencia: z.enum(["mensal", "unica"]),
   diaCobranca: z.number().int().nullable(),
+  intervaloMeses: z.number().int().min(1).max(12),
   inicio: LocalDateSchema.nullable(),
   fim: LocalDateSchema.nullable(),
   data: LocalDateSchema.nullable(),
   valores: z.array(z.object({ vigenteDesde: LocalDateSchema, valorCents: z.number().int() })),
   valorAtualCents: z.number().int().nonnegative(),
+  /** Correções de uma cobrança, em ordem de criação; `vigente` = a que conta. */
+  ajustes: z.array(
+    z.object({
+      competencia: LocalDateSchema,
+      valorCents: z.number().int().nonnegative(),
+      valorOriginalCents: z.number().int().nonnegative(),
+      nota: z.string(),
+      vigente: z.boolean(),
+      criadoEm: z.string(),
+    }),
+  ),
 });
 
 function erroDespesaManual(error: unknown): never {
@@ -4901,11 +4916,20 @@ const despesasManuaisRouter = t.router({
           categoria: d.categoria,
           recorrencia: d.recorrencia,
           diaCobranca: d.diaCobranca,
+          intervaloMeses: d.intervaloMeses,
           inicio: d.inicio,
           fim: d.fim,
           data: d.data,
           valores: [...d.valores],
           valorAtualCents: d.valorAtualCents,
+          ajustes: d.ajustes.map((a) => ({
+            competencia: a.competencia,
+            valorCents: a.valorCents,
+            valorOriginalCents: a.valorOriginalCents,
+            nota: a.nota,
+            vigente: a.vigente,
+            criadoEm: a.criadoEm.toISOString(),
+          })),
         })),
       };
     }),
@@ -4947,6 +4971,29 @@ const despesasManuaisRouter = t.router({
           ...input,
         });
         return { ok: true as const };
+      } catch (error: unknown) {
+        erroDespesaManual(error);
+      }
+    }),
+
+  /** aperture-9nmdo — corrige o valor da cobrança de um mês; nota obrigatória. */
+  corrigirMes: adminProcedure
+    .input(
+      z.object({
+        id: z.string().uuid(),
+        mes: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/),
+        valorCents: z.number().int().nonnegative().max(100_000_000_00),
+        nota: z.string().trim().min(1).max(500),
+      }),
+    )
+    .output(z.object({ competencia: LocalDateSchema }))
+    .mutation(async ({ ctx, input }) => {
+      try {
+        return await corrigirMesDespesaManual(ctx.deps.db, {
+          platformId: ID_PLATAFORMA_EUNENEM,
+          ...input,
+          actorId: ctx.adminUsuario.id,
+        });
       } catch (error: unknown) {
         erroDespesaManual(error);
       }
