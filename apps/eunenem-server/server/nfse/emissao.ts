@@ -523,7 +523,7 @@ async function recuperarPorDps(
 }
 
 // ────────────────────────────────────────────────────────────────────
-//  Consultar / cancelar / DANFSe
+//  Consultar / cancelar
 // ────────────────────────────────────────────────────────────────────
 
 async function linhaDoAmbiente(db: Database, config: NfseConfig, id: string): Promise<NonNullable<Linha>> {
@@ -632,15 +632,5 @@ export async function cancelarEmissao(
         .execute();
     }
     return paraEmissao((await buscarLinha(db, linha.id)) as NonNullable<Linha>);
-  });
-}
-
-export async function baixarDanfse(deps: DepsEmissao, input: { readonly id: string }): Promise<Buffer | null> {
-  return comSpan('nfse.baixarDanfse', {}, async () => {
-    const linha = await linhaDoAmbiente(deps.db, deps.config, input.id);
-    if (linha.chave_acesso === null) throw new OperacaoInvalidaError('sem_chave');
-    const { cliente } = prepararCliente(deps.config, deps.clienteSefin);
-    const r = await cliente.baixarDanfse(linha.chave_acesso);
-    return r.tipo === 'ok' ? r.pdf : null;
   });
 }

@@ -109,7 +109,6 @@ describe('admin.notaFiscal emissão (aperture-wp6j6) — gate antes de banco e d
         confirmacaoChave: '1'.repeat(50),
       }),
     () => c.admin.notaFiscal.xml({ id: ID, tipo: 'dps' }),
-    () => c.admin.notaFiscal.danfse({ id: ID }),
   ];
 
   it('401 sem sessão em todas as ações', async () => {

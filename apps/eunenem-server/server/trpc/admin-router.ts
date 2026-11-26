@@ -127,7 +127,6 @@ import {
 import { carregarPreviaMensal, MesFuturoError } from "../nfse/previa-mensal.js";
 import { listarCadastrosIncompletos } from "../nfse/pendencias-cadastro.js";
 import {
-  baixarDanfse,
   cancelarEmissao,
   carregarPlanoEmissao,
   consultarEmissao,
@@ -5048,18 +5047,6 @@ const notaFiscalRouter = t.router({
     .query(async ({ ctx, input }) => {
       const lista = await listarCadastrosIncompletos(ctx.deps.db, { platformId: ID_PLATAFORMA_EUNENEM, mes: input.mes });
       return lista.map((l) => ({ ...l, responsaveis: [...l.responsaveis], motivos: [...l.motivos] }));
-    }),
-
-  danfse: adminProcedure
-    .input(z.object({ id: z.string().uuid() }))
-    .output(z.object({ pdfBase64: z.string().nullable() }))
-    .query(async ({ ctx, input }) => {
-      try {
-        const pdf = await baixarDanfse(depsEmissao(ctx.deps), input);
-        return { pdfBase64: pdf ? pdf.toString("base64") : null };
-      } catch (error: unknown) {
-        return erroEmissao(error);
-      }
     }),
 });
 

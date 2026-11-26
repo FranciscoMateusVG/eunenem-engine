@@ -68,6 +68,9 @@ const TEXTO_STATUS: Record<Emissao["status"], string> = {
   cancelada: "cancelada",
 };
 
+/** DANFSe: gerado pela Consulta Pública da NFS-e (chave de acesso + captcha). */
+export const CONSULTA_PUBLICA = "https://www.nfse.gov.br/consultapublica";
+
 const MOTIVOS_CANCELAMENTO = [
   { valor: "1", rotulo: "1 — Erro na emissão" },
   { valor: "2", rotulo: "2 — Serviço não prestado" },
@@ -263,14 +266,12 @@ export function ListaEmissoes({
   ocupado,
   onConsultar,
   onBaixarXml,
-  onBaixarDanfse,
   onCancelar,
 }: {
   emissoes: readonly Emissao[];
   ocupado: boolean;
   onConsultar: (id: string) => void;
   onBaixarXml: (e: Emissao, tipo: "dps" | "nfse") => void;
-  onBaixarDanfse: (e: Emissao) => void;
   onCancelar: (e: Emissao) => void;
 }) {
   if (emissoes.length === 0) {
@@ -341,9 +342,17 @@ export function ListaEmissoes({
                     </button>
                   ) : null}
                   {e.chaveAcesso ? (
-                    <button type="button" className={BOTAO} disabled={ocupado} onClick={() => onBaixarDanfse(e)}>
-                      DANFSe
-                    </button>
+                    // A API de DANFSe do governo foi desativada em 03/08/2026
+                    // (NT 008): o PDF sai na Consulta Pública, pela chave.
+                    <a
+                      className={BOTAO}
+                      href={CONSULTA_PUBLICA}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      title={`Chave de acesso: ${e.chaveAcesso}`}
+                    >
+                      Consulta Pública (DANFSe)
+                    </a>
                   ) : null}
                   {e.status === "autorizada" ? (
                     <button type="button" className={BOTAO} disabled={ocupado} onClick={() => onCancelar(e)}>
@@ -519,18 +528,6 @@ export function NotaFiscalEmissao({ mes, mesFechado }: { mes: string; mesFechado
     },
     [utils],
   );
-  const baixarDanfse = useCallback(
-    async (e: Emissao) => {
-      try {
-        const r = await utils.admin.notaFiscal.danfse.fetch({ id: e.id });
-        if (!r.pdfBase64) return setMensagem("DANFSe ainda não disponível no ADN.");
-        baixar(Uint8Array.from(atob(r.pdfBase64), (c) => c.charCodeAt(0)), "application/pdf", `danfse-${e.chaveAcesso}.pdf`);
-      } catch (erro) {
-        setMensagem(`DANFSe indisponível: ${(erro as Error).message}`);
-      }
-    },
-    [utils],
-  );
 
   const ocupado = emitir.isPending || consultar.isPending || cancelar.isPending;
 
@@ -591,7 +588,6 @@ export function NotaFiscalEmissao({ mes, mesFechado }: { mes: string; mesFechado
           ocupado={ocupado}
           onConsultar={(id) => consultar.mutate({ id })}
           onBaixarXml={(e, tipo) => void baixarXml(e, tipo)}
-          onBaixarDanfse={(e) => void baixarDanfse(e)}
           onCancelar={(e) => {
             setMensagem(null);
             setCancelando(e);

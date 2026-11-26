@@ -68,15 +68,21 @@ async function main(): Promise<void> {
     const de = `${mes}-01`;
     const [ano, m] = mes.split('-').map(Number) as [number, number];
     const ate = m === 12 ? `${ano + 1}-01-01` : `${ano}-${String(m + 1).padStart(2, '0')}-01`;
+    // Recebedor MAIS RECENTE de cada campanha (mesma ordem da prévia/plano).
     const noMes = (
-      await sql<{ campanha_id: string; titulo: string }>`
-      SELECT DISTINCT c.id AS campanha_id, c.titulo
-      FROM lancamentos_financeiros l
-      JOIN pagamentos p ON p.id = l.id_pagamento
-      JOIN campanhas c ON c.id = p.intencao_id_campanha
-      WHERE l.tipo = 'credito_receita_plataforma'
-        AND l.criado_em >= (${de}::date::timestamp AT TIME ZONE 'America/Sao_Paulo')
-        AND l.criado_em < (${ate}::date::timestamp AT TIME ZONE 'America/Sao_Paulo')
+      await sql<{ campanha_id: string; titulo: string; cpf: string | null; nome: string | null }>`
+      SELECT c.id AS campanha_id, c.titulo, r.cpf_titular AS cpf, r.nome_titular AS nome
+      FROM campanhas c
+      LEFT JOIN LATERAL (
+        SELECT cpf_titular, nome_titular FROM recebedores
+        WHERE campanha_id = c.id ORDER BY criada_em DESC, id DESC LIMIT 1
+      ) r ON true
+      WHERE EXISTS (
+        SELECT 1 FROM lancamentos_financeiros l JOIN pagamentos p ON p.id = l.id_pagamento
+        WHERE p.intencao_id_campanha = c.id AND l.tipo = 'credito_receita_plataforma'
+          AND l.criado_em >= (${de}::date::timestamp AT TIME ZONE 'America/Sao_Paulo')
+          AND l.criado_em < (${ate}::date::timestamp AT TIME ZONE 'America/Sao_Paulo')
+      )
     `.execute(db)
     ).rows;
     const sintetica = (r: (typeof noMes)[number]) =>

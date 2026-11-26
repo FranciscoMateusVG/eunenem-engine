@@ -53,6 +53,9 @@ confirmação (ambiente, série, tomadores, total, campos fiscais, caixa
 - Cancelamento (evento e101101): motivo oficial (1/2/9), justificativa de 15 a
   255 caracteres e a chave de acesso redigitada. Sem resposta, a nova tentativa
   consulta o evento antes de reenviar.
+- DANFSe: a API do governo foi desativada em 03/08/2026 (NT 008). A lista de
+  emissões oferece o XML da NFS-e e o link para a Consulta Pública
+  (https://www.nfse.gov.br/consultapublica), onde o PDF é gerado pela chave.
 - Endpoints: homologação `https://sefin.producaorestrita.nfse.gov.br/SefinNacional`
   + `https://adn.producaorestrita.nfse.gov.br`; produção
   `https://sefin.nfse.gov.br/SefinNacional` + `https://adn.nfse.gov.br`.
