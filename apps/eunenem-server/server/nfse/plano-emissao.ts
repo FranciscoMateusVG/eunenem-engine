@@ -39,6 +39,8 @@ export interface NotaPlanejada {
 
 /** Nota já gravada para a competência (o que foi fixado na 1ª emissão). */
 export interface NotaFixada extends NotaPlanejada {
+  /** Série reservada na fixação (pode diferir da configurada hoje). */
+  readonly serie: string;
   readonly status: 'pendente' | 'enviando' | 'incerta' | 'rejeitada' | 'autorizada' | 'cancelada';
 }
 
@@ -54,6 +56,7 @@ export type BloqueioEmissao =
   | 'pendencias_de_tomador'
   | 'producao_nao_liberada'
   | 'competencia_divergente'
+  | 'serie_divergente'
   | 'sem_notas';
 
 export type EstrategiaAgrupamento = (previa: PreviaMensal) => readonly NotaPlanejada[];
@@ -143,9 +146,12 @@ export function montarPlanoEmissao(input: {
   const notas: readonly NotaPlanejada[] = fixada
     ? fixadas
         .filter((f) => f.status !== 'autorizada' && f.status !== 'cancelada')
-        .map(({ status: _status, ...nota }) => nota)
+        .map(({ status: _status, serie: _serie, ...nota }) => nota)
     : recalculadas;
   if (!fixada && notas.length === 0) bloqueios.add('sem_notas');
+  // Num retry a série enviada é a RESERVADA; se NFSE_SERIE mudou desde a
+  // fixação, a confirmação mostraria uma série e o envio usaria outra.
+  if (fixadas.some((f) => f.serie !== config.serie.valor)) bloqueios.add('serie_divergente');
 
   const primeira = previa.notas.find((n) => n.dps.status === 'gerada')?.dps;
   const camposFiscais =

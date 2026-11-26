@@ -186,7 +186,7 @@ export async function xmlDaEmissao(
  * outro clique fixou antes (unicidade por CPF), desfaz tudo — nenhum número é
  * consumido — e devolve false.
  */
-async function fixarCompetencia(
+export async function fixarCompetencia(
   db: Database,
   input: {
     readonly ambiente: TipoAmbiente;
@@ -200,6 +200,18 @@ async function fixarCompetencia(
 ): Promise<boolean> {
   try {
     await db.transaction().execute(async (trx) => {
+      // Serializa a fixação por (ambiente, competência) e relê DENTRO da
+      // transação: dois primeiros cliques com planos de CPFs disjuntos (ex.:
+      // recebedor trocado entre eles) não podem fixar o mês duas vezes.
+      await sql`SELECT pg_advisory_xact_lock(hashtext(${`nfse_competencia:${input.ambiente}:${input.mes}`}))`.execute(trx);
+      const jaFixada = await trx
+        .selectFrom('nfse_emissoes')
+        .select('id')
+        .where('ambiente', '=', input.ambiente)
+        .where('competencia', '=', input.mes)
+        .limit(1)
+        .executeTakeFirst();
+      if (jaFixada) throw new CompetenciaJaFixada();
       for (const nota of input.notas) {
         const { proximo } = await trx
           .insertInto('nfse_numeracao')
@@ -257,6 +269,7 @@ function notaDaLinha(l: NonNullable<Linha>): NotaFixada {
     tomadorNome: l.tomador_nome,
     valorCents: Number(l.valor_cents),
     campanhas: [...l.campanhas].sort(),
+    serie: l.serie,
     status: l.status as StatusEmissao,
   };
 }

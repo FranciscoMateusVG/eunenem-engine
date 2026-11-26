@@ -9,7 +9,10 @@ import {
   type NfseEnv,
   parseNfseConfig,
 } from '../../apps/eunenem-server/server/nfse/config.js';
-import type { FabricaClienteSefin } from '../../apps/eunenem-server/server/nfse/emissao.js';
+import {
+  type FabricaClienteSefin,
+  fixarCompetencia,
+} from '../../apps/eunenem-server/server/nfse/emissao.js';
 import { criarClienteSefin } from '../../apps/eunenem-server/server/nfse/sefin-cliente.js';
 import type { TrpcContext } from '../../apps/eunenem-server/server/trpc/context.js';
 import { appRouter } from '../../apps/eunenem-server/server/trpc/router.js';
@@ -477,6 +480,54 @@ describe('competência fixada na primeira emissão (sem dupla tributação)', ()
       'autorizada',
       'autorizada',
     ]);
+  });
+});
+
+describe('fixação concorrente da competência', () => {
+  const nota = (cpf: string, campanha: string) => ({
+    tomadorCpf: cpf,
+    tomadorNome: 'X',
+    valorCents: 1234,
+    campanhas: [campanha],
+  });
+  const fixar = (cpf: string) =>
+    fixarCompetencia(testDb.db, {
+      ambiente: '2',
+      serie: '00001',
+      mes: MES,
+      notas: [nota(cpf, randomUUID())],
+      autorId: randomUUID(),
+      now: NOW,
+      idDps: (n) => `DPS${IBGE}2${CNPJ}00001${n.padStart(15, '0')}`,
+    });
+
+  it('primeiros cliques simultâneos com CPFs disjuntos: só um fixa o mês', async () => {
+    const r = await Promise.all([fixar(CPF_A), fixar(CPF_C), fixar(CPF_B)]);
+    expect(r.filter(Boolean)).toHaveLength(1);
+    const linhas = await sql<{
+      tomador_cpf: string;
+    }>`SELECT tomador_cpf FROM nfse_emissoes WHERE competencia = ${MES}`.execute(testDb.db);
+    expect(linhas.rows).toHaveLength(1);
+    const seq = await sql<{ proximo: string }>`SELECT proximo FROM nfse_numeracao`.execute(
+      testDb.db,
+    );
+    expect(seq.rows[0]?.proximo).toBe('2'); // nenhum número consumido pelos que desistiram
+  });
+
+  it('mês já fixado com outro CPF: a fixação seguinte é recusada', async () => {
+    expect(await fixar(CPF_A)).toBe(true);
+    expect(await fixar(CPF_C)).toBe(false);
+  });
+
+  it('série configurada mudou depois da fixação: retry bloqueado, nada enviado', async () => {
+    await seedDoisTomadores();
+    fake.proximaEmissao = ['autorizar', { rejeitar: { codigo: 'E1', descricao: 'x' } }];
+    await emitir();
+    const outra = caller({ env: env({ NFSE_SERIE: '00002' }) });
+    const plano = await outra.planoEmissao({ mes: MES });
+    expect(plano.bloqueios).toContain('serie_divergente');
+    expect((await erroDe(emitir(outra))).message).toContain('serie_divergente');
+    expect(posts()).toHaveLength(2);
   });
 });
 

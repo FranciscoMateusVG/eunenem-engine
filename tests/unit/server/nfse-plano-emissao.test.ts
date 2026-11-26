@@ -138,7 +138,7 @@ describe('competência fixada e impressão', () => {
     const p = montarPlanoEmissao({
       previa: previa(),
       config: CONFIG,
-      fixadas: [{ ...fixadaA, status: 'autorizada' }],
+      fixadas: [{ ...fixadaA, serie: '00001', status: 'autorizada' }],
     });
     expect(p.fixada).toBe(true);
     expect(p.bloqueios).toEqual([]);
@@ -149,7 +149,7 @@ describe('competência fixada e impressão', () => {
     const p = montarPlanoEmissao({
       previa: previa(),
       config: CONFIG,
-      fixadas: [{ ...fixadaA, tomadorCpf: '39053344705', status: 'autorizada' }],
+      fixadas: [{ ...fixadaA, serie: '00001', tomadorCpf: '39053344705', status: 'autorizada' }],
     });
     expect(p.bloqueios).toContain('competencia_divergente');
     expect(p.divergencias).toHaveLength(2);
@@ -185,5 +185,25 @@ describe('competência fixada e impressão', () => {
       }),
     ];
     for (const v of variantes) expect(v.impressao).not.toBe(base);
+  });
+});
+
+describe('série reservada × configurada', () => {
+  it('NFSE_SERIE mudou depois da fixação: bloqueia (serie_divergente)', () => {
+    const fixada = {
+      tomadorCpf: '52998224725',
+      tomadorNome: 'Ana',
+      valorCents: 100,
+      campanhas: ['c1'],
+      serie: '00001',
+      status: 'rejeitada' as const,
+    };
+    const mudou = parseNfseConfig({ ...CONFIG_ENV, NFSE_SERIE: '00002' });
+    expect(
+      montarPlanoEmissao({ previa: previa(), config: mudou, fixadas: [fixada] }).bloqueios,
+    ).toContain('serie_divergente');
+    expect(
+      montarPlanoEmissao({ previa: previa(), config: CONFIG, fixadas: [fixada] }).bloqueios,
+    ).not.toContain('serie_divergente');
   });
 });
