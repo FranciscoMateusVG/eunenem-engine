@@ -43,8 +43,15 @@ afterAll(async () => {
 
 beforeEach(limpar);
 
-function caller(opts: { sessao?: boolean; allowlist?: string[]; now?: Date } = {}) {
-  const auth = adminAuthOverrides();
+function caller(
+  opts: {
+    sessao?: boolean;
+    allowlist?: string[];
+    now?: Date;
+    auth?: ReturnType<typeof adminAuthOverrides>;
+  } = {},
+) {
+  const auth = opts.auth ?? adminAuthOverrides();
   const deps = {
     ...auth.depsOverrides,
     ...(opts.allowlist ? { adminAllowedEmails: new Set(opts.allowlist) } : {}),
@@ -552,7 +559,6 @@ describe('9nmdo — correção do valor de um mês, com nota', () => {
     const rows = await sql<{ criado_por: string }>`
       SELECT criado_por FROM despesas_manuais_ajustes`.execute(testDb.db);
     expect(rows.rows).toHaveLength(2);
-    // Ator vem da sessão admin (uuid), nunca do input.
     expect(rows.rows.every((r) => /^[0-9a-f-]{36}$/.test(r.criado_por))).toBe(true);
   });
 
@@ -600,6 +606,42 @@ describe('9nmdo — correção do valor de um mês, com nota', () => {
         valorCents: 1,
         nota: 'x',
       }),
+    ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    const n = await sql<{ n: string }>`SELECT COUNT(*) AS n FROM despesas_manuais_ajustes`.execute(
+      testDb.db,
+    );
+    expect(Number(n.rows[0]?.n)).toBe(0);
+  });
+
+  it('ator gravado é exatamente o usuário da sessão admin', async () => {
+    const auth = adminAuthOverrides();
+    const sessao = await auth.depsOverrides.authService.validarSessao('admin-test-session-token');
+    if (!sessao) throw new Error('sem sessão de teste');
+    const c = caller({ auth }).admin.despesas.manuais;
+    const { id } = await c.criar({
+      nome: 'Servidor',
+      valorCents: 10_000,
+      tipo: { recorrencia: 'mensal', diaCobranca: 4, inicio: '2037-08-01' },
+    });
+    await c.corrigirMes({ id, mes: '2037-09', valorCents: 1, nota: 'x' });
+    const rows = await sql<{ criado_por: string }>`
+      SELECT criado_por FROM despesas_manuais_ajustes WHERE despesa_id = ${id}::uuid`.execute(
+      testDb.db,
+    );
+    expect(rows.rows).toEqual([{ criado_por: sessao.idUsuario }]);
+  });
+
+  it('não corrige despesa de outra plataforma nem despesa excluída (NOT_FOUND, nada gravado)', async () => {
+    const outra = await mensal('Outra plataforma', 10_000, 4, '2037-08-01');
+    await sql`UPDATE despesas_manuais SET id_plataforma = '30000000-0000-4000-8000-000000000099'
+      WHERE id = ${outra.id}::uuid`.execute(testDb.db);
+    await expect(
+      admin().corrigirMes({ id: outra.id, mes: '2037-09', valorCents: 1, nota: 'x' }),
+    ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    const excluida = await mensal('Excluída', 10_000, 4, '2037-08-01');
+    expect((await excluirHttp(excluida.id)).status).toBe(200);
+    await expect(
+      admin().corrigirMes({ id: excluida.id, mes: '2037-09', valorCents: 1, nota: 'x' }),
     ).rejects.toMatchObject({ code: 'NOT_FOUND' });
     const n = await sql<{ n: string }>`SELECT COUNT(*) AS n FROM despesas_manuais_ajustes`.execute(
       testDb.db,
