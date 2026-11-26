@@ -509,11 +509,12 @@ async function recuperarPorDps(
   id: string,
   idDps: string,
   now: Date,
+  opcoes: { readonly marcarIncerta: boolean } = { marcarIncerta: true },
 ): Promise<'autorizada' | 'incerta' | 'nao_encontrada'> {
   const consulta = await cliente.consultarDps(idDps);
   if (consulta.tipo === 'nao_encontrada') return 'nao_encontrada';
   if (consulta.tipo === 'incerta') {
-    await atualizar(db, id, { status: 'incerta', atualizada_em: now });
+    if (opcoes.marcarIncerta) await atualizar(db, id, { status: 'incerta', atualizada_em: now });
     return 'incerta';
   }
   const nfse = await cliente.consultarNfse(consulta.chaveAcesso);
@@ -543,7 +544,11 @@ export async function consultarEmissao(deps: DepsEmissao, input: { readonly id: 
     if (linha.chave_acesso === null) {
       const expirada = linha.status === 'enviando' && linha.atualizada_em.getTime() < now.getTime() - ENVIANDO_EXPIRA_MS;
       if (linha.tentativas > 0 && (linha.status === 'incerta' || linha.status === 'rejeitada' || expirada)) {
-        const r = await recuperarPorDps(db, cliente, linha.id, linha.id_dps, now);
+        // Rejeitada continua rejeitada se a consulta for inconclusiva: a
+        // rejeição foi uma resposta definitiva (nada registrado).
+        const r = await recuperarPorDps(db, cliente, linha.id, linha.id_dps, now, {
+          marcarIncerta: linha.status !== 'rejeitada',
+        });
         // Interrompida e inexistente no Sistema Nacional: pode ser reenviada.
         if (r === 'nao_encontrada' && expirada) await atualizar(db, linha.id, { status: 'incerta', atualizada_em: now });
       }

@@ -152,13 +152,13 @@ describe('parseNfseConfig', () => {
     expect(cfg.certificado).toBeNull();
   });
 
-  it('série real: default 00001; 99999 (prévia) e 00000 são inválidas', () => {
+  it('série real: default 00001; 9xxxx (reservadas no RTC), 89999 (prévia) e 00000 são inválidas', () => {
     expect(parseNfseConfig({}).serie).toEqual({ valor: '00001', origem: 'default' });
     expect(parseNfseConfig({ NFSE_SERIE: '00002' }).serie).toEqual({
       valor: '00002',
       origem: 'env',
     });
-    for (const NFSE_SERIE of ['99999', '00000', '1', 'abcde']) {
+    for (const NFSE_SERIE of ['99999', '90000', '89999', '00000', '1', 'abcde']) {
       const c = parseNfseConfig({ NFSE_SERIE });
       expect(c.serie.valor, NFSE_SERIE).toBe('00001');
       expect(c.problemas, NFSE_SERIE).toContainEqual({
@@ -166,6 +166,21 @@ describe('parseNfseConfig', () => {
         motivo: 'invalido',
       });
     }
+  });
+
+  it('IM: default do contador; NFSE_INSCRICAO_MUNICIPAL=omitir tira a tag (E0120 na produção restrita)', () => {
+    expect(parseNfseConfig({}).inscricaoMunicipal).toEqual({
+      valor: '12306200019',
+      origem: 'default',
+    });
+    expect(parseNfseConfig({ NFSE_INSCRICAO_MUNICIPAL: 'omitir' }).inscricaoMunicipal).toEqual({
+      valor: null,
+      origem: 'env',
+    });
+    expect(parseNfseConfig({ NFSE_INSCRICAO_MUNICIPAL: '123' }).inscricaoMunicipal).toEqual({
+      valor: '123',
+      origem: 'env',
+    });
   });
 
   it('produção só é liberada com NFSE_EMISSAO_PRODUCAO=liberada, exatamente', () => {

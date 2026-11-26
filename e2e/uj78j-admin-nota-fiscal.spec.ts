@@ -17,7 +17,7 @@ import type { Page } from '@playwright/test';
 import { sql } from 'kysely';
 import { mesAnterior, mesAtualSP } from '../apps/eunenem-server/pages/lib/notaFiscalMes.js';
 import { createDatabase, type Database } from '../src/adapters/database.js';
-import { validateDps } from '../tests/helpers/nfse-xsd.js';
+import { validateDpsDoLeiaute } from '../tests/helpers/nfse-xsd.js';
 import { ReceitaLedgerSeed } from '../tests/helpers/receita-ledger-seed.js';
 import { verificarAssinaturaDps } from '../tests/helpers/xmldsig-verify.js';
 import { expect, test } from './fixtures.js';
@@ -194,7 +194,7 @@ test('uj78j: prévia da NFS-e mensal no admin', async ({ browser, baseURL }, tes
         await expect(page.getByRole('heading', { name: 'XML da DPS (assinado)' })).toBeVisible();
         const xml = (await page.getByTestId('nf-xml').textContent()) ?? '';
         expect(xml).toContain('<vServ>115.45</vServ>');
-        expect(validateDps(xml)).toEqual({ ok: true, errors: [] });
+        expect(validateDpsDoLeiaute(xml)).toEqual({ ok: true, errors: [] });
         const dsig = verificarAssinaturaDps(xml);
         expect(dsig.digestConfere).toBe(true);
         expect(dsig.assinaturaConfere).toBe(true);
