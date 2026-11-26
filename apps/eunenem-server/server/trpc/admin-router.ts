@@ -105,7 +105,12 @@ import {
 } from "../../pages/lib/receitaPeriodo.js";
 import { type CoberturaDespesas, loadDespesasPainel } from "../admin-despesas.js";
 import type { Database } from "../../../../src/adapters/database.js";
-import { InvalidCaixaPeriodoError, loadCaixaPainel } from "../admin-caixa.js";
+import {
+  InvalidCaixaPeriodoError,
+  listarResgatesEfetuados,
+  loadCaixaPainel,
+  type ResgateEfetuado,
+} from "../admin-caixa.js";
 import { caixaParaCsv, nomeArquivoCaixa } from "../../pages/lib/caixaCsv.js";
 import { CAIXA_GRANULARIDADES } from "../../pages/lib/caixaPeriodo.js";
 import {
@@ -2856,7 +2861,65 @@ function toRepasseAdminDTO(
   };
 }
 
+const LocalDateSchema = z
+  .string()
+  .length(10)
+  .refine(isLocalDate, { message: "data_invalida" });
+
+/** aperture-9nmdo — um resgate aceito pelo banco (linha da tela de resgates). */
+const ResgateEfetuadoSchema = z.object({
+  idRepasse: z.string(),
+  idCampanha: z.string(),
+  campanhaTitulo: z.string(),
+  recebedorNome: z.string().nullable(),
+  amountCents: z.number().int(),
+  status: z.string(),
+  metodo: z.enum(["inter", "manual"]),
+  bankTransferRef: z.string().nullable(),
+  efetuadoEm: z.string(),
+});
+
+function toResgateEfetuadoDTO(r: ResgateEfetuado): z.infer<typeof ResgateEfetuadoSchema> {
+  return {
+    idRepasse: r.idRepasse,
+    idCampanha: r.idCampanha,
+    campanhaTitulo: r.campanhaTitulo,
+    recebedorNome: r.recebedorNome,
+    amountCents: r.amountCents,
+    status: r.status,
+    metodo: r.metodo,
+    bankTransferRef: r.bankTransferRef,
+    efetuadoEm: r.efetuadoEm.toISOString(),
+  };
+}
+
 const repassesRouter = t.router({
+  /**
+   * aperture-9nmdo — filtro de período da tela de resgates: os resgates
+   * aceitos pelo banco em [de, ate), pela MESMA consulta das saídas do
+   * Fluxo de caixa (server/admin-caixa.ts). Leitura pura.
+   */
+  efetuados: adminProcedure
+    .input(z.object({ de: LocalDateSchema, ate: LocalDateSchema }))
+    .output(z.object({ resgates: z.array(ResgateEfetuadoSchema), totalCents: z.number().int() }))
+    .query(async ({ ctx, input }) => {
+      try {
+        const resgates = await listarResgatesEfetuados(ctx.deps.db, {
+          platformId: ID_PLATAFORMA_EUNENEM,
+          ...input,
+        });
+        return {
+          resgates: resgates.map(toResgateEfetuadoDTO),
+          totalCents: resgates.reduce((a, r) => a + r.amountCents, 0),
+        };
+      } catch (error: unknown) {
+        if (error instanceof InvalidCaixaPeriodoError) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: error.message });
+        }
+        throw error;
+      }
+    }),
+
   list: adminProcedure
     .input(RepassesListInputSchema)
     .output(RepassesListOutputSchema)
@@ -4321,11 +4384,6 @@ const catalogRouter = t.router({
  * prévia da NFS-e (PR #144) depende dele e dos tipos dele.
  * ────────────────────────────────────────────────────────────────────── */
 
-const LocalDateSchema = z
-  .string()
-  .length(10)
-  .refine(isLocalDate, { message: "data_invalida" });
-
 const ReceitaSomaSchema = z.object({
   taxasRegistradasCents: cents(),
   cancelamentosCents: cents(),
@@ -5085,6 +5143,7 @@ const CaixaPainelSchema = z.object({
     totalCents: z.number().int(),
     repasses: z.number().int(),
     porMetodo: z.object({ inter: CaixaSaidaMetodoSchema, manual: CaixaSaidaMetodoSchema }),
+    resgates: z.array(ResgateEfetuadoSchema),
   }),
   pendentes: z.object({
     aprovadosNaoTransferidos: CaixaPendenteSchema,
@@ -5108,7 +5167,7 @@ const CaixaPainelSchema = z.object({
     totalIndependente: CaixaSomaSchema,
     somaSerie: CaixaSomaSchema,
     totalPagoDosPagamentosCents: z.number().int(),
-    totalDosRepassesCents: z.number().int(),
+    totalNoLivroDosResgatesCents: z.number().int(),
     diferencas: z.object({
       entradasBrutasCents: z.number().int(),
       estornosCents: z.number().int(),
@@ -5149,7 +5208,12 @@ const caixaRouter = t.router({
     .output(CaixaPainelSchema)
     .query(async ({ ctx, input }) => {
       const painel = await lerCaixa(ctx, input);
-      return { ...painel, snapshotAt: painel.snapshotAt.toISOString(), serie: [...painel.serie] };
+      return {
+        ...painel,
+        snapshotAt: painel.snapshotAt.toISOString(),
+        saidas: { ...painel.saidas, resgates: painel.saidas.resgates.map(toResgateEfetuadoDTO) },
+        serie: [...painel.serie],
+      };
     }),
   csv: adminProcedure
     .input(CaixaPeriodoInputSchema)
