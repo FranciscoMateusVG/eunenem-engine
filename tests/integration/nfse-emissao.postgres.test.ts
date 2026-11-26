@@ -843,17 +843,6 @@ describe('consultar e cancelar', () => {
       fake.requisicoes.filter((q) => q.path === `/dps/${rejeitada.idDps.slice(3)}`),
     ).toHaveLength(2);
   });
-
-  it('danfse devolve o PDF do ADN', async () => {
-    const [b] = await emitidas();
-    if (!b) throw new Error('sem emissão');
-    const { pdfBase64 } = await caller().danfse({ id: b.id });
-    expect(
-      Buffer.from(pdfBase64 ?? '', 'base64')
-        .subarray(0, 5)
-        .toString(),
-    ).toBe('%PDF-');
-  });
 });
 
 describe('segredos', () => {

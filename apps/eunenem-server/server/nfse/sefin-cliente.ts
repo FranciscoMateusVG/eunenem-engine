@@ -18,7 +18,8 @@ import type { TipoAmbiente } from './dps.js';
  *   POST {sefin}/nfse/{chave}/eventos         {pedidoRegistroEventoXmlGZipB64}
  *   GET  {sefin}/nfse/{chave}/eventos/{tipo}/{seq} → {eventos:[{arquivoXml}]}
  *        (arquivoXml = base64 do gzip+base64 — confirmado na produção restrita)
- *   GET  {adn}/danfse/{chave}                 → PDF
+ * (DANFSe: a API do ADN foi desativada em 03/08/2026, NT 008 — o PDF sai
+ * na Consulta Pública; não há chamada aqui.)
  *
  * Classificação: 2xx = sucesso; 4xx = recusa (nada foi registrado); qualquer
  * outra coisa (timeout, conexão, TLS, 5xx, corpo ilegível) = `incerta` — o
@@ -80,18 +81,12 @@ export type RespostaConsultaEvento =
   | { readonly tipo: 'nao_encontrado' }
   | Incerta;
 
-export type RespostaDanfse =
-  | { readonly tipo: 'ok'; readonly pdf: Buffer }
-  | { readonly tipo: 'nao_encontrado' }
-  | Incerta;
-
 export interface ClienteSefin {
   emitirDps(dpsXmlAssinado: string): Promise<RespostaEmissao>;
   consultarDps(idDps: string): Promise<RespostaConsultaDps>;
   consultarNfse(chaveAcesso: string): Promise<RespostaConsultaNfse>;
   registrarEvento(chaveAcesso: string, pedidoXmlAssinado: string): Promise<RespostaEvento>;
   consultarEvento(chaveAcesso: string, tipoEvento: string, sequencia: number): Promise<RespostaConsultaEvento>;
-  baixarDanfse(chaveAcesso: string): Promise<RespostaDanfse>;
 }
 
 export interface OpcoesClienteSefin {
@@ -252,7 +247,7 @@ export function criarClienteSefin(opcoes: OpcoesClienteSefin): ClienteSefin {
     });
   }
 
-  const { sefin, adn } = opcoes.hosts;
+  const { sefin } = opcoes.hosts;
 
   return {
     emitirDps: (dpsXmlAssinado) =>
@@ -327,12 +322,5 @@ export function criarClienteSefin(opcoes: OpcoesClienteSefin): ClienteSefin {
           return eventoXml === null ? incerta('resposta_invalida', r.status) : { tipo: 'encontrado', eventoXml };
         },
       ),
-
-    baixarDanfse: (chaveAcesso) =>
-      chamar('baixarDanfse', 'GET', `${adn}/danfse/${chaveAcesso}`, undefined, (r): RespostaDanfse => {
-        if (r.status === 404) return { tipo: 'nao_encontrado' };
-        if (r.status === 200 && r.corpo.subarray(0, 5).toString('latin1') === '%PDF-') return { tipo: 'ok', pdf: r.corpo };
-        return incerta(r.status === 200 ? 'resposta_invalida' : 'http', r.status);
-      }, 'application/pdf'),
   };
 }

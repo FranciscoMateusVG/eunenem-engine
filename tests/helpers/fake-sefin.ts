@@ -286,13 +286,6 @@ export async function iniciarFakeSefin(opts: {
           }
         }
 
-        const danfse = /^\/danfse\/(\d{50})$/.exec(path);
-        if (danfse && req.method === 'GET') {
-          if (!notas.has(danfse[1] ?? '')) return json(404, { erros: [] });
-          res.writeHead(200, { 'content-type': 'application/pdf' });
-          return res.end(Buffer.from('%PDF-1.4 fake danfse'));
-        }
-
         json(404, { erros: [{ Codigo: 'E404', Descricao: `rota desconhecida ${path}` }] });
       });
     },

@@ -190,7 +190,6 @@ describe('ListaEmissoes', () => {
         ocupado: false,
         onConsultar: nada,
         onBaixarXml: nada,
-        onBaixarDanfse: nada,
         onCancelar: nada,
       }),
     );
@@ -199,12 +198,17 @@ describe('ListaEmissoes', () => {
     expect(lista([])).toContain('Nenhuma NFS-e emitida para este mês neste ambiente.');
   });
 
-  it('autorizada: número, chave, XMLs, DANFSe e cancelar', () => {
+  it('autorizada: número, chave, XMLs, Consulta Pública (DANFSe) e cancelar', () => {
     const html = lista([emissao()]);
     expect(html).toContain('nº 42');
     expect(html).toContain('3'.repeat(50));
-    for (const b of ['Consultar', 'XML DPS', 'XML NFS-e', 'DANFSe', 'Cancelar NFS-e'])
+    for (const b of ['Consultar', 'XML DPS', 'XML NFS-e', 'Cancelar NFS-e'])
       expect(html).toContain(`>${b}</button>`);
+    // A API de DANFSe do governo foi desativada (NT 008): o PDF sai na Consulta Pública.
+    expect(html).toMatch(
+      /<a [^>]*href="https:\/\/www\.nfse\.gov\.br\/consultapublica"[^>]*>Consulta Pública \(DANFSe\)<\/a>/,
+    );
+    expect(html).not.toContain('>DANFSe</button>');
   });
 
   it('rejeitada mostra os erros do Sistema Nacional e não oferece cancelar', () => {
@@ -220,7 +224,7 @@ describe('ListaEmissoes', () => {
     expect(html).toContain('E0312');
     expect(html).toContain('cTribNac nao habilitado');
     expect(html).not.toContain('Cancelar NFS-e');
-    expect(html).not.toContain('DANFSe');
+    expect(html).not.toContain('Consulta Pública');
   });
 
   it('incerta orienta consultar antes de reenviar', () => {

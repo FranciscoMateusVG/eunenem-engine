@@ -126,7 +126,6 @@ import {
 } from "../admin-despesas-manuais.js";
 import { carregarPreviaMensal, MesFuturoError } from "../nfse/previa-mensal.js";
 import {
-  baixarDanfse,
   cancelarEmissao,
   carregarPlanoEmissao,
   consultarEmissao,
@@ -5021,17 +5020,6 @@ const notaFiscalRouter = t.router({
       }
     }),
 
-  danfse: adminProcedure
-    .input(z.object({ id: z.string().uuid() }))
-    .output(z.object({ pdfBase64: z.string().nullable() }))
-    .query(async ({ ctx, input }) => {
-      try {
-        const pdf = await baixarDanfse(depsEmissao(ctx.deps), input);
-        return { pdfBase64: pdf ? pdf.toString("base64") : null };
-      } catch (error: unknown) {
-        return erroEmissao(error);
-      }
-    }),
 });
 
 

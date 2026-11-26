@@ -160,15 +160,6 @@ describe('consultas', () => {
     expect(r).toEqual({ tipo: 'encontrada', nfseXml: emitida.nfseXml });
     expect(await cliente().consultarNfse('9'.repeat(50))).toEqual({ tipo: 'nao_encontrada' });
   });
-
-  it('baixarDanfse busca o PDF no ADN', async () => {
-    const emitida = await cliente().emitirDps(dpsXml());
-    if (emitida.tipo !== 'autorizada') throw new Error('esperava autorizada');
-    const r = await cliente().baixarDanfse(emitida.chaveAcesso);
-    if (r.tipo !== 'ok') throw new Error('esperava ok');
-    expect(r.pdf.subarray(0, 5).toString()).toBe('%PDF-');
-    expect(fake.requisicoes.at(-1)?.path).toBe(`/danfse/${emitida.chaveAcesso}`);
-  });
 });
 
 describe('eventos', () => {
