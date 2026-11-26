@@ -485,3 +485,43 @@ describe('leiaute RTC 2026-11 (produção restrita) — aperture-wp6j6, smoke', 
     expect(validateDpsRtc(xml).errors).toEqual([]);
   });
 });
+
+describe('leiaute RTC: cNBS antes de xDescServ (smoke 26/11, E1235)', () => {
+  it('com cNBS, a DPS RTC passa no pack de produção restrita; produção mantém cNBS depois', async () => {
+    const { validateDps, validateDpsRtc } = await import('../../helpers/nfse-xsd.js');
+    const servico = {
+      cLocPrestacao: '2611606',
+      cTribNac: '100202',
+      cTribMun: '003',
+      xDescServ: 'Comissão',
+      cNBS: '109059000',
+    };
+    const rtc = montarDpsXml(
+      input({
+        leiaute: 'rtc-2026-11',
+        serie: '00001',
+        nDPS: '1',
+        ibscbs: true,
+        servico,
+        tomador: {
+          cpf: '52998224725',
+          nome: 'Ana',
+          endereco: {
+            cMun: '3106200',
+            cep: '30130003',
+            logradouro: 'Avenida Afonso Pena',
+            numero: '1212',
+            bairro: 'Centro',
+          },
+        },
+      }),
+    ).xml;
+    expect(rtc).toContain(
+      '<cTribMun>003</cTribMun><cNBS>109059000</cNBS><xDescServ>Comissão</xDescServ>',
+    );
+    expect(validateDpsRtc(rtc).errors).toEqual([]);
+    const prod = montarDpsXml(input({ leiaute: 'producao-2026-02', servico })).xml;
+    expect(prod).toContain('<xDescServ>Comissão</xDescServ><cNBS>109059000</cNBS>');
+    expect(validateDps(prod).errors).toEqual([]);
+  });
+});

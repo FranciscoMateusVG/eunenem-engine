@@ -16,7 +16,8 @@ import type { TipoAmbiente } from './dps.js';
  *        "DPS": a API real responde E2400 com ele; não achou = 404 E2404)
  *   GET  {sefin}/nfse/{chave}                 → {nfseXmlGZipB64}
  *   POST {sefin}/nfse/{chave}/eventos         {pedidoRegistroEventoXmlGZipB64}
- *   GET  {sefin}/nfse/{chave}/eventos/{tipo}/{seq} → {eventoXmlGZipB64}
+ *   GET  {sefin}/nfse/{chave}/eventos/{tipo}/{seq} → {eventos:[{arquivoXml}]}
+ *        (arquivoXml = base64 do gzip+base64 — confirmado na produção restrita)
  *   GET  {adn}/danfse/{chave}                 → PDF
  *
  * Classificação: 2xx = sucesso; 4xx = recusa (nada foi registrado); qualquer
@@ -151,6 +152,27 @@ function xmlDoCampo(json: Record<string, unknown> | null, nome: string): string 
   } catch {
     return null;
   }
+}
+
+/**
+ * `arquivoXml` da consulta de eventos: base64 do texto gzip+base64 (visto na
+ * produção restrita). Tolera também gzip+base64 direto e XML cru.
+ */
+function decodificarArquivoXml(arquivo: string): string | null {
+  const tentar = (f: () => string) => {
+    try {
+      const x = f();
+      return x.trimStart().startsWith('<') ? x : null;
+    } catch {
+      return null;
+    }
+  };
+  if (arquivo.trimStart().startsWith('<')) return arquivo;
+  return (
+    tentar(() => gunzipB64(Buffer.from(arquivo, 'base64').toString('utf8').trim())) ??
+    tentar(() => gunzipB64(arquivo)) ??
+    tentar(() => Buffer.from(arquivo, 'base64').toString('utf8'))
+  );
 }
 
 const incerta = (motivo: MotivoIncerteza, httpStatus: number | null = null): Incerta => ({ tipo: 'incerta', motivo, httpStatus });
@@ -288,9 +310,21 @@ export function criarClienteSefin(opcoes: OpcoesClienteSefin): ClienteSefin {
         undefined,
         (r): RespostaConsultaEvento => {
           if (r.status === 404) return { tipo: 'nao_encontrado' };
-          const eventoXml = xmlDoCampo(lerJson(r.corpo), 'eventoXmlGZipB64');
-          if (r.status === 200 && eventoXml !== null) return { tipo: 'encontrado', eventoXml };
-          return incerta(r.status === 200 ? 'resposta_invalida' : 'http', r.status);
+          const json = lerJson(r.corpo);
+          if (r.status !== 200 || json === null) return incerta(r.status === 200 ? 'resposta_invalida' : 'http', r.status);
+          // Forma real (smoke 26/11/2026): { eventos: [{ arquivoXml }] }, com
+          // arquivoXml = base64 do texto gzip+base64. Aceita também a forma
+          // antiga eventoXmlGZipB64.
+          const eventos = campo(json, 'eventos');
+          if (Array.isArray(eventos)) {
+            if (eventos.length === 0) return { tipo: 'nao_encontrado' };
+            const primeiro = eventos[0];
+            const arquivo = primeiro && typeof primeiro === 'object' ? texto(primeiro as Record<string, unknown>, 'arquivoXml') : null;
+            const eventoXml = arquivo === null ? null : decodificarArquivoXml(arquivo);
+            return eventoXml === null ? incerta('resposta_invalida', r.status) : { tipo: 'encontrado', eventoXml };
+          }
+          const eventoXml = xmlDoCampo(json, 'eventoXmlGZipB64');
+          return eventoXml === null ? incerta('resposta_invalida', r.status) : { tipo: 'encontrado', eventoXml };
         },
       ),
 

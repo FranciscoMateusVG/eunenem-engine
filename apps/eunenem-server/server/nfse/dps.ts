@@ -262,6 +262,7 @@ export function montarDpsXml(input: DpsInput): { readonly xml: string; readonly 
     nDPS: input.nDPS,
   });
   const { prestador, servico, valores } = input;
+  const rtc = input.leiaute === 'rtc-2026-11';
 
   const prest = el(
     'prest',
@@ -280,7 +281,12 @@ export function montarDpsXml(input: DpsInput): { readonly xml: string; readonly 
     el('locPrest', txt('cLocPrestacao', servico.cLocPrestacao)) +
       el(
         'cServ',
-        txt('cTribNac', servico.cTribNac) + opcional('cTribMun', servico.cTribMun ?? null) + txt('xDescServ', servico.xDescServ) + opcional('cNBS', servico.cNBS),
+        txt('cTribNac', servico.cTribNac) +
+          opcional('cTribMun', servico.cTribMun ?? null) +
+          // RTC (produção restrita 20261124): cNBS antes de xDescServ.
+          (rtc
+            ? opcional('cNBS', servico.cNBS) + txt('xDescServ', servico.xDescServ)
+            : txt('xDescServ', servico.xDescServ) + opcional('cNBS', servico.cNBS)),
       ),
   );
 
@@ -296,7 +302,6 @@ export function montarDpsXml(input: DpsInput): { readonly xml: string; readonly 
       ),
   );
 
-  const rtc = input.leiaute === 'rtc-2026-11';
   // Classificação IBS/CBS fixa (contador): finNFSe=0, indFinal=1,
   // cIndOp=100301, indDest=0, CST=000, cClassTrib=000001.
   const ibscbs = !input.ibscbs

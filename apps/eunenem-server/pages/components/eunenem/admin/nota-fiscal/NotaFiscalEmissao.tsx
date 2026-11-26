@@ -42,6 +42,8 @@ const TEXTO_BLOQUEIO: Record<string, string> = {
   producao_nao_liberada:
     "Ambiente de produção configurado, mas a emissão em produção não foi liberada (NFSE_EMISSAO_PRODUCAO).",
   sem_notas: "Não há nota a emitir neste mês.",
+  cnbs_obrigatorio:
+    "No leiaute da Reforma (IBS/CBS) a Receita exige o código NBS do serviço. Defina NFSE_CNBS (9 dígitos), com o contador.",
   serie_divergente:
     "NFSE_SERIE mudou depois que o mês foi emitido. As notas pendentes usam a série já reservada; volte a série configurada para a original antes de reenviar.",
   competencia_divergente:

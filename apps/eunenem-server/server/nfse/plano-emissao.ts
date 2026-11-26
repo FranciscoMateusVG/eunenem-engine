@@ -68,6 +68,7 @@ export type BloqueioEmissao =
   | 'producao_nao_liberada'
   | 'competencia_divergente'
   | 'serie_divergente'
+  | 'cnbs_obrigatorio'
   | 'sem_notas';
 
 export type EstrategiaAgrupamento = (previa: PreviaMensal) => readonly NotaPlanejada[];
@@ -186,6 +187,9 @@ export function montarPlanoEmissao(input: {
   // smoke 26/11/2026). Sem endereço a nota seria recusada com certeza: vira
   // pendência pulada (aparece na confirmação e em "cadastros incompletos").
   const exigeEndereco = config.leiauteDps.valor === 'rtc-2026-11';
+  // Leiaute RTC com IBS/CBS: a NBS é obrigatória (E0322); sem NFSE_CNBS a
+  // recusa é certa, então bloqueia antes de enviar.
+  if (exigeEndereco && config.cNBS.valor === null) bloqueios.add('cnbs_obrigatorio');
   const agrupadas = agrupar(previa);
   const semEndereco = exigeEndereco ? agrupadas.filter((n) => !n.endereco) : [];
   const recalculadas = exigeEndereco ? agrupadas.filter((n) => n.endereco) : agrupadas;

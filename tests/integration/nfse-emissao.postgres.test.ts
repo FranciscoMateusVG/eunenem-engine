@@ -746,7 +746,7 @@ describe('leiaute RTC (produção restrita): endereço obrigatório', () => {
       endereco_uf = 'MG', endereco_codigo_municipio_ibge = '3106200' WHERE cpf_titular = ${CPF_A}`.execute(
       testDb.db,
     );
-    const rtc = caller({ env: env({ NFSE_LEIAUTE_DPS: 'rtc-2026-11' }) });
+    const rtc = caller({ env: env({ NFSE_LEIAUTE_DPS: 'rtc-2026-11', NFSE_CNBS: '109059000' }) });
     const plano = await rtc.planoEmissao({ mes: MES });
     expect(plano.notas.map((n) => n.tomadorCpf)).toEqual([CPF_A]);
     expect(plano.puladas).toMatchObject([{ motivo: 'sem_endereco', valorCents: 500 }]);
