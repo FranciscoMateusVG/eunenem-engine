@@ -172,36 +172,28 @@ test('painel compacto e configurações ligadas ao backend', async ({
     }
     await page.getByRole('link', { name: 'Gerenciar acessos', exact: true }).click();
     await expect(page).toHaveURL(new RegExp(`${base}/compartilhar$`));
-    const titulo = 'Lista para excluir';
-    const created = await page.request.post('/api/trpc/campanhas.criar', { data: { titulo } });
-    expect(created.ok()).toBe(true);
-    const {
-      result: {
-        data: { id: idExtra },
-      },
-    } = await created.json();
-    await page.goto(`/painel/${seededData.slug}/c/${idExtra}/configuracoes`);
-    await expect(page.getByRole('heading', { name: 'Excluir Listas' })).toBeVisible();
-    const abrir = page.getByRole('button', { name: 'Excluir esta lista', exact: true });
-    const dialog = page.getByRole('dialog');
-    const excluir = dialog.getByRole('button', { name: 'Excluir lista', exact: true });
-
-    await abrir.click();
-    await expect(dialog).toContainText(titulo);
-    await expect(excluir).toBeDisabled();
-    await dialog.getByRole('button', { name: 'Cancelar', exact: true }).click();
-    await expect(dialog).toHaveCount(0);
-
-    await abrir.click();
-    await dialog.getByRole('checkbox').check();
-    await excluir.click();
-    await expect(page).toHaveURL(/\/campanhas$/);
-    const listas = await db
-      .selectFrom('campanhas')
-      .select('id')
-      .where('id', 'in', [idExtra, seededData.idCampanha])
-      .execute();
-    expect(listas.map((lista) => lista.id)).toEqual([seededData.idCampanha]);
+    await page.goto(`${base}/configuracoes`);
+    await page.getByRole('button', { name: 'Excluir minha conta', exact: true }).click();
+    await expect(page.getByRole('dialog')).toBeVisible();
+    await expect(page.getByRole('link', { name: 'atendimento' })).toHaveAttribute('href', /wa.me/);
+    await expect(page.getByRole('button', { name: 'Desativar minha conta' })).toBeDisabled();
+    await page.getByRole('button', { name: 'Cancelar', exact: true }).click();
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+    const desativadoEm = async () =>
+      (
+        await db
+          .selectFrom('usuarios')
+          .select('desativado_em')
+          .where('id', '=', seededData.session.userId)
+          .executeTakeFirst()
+      )?.desativado_em;
+    expect(await desativadoEm()).toBeNull();
+    await page.getByRole('button', { name: 'Excluir minha conta', exact: true }).click();
+    await page.getByRole('checkbox', { name: /Entendo e quero desativar/ }).check();
+    await page.getByRole('button', { name: 'Desativar minha conta' }).click();
+    await expect(page.getByText('Sua conta foi desativada')).toBeVisible();
+    expect(await desativadoEm()).not.toBeNull();
+    await page.waitForURL((url) => url.pathname === '/');
   } finally {
     await db.destroy();
   }
