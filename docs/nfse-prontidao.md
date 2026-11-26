@@ -1,6 +1,7 @@
 # NFS-e — checklist de emissão (aperture-besta)
 
-Esta entrega é somente prévia. Não transmite, emite ou cancela notas.
+A prévia (aperture-dh1k7) não transmite nada. A emissão real (aperture-wp6j6)
+existe só por clique do admin — ver "Emissão real" abaixo.
 
 - Confirmar com contador a base: comissão da plataforma menos cancelamentos, sem adicional do cartão cobrado do pagador. Reconciliar por tomador e verificar notas já emitidas.
 - Resolver CPF/nome ausentes, inválidos e divergentes. Por decisão do operador (28/10/2026), usar sempre o último recebedor cadastrado da campanha (criada_em DESC, id DESC para empate), independentemente de is_active ou da competência. Mais de um registro gera a nota de rastreio “recebedor mais recente da campanha (houve troca)”, não pendência. A consulta é atual, não reconstrução histórica; alterações in-place antigas não são detectáveis.
@@ -17,3 +18,29 @@ https://www.gov.br/nfse/pt-br/biblioteca/documentacao-tecnica/documentacao-atual
 Pack v1.01-20260209 preservado verbatim em tests/fixtures/nfse-xsd. O harness existente normaliza apenas numa cópia temporária os anchors incorretos do pattern de série para libxml2; não declarar validação verbatim sem essa ressalva. Homologação tem pack diferente20261020; não trocar silenciosamente o de produção.
 
 Configurar NFSE_CTRIB_NAC diferente de100202 bloqueia a DPS com pendência visível: o municipal003 só foi aprovado para esse código nacional.
+
+## Emissão real (aperture-wp6j6)
+
+Fluxo: /admin/pagamentos/nota-fiscal → mês fechado → "Emitir NFS-e" →
+confirmação (ambiente, série, tomadores, total, campos fiscais, caixa
+"conferi") → "Confirmar emissão". Nada roda sozinho: não há job nem cron.
+
+- Uma nota por CPF de tomador (estratégia `agruparPorTomador`); qualquer
+  pendência de tomador bloqueia o mês inteiro (`bloquearCompetenciaComPendencias`).
+  As duas decisões estão isoladas em `server/nfse/plano-emissao.ts`.
+- Idempotência: `nfse_emissoes` tem uma linha por (ambiente, competência, CPF);
+  autorizada/cancelada nunca é reenviada. O nDPS é reservado em transação
+  (`nfse_numeracao`, por ambiente e série) antes do envio; o Id da DPS é o mesmo
+  em todas as tentativas.
+- Sem resposta (timeout, conexão, 5xx) a nota fica "incerta"; a próxima
+  tentativa (ou "Consultar") faz GET /dps/{Id} antes de reenviar.
+- O servidor recalcula o plano no clique e recusa (CONFLICT) se quantidade ou
+  total diferirem do que o admin confirmou.
+- Produção exige NFSE_AMBIENTE=1 E NFSE_EMISSAO_PRODUCAO=liberada.
+- Cancelamento (evento e101101): motivo oficial (1/2/9), justificativa de 15 a
+  255 caracteres e a chave de acesso redigitada. Sem resposta, a nova tentativa
+  consulta o evento antes de reenviar.
+- Endpoints: homologação `https://sefin.producaorestrita.nfse.gov.br/SefinNacional`
+  + `https://adn.producaorestrita.nfse.gov.br`; produção
+  `https://sefin.nfse.gov.br/SefinNacional` + `https://adn.nfse.gov.br`.
+  Corpo JSON com XML gzip+base64 (`dpsXmlGZipB64`, `pedidoRegistroEventoXmlGZipB64`).

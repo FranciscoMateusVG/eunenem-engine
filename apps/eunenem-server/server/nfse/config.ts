@@ -106,8 +106,18 @@ export interface NfseConfig {
   /** pTotTribSN (ME/EPP), TSDec2V2. */
   readonly pTotTribSN: CampoConfig<string | null>;
   readonly certificado: CertificadoNfse | null;
+  /** Série real da DPS (aperture-wp6j6). Nunca a série de prévia 99999. */
+  readonly serie: CampoConfig<string>;
+  /**
+   * Segunda chave da produção: emitir com tpAmb=1 exige também
+   * NFSE_EMISSAO_PRODUCAO=liberada. Homologação não depende dela.
+   */
+  readonly emissaoProducaoLiberada: boolean;
   readonly problemas: readonly ProblemaConfig[];
 }
+
+/** Série própria das DPS reais (docs/nfse-prontidao.md). */
+export const SERIE_DPS_PADRAO = '00001';
 
 /** Código indicado pelo contador: LC 116 item 10.02, desdobro 02. */
 export const CTRIB_NAC_PADRAO = '100202';
@@ -168,6 +178,8 @@ const DescricaoSchema = z
   .min(1)
   .regex(LATIN1)
   .refine((t) => descricaoDoServico(t, ROTULO_COMPETENCIA_MAIS_LONGO).length <= 2000);
+/** TSSerieDPS (0{0,4}\d{1,5}) com 5 dígitos; 99999 é a série da prévia. */
+const SerieSchema = z.string().regex(/^\d{5}$/).refine((v) => v !== '99999' && v !== '00000');
 const Base64Schema = z.string().transform((v) => v.replace(/\s/g, '')).pipe(z.base64().min(1));
 
 export type NfseVariavel = keyof typeof NfseEnvShape;
@@ -196,6 +208,8 @@ export const NfseEnvShape = {
   NFSE_CERT_PATH: z.string().optional(),
   NFSE_CERT_BASE64: z.string().optional(),
   NFSE_CERT_PASSWORD: z.string().optional(),
+  NFSE_SERIE: z.string().optional(),
+  NFSE_EMISSAO_PRODUCAO: z.string().optional(),
 };
 
 export function parseNfseConfig(env: NfseEnv): NfseConfig {
@@ -252,6 +266,8 @@ export function parseNfseConfig(env: NfseEnv): NfseConfig {
   const pTotTrib = campo<PercentuaisTributos | null, PercentuaisTributos>('NFSE_P_TOT_TRIB', PTotTribSchema, { fed: '11.33', est: '0.00', mun: '3.00' });
   const pTotTribSN = campo<string | null, null>('NFSE_P_TOT_TRIB_SN', PTotTribSNSchema, null);
   const descricaoServico = campo('NFSE_DESCRICAO_SERVICO', DescricaoSchema, DESCRICAO_SERVICO_PADRAO);
+  const serie = campo('NFSE_SERIE', SerieSchema, SERIE_DPS_PADRAO);
+  const emissaoProducaoLiberada = ler('NFSE_EMISSAO_PRODUCAO') === 'liberada';
 
   // A senha NÃO passa por trim: espaços nas pontas fazem parte dela.
   const certificado = parseCertificado(ler, env.NFSE_CERT_PASSWORD ?? '', problemas);
@@ -273,6 +289,8 @@ export function parseNfseConfig(env: NfseEnv): NfseConfig {
     pTotTrib,
     pTotTribSN,
     certificado,
+    serie,
+    emissaoProducaoLiberada,
     problemas,
   };
 }

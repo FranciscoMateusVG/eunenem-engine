@@ -1,7 +1,7 @@
 import { execFileSync, spawnSync } from 'node:child_process';
 import { copyFileSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 /**
@@ -72,4 +72,9 @@ export function validateAgainstXsd(xml: string, xsdPath: string): XsdResult {
 /** Valida contra o pack oficial 1.01 (com a normalização documentada acima). */
 export function validateDps(xml: string): XsdResult {
   return validateAgainstXsd(xml, dpsXsdNormalizado());
+}
+
+/** Pedido de registro de evento (cancelamento) contra o mesmo pack 1.01. */
+export function validatePedRegEvento(xml: string): XsdResult {
+  return validateAgainstXsd(xml, join(dirname(dpsXsdNormalizado()), 'pedRegEvento_v1.01.xsd'));
 }

@@ -89,3 +89,62 @@ describe('admin.notaFiscal.previaMensal — validação de entrada (sem banco)',
     );
   });
 });
+
+describe('admin.notaFiscal emissão (aperture-wp6j6) — gate antes de banco e de Sefin', () => {
+  const ID = '00000000-0000-4000-8000-000000000001';
+  const chamadas = (c: ReturnType<typeof appRouter.createCaller>) => [
+    () => c.admin.notaFiscal.planoEmissao({ mes: '2031-05' }),
+    () => c.admin.notaFiscal.emissoes({ mes: '2031-05' }),
+    () =>
+      c.admin.notaFiscal.emitir({
+        mes: '2031-05',
+        confirmacao: { quantidade: 1, totalCents: 100 },
+      }),
+    () => c.admin.notaFiscal.consultar({ id: ID }),
+    () =>
+      c.admin.notaFiscal.cancelar({
+        id: ID,
+        motivo: '1',
+        texto: 'Erro na emissão do valor',
+        confirmacaoChave: '1'.repeat(50),
+      }),
+    () => c.admin.notaFiscal.xml({ id: ID, tipo: 'dps' }),
+    () => c.admin.notaFiscal.danfse({ id: ID }),
+  ];
+
+  it('401 sem sessão em todas as ações', async () => {
+    for (const chamar of chamadas(appRouter.createCaller(buildCtx({ admin: false })))) {
+      await expect(chamar()).rejects.toMatchObject({ code: 'UNAUTHORIZED' });
+    }
+  });
+
+  it('403 fora da allowlist em todas as ações', async () => {
+    const ctx = buildCtx({ admin: true });
+    (ctx.deps as { adminAllowedEmails: Set<string> }).adminAllowedEmails = new Set([
+      'someone-else@example.com',
+    ]);
+    for (const chamar of chamadas(appRouter.createCaller(ctx))) {
+      await expect(chamar()).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    }
+  });
+
+  it('cancelar: justificativa curta e chave malformada são recusadas antes do banco', async () => {
+    const c = appRouter.createCaller(buildCtx({ admin: true }));
+    await expect(
+      c.admin.notaFiscal.cancelar({
+        id: ID,
+        motivo: '1',
+        texto: 'curto',
+        confirmacaoChave: '1'.repeat(50),
+      }),
+    ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    await expect(
+      c.admin.notaFiscal.cancelar({
+        id: ID,
+        motivo: '1',
+        texto: 'Erro na emissão do valor',
+        confirmacaoChave: '123',
+      }),
+    ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+  });
+});

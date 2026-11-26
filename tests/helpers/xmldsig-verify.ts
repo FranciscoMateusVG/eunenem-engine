@@ -50,11 +50,23 @@ function excC14n(xml: string): Buffer {
 }
 
 export function verificarAssinaturaDps(signedXml: string): DsigCheck {
-  // Estrutura TCDPS: <DPS> infDPS, depois Signature, e nada mais.
+  return verificarAssinatura(signedXml, { raiz: 'DPS', inf: 'infDPS' });
+}
+
+/** Mesmo perfil para o pedido de registro de evento (pedRegEvento/infPedReg). */
+export function verificarAssinaturaPedidoEvento(signedXml: string): DsigCheck {
+  return verificarAssinatura(signedXml, { raiz: 'pedRegEvento', inf: 'infPedReg' });
+}
+
+function verificarAssinatura(signedXml: string, tags: { raiz: string; inf: string }): DsigCheck {
+  const { raiz, inf } = tags;
+  // Estrutura: <raiz> inf, depois Signature, e nada mais.
   const dps = one(
     signedXml,
-    /<DPS\b[^>]*>(<infDPS\b[\s\S]*?<\/infDPS>)(<Signature\b[\s\S]*<\/Signature>)<\/DPS>/,
-    'DPS com infDPS seguido de Signature',
+    new RegExp(
+      `<${raiz}\\b[^>]*>(<${inf}\\b[\\s\\S]*?<\\/${inf}>)(<Signature\\b[\\s\\S]*<\\/Signature>)<\\/${raiz}>`,
+    ),
+    `${raiz} com ${inf} seguido de Signature`,
   );
   const infDps = dps[1] as string;
   const signature = dps[2] as string;
@@ -81,13 +93,13 @@ export function verificarAssinaturaDps(signedXml: string): DsigCheck {
     one(signature, /<X509Certificate>([^<]+)<\/X509Certificate>/, 'X509Certificate')[1] as string
   ).replace(/\s/g, '');
 
-  const infId = one(infDps, /^<infDPS Id="([^"]+)"/, 'infDPS@Id')[1] as string;
-  if (uri !== infId) throw new Error(`Reference aponta para #${uri}, infDPS tem Id ${infId}`);
+  const infId = one(infDps, new RegExp(`^<${inf} Id="([^"]+)"`), `${inf}@Id`)[1] as string;
+  if (uri !== infId) throw new Error(`Reference aponta para #${uri}, ${inf} tem Id ${infId}`);
   if (c14n !== EXC_C14N) throw new Error(`c14n inesperada: ${c14n}`);
 
   // O enveloped-signature não remove nada: a Signature não está dentro do infDPS.
   const digestCalc = createHash('sha256')
-    .update(excC14n(standalone(infDps, 'infDPS', NFSE)))
+    .update(excC14n(standalone(infDps, inf, NFSE)))
     .digest('base64');
 
   const certPem = `-----BEGIN CERTIFICATE-----\n${certificadoBase64}\n-----END CERTIFICATE-----\n`;

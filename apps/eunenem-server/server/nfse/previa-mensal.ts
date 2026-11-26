@@ -68,7 +68,7 @@ export function situacaoDoMes(mes: string, now: Date): SituacaoMes {
 //  totTrib por regime (Anexo I: E0710, E0712, E0713)
 // ────────────────────────────────────────────────────────────────────
 
-interface TotTribResolvido {
+export interface TotTribResolvido {
   readonly totTrib: TotTrib;
   /** A DPS seria recusada pelas regras do Sistema Nacional como está. */
   readonly pendente: boolean;
@@ -289,15 +289,30 @@ export type PreviaDps =
 
 const VARIAVEIS_BLOQUEANTES: readonly NfseVariavel[] = ['NFSE_PRESTADOR_CNPJ', 'NFSE_MUNICIPIO_IBGE'];
 
-export function montarPreviaDps(input: {
+/**
+ * DpsInput de UMA nota (tomador × competência). Compartilhado pela prévia e
+ * pela emissão real (aperture-wp6j6): só série, número, verAplic e o instante
+ * mudam entre as duas — os campos fiscais são exatamente os mesmos.
+ */
+export type DpsDaNota =
+  | Exclude<PreviaDps, { status: 'gerada' }>
+  | { readonly status: 'pronta'; readonly dps: DpsInput; readonly totTrib: TotTribResolvido };
+
+export interface NumeracaoDps {
+  readonly serie: string;
+  readonly nDPS: string;
+  readonly verAplic: string;
+}
+
+export function montarDpsDaNota(input: {
   readonly tomador?: { readonly cpf: string; readonly nome: string };
-  readonly ordinal?: number;
   readonly mes: string;
   readonly resultadoCents: number;
   readonly config: NfseConfig;
   readonly now: Date;
-}): PreviaDps {
-  const { mes, resultadoCents, config, now } = input;
+  readonly numeracao: NumeracaoDps;
+}): DpsDaNota {
+  const { mes, resultadoCents, config, now, numeracao } = input;
   if (resultadoCents <= 0) return { status: 'sem_valor' };
 
   const { prestadorCnpj, municipioIbge } = config;
@@ -317,9 +332,9 @@ export function montarPreviaDps(input: {
   const dps: DpsInput = {
     tpAmb: config.ambiente.valor,
     dhEmi: dhEmiSaoPaulo(now),
-    verAplic: VER_APLIC_PREVIA,
-    serie: SERIE_DPS_PREVIA,
-    nDPS: input.ordinal ? `${mes.replace('-', '')}${String(input.ordinal).padStart(8, '0')}` : numeroDpsPrevia(mes),
+    verAplic: numeracao.verAplic,
+    serie: numeracao.serie,
+    nDPS: numeracao.nDPS,
     dCompet: competencia.ultimoDia,
     cLocEmi: municipioIbge,
     prestador: {
@@ -346,14 +361,38 @@ export function montarPreviaDps(input: {
       totTrib: totTrib.totTrib,
     },
   };
+  return { status: 'pronta', dps, totTrib };
+}
+
+export function montarPreviaDps(input: {
+  readonly tomador?: { readonly cpf: string; readonly nome: string };
+  readonly ordinal?: number;
+  readonly mes: string;
+  readonly resultadoCents: number;
+  readonly config: NfseConfig;
+  readonly now: Date;
+}): PreviaDps {
+  const { mes, config } = input;
+  const nota = montarDpsDaNota({
+    ...input,
+    numeracao: {
+      serie: SERIE_DPS_PREVIA,
+      nDPS: input.ordinal ? `${mes.replace('-', '')}${String(input.ordinal).padStart(8, '0')}` : numeroDpsPrevia(mes),
+      verAplic: VER_APLIC_PREVIA,
+    },
+  });
+  if (nota.status !== 'pronta') return nota;
+  const { dps, totTrib } = nota;
+  const resultadoCents = dps.valores.vServCents;
+  const tomador = dps.tomador as { readonly cpf: string; readonly nome: string };
   const { xml, idDps } = montarDpsXml(dps);
   return {
     status: 'gerada',
     idDps,
     valorServico: formatarValorDps(resultadoCents),
     campos: [...camposDaDps(dps, config, totTrib),
-      { grupo:'Tomador',tag:'CPF',rotulo:'CPF do recebedor mais recente',valor:input.tomador.cpf,origem:'derivado',aConfirmar:true,nota:'Último recebedor cadastrado da campanha; decisão do operador para a prévia histórica.' },
-      { grupo:'Tomador',tag:'xNome',rotulo:'Nome do recebedor mais recente',valor:input.tomador.nome,origem:'derivado',aConfirmar:true,nota:null },
+      { grupo:'Tomador',tag:'CPF',rotulo:'CPF do recebedor mais recente',valor:tomador.cpf,origem:'derivado',aConfirmar:true,nota:'Último recebedor cadastrado da campanha; decisão do operador para a prévia histórica.' },
+      { grupo:'Tomador',tag:'xNome',rotulo:'Nome do recebedor mais recente',valor:tomador.nome,origem:'derivado',aConfirmar:true,nota:null },
       { grupo:'Serviço',tag:'cTribMun',rotulo:'Código municipal',valor:'003',origem:'fixo',aConfirmar:false,nota:'Orientação do contador.' },
       { grupo:'IBS/CBS',tag:'IBSCBS',rotulo:'Classificação IBS/CBS',valor:'finNFSe=0; indFinal=1; cIndOp=100301; indDest=0; CST=000; cClassTrib=000001',origem:'fixo',aConfirmar:false,nota:'Alíquotas calculadas pelo Sistema Nacional, não informadas na DPS.' },
     ],

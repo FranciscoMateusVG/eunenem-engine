@@ -178,9 +178,7 @@ test('uj78j: prévia da NFS-e mensal no admin', async ({ browser, baseURL }, tes
           .getByRole('link', { name: 'Nota fiscal (prévia)' });
         await aba.click();
         await expect(page).toHaveURL(/\/admin\/pagamentos\/nota-fiscal/);
-        await expect(
-          page.getByRole('heading', { name: 'Prévia da NFS-e mensal', level: 1 }),
-        ).toBeVisible();
+        await expect(page.getByRole('heading', { name: 'NFS-e mensal', level: 1 })).toBeVisible();
         await expect(page.getByRole('note')).toContainText('Nenhuma nota é emitida');
         await expect(page.getByLabel('Mês de competência')).toHaveValue(m1);
 
@@ -204,10 +202,18 @@ test('uj78j: prévia da NFS-e mensal no admin', async ({ browser, baseURL }, tes
         expect(await page.locator('[data-a-confirmar="true"]').count()).toBeGreaterThan(0);
         await expect(page.locator('tr[data-campo="vServ"]')).toContainText('115.45');
 
-        // ── (4) Não existe ação de envio ───────────────────────────────────
+        // ── (4) Nada é enviado sem clique + confirmação (aperture-wp6j6) ────
+        // A única ação de envio é "Emitir NFS-e", na seção de emissão; abrir a
+        // página não emite nada e a prévia continua sem botão de envio.
+        const emissao = page.getByRole('region', { name: 'Emissão da NFS-e' });
         await expect(
-          page.getByRole('button', { name: /emitir|enviar|transmitir|cancelar nota/i }),
-        ).toHaveCount(0);
+          emissao.getByText('Nenhuma NFS-e emitida para este mês neste ambiente.'),
+        ).toBeVisible();
+        await expect(
+          page.getByRole('button', { name: /emitir|enviar|transmitir|cancelar/i }),
+        ).toHaveCount(1);
+        await expect(emissao.getByRole('button', { name: 'Emitir NFS-e' })).toHaveCount(1);
+        await expect(page.getByTestId('nf-confirmacao')).toHaveCount(0);
 
         await page.screenshot({
           path: testInfo.outputPath(`nota-fiscal-${tag}.png`),
