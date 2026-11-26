@@ -15,6 +15,8 @@ const CONFIG_ENV = {
   NFSE_PRESTADOR_CNPJ: '11222333000181',
   NFSE_MUNICIPIO_IBGE: '3106200',
   NFSE_CERT_BASE64: 'AAAA',
+  // Leiaute de produção nos testes gerais; o RTC tem bloco próprio abaixo.
+  NFSE_LEIAUTE_DPS: 'producao-2026-02',
 };
 const CONFIG = parseNfseConfig(CONFIG_ENV);
 
@@ -283,5 +285,21 @@ describe('série reservada × configurada', () => {
     expect(
       montarPlanoEmissao({ previa: previa(), config: CONFIG, fixadas: [fixada] }).bloqueios,
     ).not.toContain('serie_divergente');
+  });
+});
+
+describe('leiaute RTC: NBS obrigatória (E0322 na produção restrita)', () => {
+  it('sem NFSE_CNBS bloqueia; com NFSE_CNBS libera; leiaute de produção não exige', () => {
+    const rtc = (extra: Record<string, string> = {}) =>
+      parseNfseConfig({ ...CONFIG_ENV, NFSE_LEIAUTE_DPS: 'rtc-2026-11', ...extra });
+    expect(montarPlanoEmissao({ previa: previa(), config: rtc() }).bloqueios).toContain(
+      'cnbs_obrigatorio',
+    );
+    expect(
+      montarPlanoEmissao({ previa: previa(), config: rtc({ NFSE_CNBS: '109059000' }) }).bloqueios,
+    ).toEqual([]);
+    expect(montarPlanoEmissao({ previa: previa(), config: CONFIG }).bloqueios).not.toContain(
+      'cnbs_obrigatorio',
+    );
   });
 });

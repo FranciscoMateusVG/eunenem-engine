@@ -66,6 +66,7 @@ export type BloqueioEmissao =
   | 'producao_nao_liberada'
   | 'competencia_divergente'
   | 'serie_divergente'
+  | 'cnbs_obrigatorio'
   | 'sem_notas';
 
 export type EstrategiaAgrupamento = (previa: PreviaMensal) => readonly NotaPlanejada[];
@@ -180,6 +181,9 @@ export function montarPlanoEmissao(input: {
   }
   if (config.ambiente.valor === '1' && !config.emissaoProducaoLiberada) bloqueios.add('producao_nao_liberada');
 
+  // Leiaute RTC com IBS/CBS: a NBS é obrigatória (E0322, smoke 26/11/2026);
+  // sem NFSE_CNBS a recusa é certa, então bloqueia antes de enviar.
+  if (config.leiauteDps.valor === 'rtc-2026-11' && config.cNBS.valor === null) bloqueios.add('cnbs_obrigatorio');
   const recalculadas = agrupar(previa);
   const fixada = fixadas.length > 0;
   const { divergencias, novas } = compararComFixadas(recalculadas, fixadas);

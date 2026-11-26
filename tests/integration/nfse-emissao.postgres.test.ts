@@ -105,6 +105,8 @@ const ENV_COMPLETO: NfseEnv = {
   NFSE_MUNICIPIO_IBGE: IBGE,
   NFSE_CERT_BASE64: '',
   NFSE_CERT_PASSWORD: '',
+  // Leiaute de produção nos testes gerais (o RTC exige NBS/endereço).
+  NFSE_LEIAUTE_DPS: 'producao-2026-02',
 };
 
 function env(extra: NfseEnv = {}): NfseEnv {

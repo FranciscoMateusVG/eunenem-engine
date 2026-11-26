@@ -246,7 +246,20 @@ export async function iniciarFakeSefin(opts: {
                 ...base,
                 erros: [{ Codigo: 'E404', Descricao: 'evento nao encontrado' }],
               });
-            return json(200, { ...base, eventoXmlGZipB64: gz(nota.eventoXml) });
+            // Forma real (smoke 26/11/2026): lista `eventos`, com `arquivoXml` =
+            // base64 do texto gzip+base64 (base64 dupla).
+            return json(200, {
+              ...base,
+              eventos: [
+                {
+                  chaveAcesso: nota.chave,
+                  tipoEvento: 101101,
+                  numeroPedidoRegistroEvento: 1,
+                  dataHoraRecebimento: new Date().toISOString(),
+                  arquivoXml: Buffer.from(gz(nota.eventoXml), 'utf8').toString('base64'),
+                },
+              ],
+            });
           }
           if (req.method === 'POST') {
             if (!xml)
