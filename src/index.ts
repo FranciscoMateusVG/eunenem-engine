@@ -274,6 +274,7 @@ export { hashClientPII } from './observability/hash-client-pii.js';
 
 export type { Campanha } from './domain/arrecadacao/entities/campanha.js';
 export {
+  campanhaArquivada,
   campanhaComAdministrador,
   campanhaComOpcao,
   campanhaComRecebedorAtivo,

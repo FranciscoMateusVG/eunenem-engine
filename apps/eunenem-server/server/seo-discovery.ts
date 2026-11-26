@@ -59,6 +59,9 @@ async function publicListEntries(db: Database) {
     .where('c.id_plataforma', '=', ID_PLATAFORMA_EUNENEM)
     .where('u.id_plataforma', '=', ID_PLATAFORMA_EUNENEM)
     .where('u.desativado_em', 'is', null)
+    // aperture-bqvb5: archived lists are off the public surface; the bare
+    // owner URL then resolves the oldest NON-archived list, as computed below.
+    .where('c.arquivada_em', 'is', null)
     .where('m.papel', '=', 'owner')
     .orderBy('c.criada_em', 'asc')
     .orderBy('c.id', 'asc')

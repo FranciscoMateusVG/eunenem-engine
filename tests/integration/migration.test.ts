@@ -484,6 +484,16 @@ describe('Migration round-trip', () => {
     //    this sequence must start at the LATEST migration and walk earlier.
     //    Adding a new migration on top REQUIRES prepending its down-step here.
 
+    // 079 campanhas.arquivada_em (aperture-bqvb5).
+    const arquivadaEmCol = async () =>
+      (
+        await sql<{ data_type: string }>`SELECT data_type FROM information_schema.columns
+          WHERE table_name = 'campanhas' AND column_name = 'arquivada_em'`.execute(db)
+      ).rows[0]?.data_type;
+    expect(await arquivadaEmCol()).toBe('timestamp with time zone');
+    expect((await migrator.migrateDown()).error).toBeUndefined();
+    expect(await arquivadaEmCol()).toBeUndefined();
+
     // 078 despesas a cada N meses + correção de um mês (aperture-9nmdo).
     expect((await getColumn(db, 'despesas_manuais', 'intervalo_meses'))?.is_nullable).toBe('NO');
     expect(

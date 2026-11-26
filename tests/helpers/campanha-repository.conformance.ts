@@ -475,6 +475,54 @@ export function describeCampanhaRepositoryConformance(name: string, options: Con
       await expect(repo.updateSlug(randomUUID(), 'qualquer', null, false)).resolves.not.toThrow();
     });
 
+    // ───── arquivadaEm — titular arquiva/desarquiva (aperture-bqvb5) ─────
+
+    it('definirArquivadaEm persists and clears the archive timestamp on every read path', async () => {
+      const campanha = makeCampanha();
+      await options.saveCampanha(repo, campanha);
+      const arquivadaEm = new Date('2026-11-25T10:00:00.000Z');
+      const [admin] = campanha.idsAdministradores;
+
+      await repo.definirArquivadaEm(campanha.id, arquivadaEm);
+
+      expect((await repo.findById(campanha.id))?.arquivadaEm).toEqual(arquivadaEm);
+      expect(
+        (await repo.findByPlataforma(campanha.idPlataforma)).find((c) => c.id === campanha.id)
+          ?.arquivadaEm,
+      ).toEqual(arquivadaEm);
+      if (admin) {
+        expect((await repo.findFirstByAdministrador(admin))?.arquivadaEm).toEqual(arquivadaEm);
+        expect((await repo.findCampanhasByAdministrador(admin))[0]?.arquivadaEm).toEqual(
+          arquivadaEm,
+        );
+      }
+
+      await repo.definirArquivadaEm(campanha.id, null);
+
+      expect((await repo.findById(campanha.id))?.arquivadaEm).toBeNull();
+    });
+
+    it('save of a stale aggregate never un-archives the campanha', async () => {
+      const campanha = makeCampanha();
+      await options.saveCampanha(repo, campanha);
+      const arquivadaEm = new Date('2026-11-25T10:00:00.000Z');
+      await repo.definirArquivadaEm(campanha.id, arquivadaEm);
+
+      await repo.save({ ...campanha, titulo: 'Renomeada' });
+
+      const found = await repo.findById(campanha.id);
+      expect(found?.titulo).toBe('Renomeada');
+      expect(found?.arquivadaEm).toEqual(arquivadaEm);
+    });
+
+    it('definirArquivadaEm emits db.arrecadacao_campanhas.definirArquivadaEm span', async () => {
+      await repo.definirArquivadaEm(randomUUID(), null);
+      const span = findSpan(options.getSpans(), 'db.arrecadacao_campanhas.definirArquivadaEm');
+      expect(span).toBeDefined();
+      expect(span?.attributes['db.system']).toBe(options.expectedDbSystem);
+      expect(span?.attributes['db.operation.name']).toBe('UPDATE');
+    });
+
     // ───── slugAlteradoEm — 1-troca via perfil (aperture) ─────
 
     it('updateSlug persists a non-null alteradoEm when marcarAlteracao=true (perfil editor)', async () => {
@@ -582,6 +630,7 @@ export function makeCampanha(overrides: Partial<Campanha> = {}): Campanha {
     titulo: 'Campanha teste',
     slug: null,
     slugAlteradoEm: null,
+    arquivadaEm: null,
     opcoes: [],
     criadaEm: new Date('2026-05-01T12:00:00.000Z'),
     ...overrides,
@@ -599,6 +648,7 @@ export function makeCampanhaSemRecebedor(overrides: Partial<Campanha> = {}): Cam
     titulo: 'Campanha sem recebedor',
     slug: null,
     slugAlteradoEm: null,
+    arquivadaEm: null,
     opcoes: [],
     criadaEm: new Date('2026-05-01T12:00:00.000Z'),
     ...overrides,

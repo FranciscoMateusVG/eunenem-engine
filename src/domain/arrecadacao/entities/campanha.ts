@@ -64,6 +64,17 @@ export interface Campanha {
   readonly slugAlteradoEm: Date | null;
   readonly opcoes: readonly OpcaoContribuicao[];
   readonly criadaEm: Date;
+  /**
+   * aperture-bqvb5 — quando a titular arquivou a lista (`null` = ativa).
+   * Arquivada, a lista sai da superfície pública (página, compra, convite,
+   * sitemap); painel, resgates e o histórico financeiro seguem intactos.
+   */
+  readonly arquivadaEm: Date | null;
+}
+
+/** True quando a titular arquivou a lista. */
+export function campanhaArquivada(campanha: Campanha): boolean {
+  return campanha.arquivadaEm !== null;
 }
 
 /** True quando a campanha tem um Recebedor ativo projetado. */
@@ -151,19 +162,25 @@ export function campanhaSemRecebedor(campanha: Campanha): Campanha {
 
 /** Monta campanha a partir de metadados e recebedor inicial ativo. */
 export function campanhaComRecebedorInicial(
-  params: Omit<Campanha, 'idRecebedor' | 'dadosRecebedor' | 'slug' | 'slugAlteradoEm'> & {
+  params: Omit<
+    Campanha,
+    'idRecebedor' | 'dadosRecebedor' | 'slug' | 'slugAlteradoEm' | 'arquivadaEm'
+  > & {
     readonly recebedor: Recebedor;
     /** Optional — defaults to null (aperture-aphk8; keeps existing call-sites intact). */
     readonly slug?: string | null;
     /** Optional — defaults to null (keeps existing call-sites intact). */
     readonly slugAlteradoEm?: Date | null;
+    /** Optional — defaults to null (a new list is active). */
+    readonly arquivadaEm?: Date | null;
   },
 ): Campanha {
-  const { recebedor, slug, slugAlteradoEm, ...rest } = params;
+  const { recebedor, slug, slugAlteradoEm, arquivadaEm, ...rest } = params;
   const next: Campanha = {
     ...rest,
     slug: slug ?? null,
     slugAlteradoEm: slugAlteradoEm ?? null,
+    arquivadaEm: arquivadaEm ?? null,
     idRecebedor: recebedor.id,
     dadosRecebedor: recebedor.dadosRecebedor,
   };
@@ -173,18 +190,24 @@ export function campanhaComRecebedorInicial(
 
 /** Monta campanha sem recebedor (lifecycle: pre-bank-info). */
 export function criarCampanhaSemRecebedor(
-  params: Omit<Campanha, 'idRecebedor' | 'dadosRecebedor' | 'slug' | 'slugAlteradoEm'> & {
+  params: Omit<
+    Campanha,
+    'idRecebedor' | 'dadosRecebedor' | 'slug' | 'slugAlteradoEm' | 'arquivadaEm'
+  > & {
     /** Optional — defaults to null (aperture-aphk8; keeps existing call-sites intact). */
     readonly slug?: string | null;
     /** Optional — defaults to null (keeps existing call-sites intact). */
     readonly slugAlteradoEm?: Date | null;
+    /** Optional — defaults to null (a new list is active). */
+    readonly arquivadaEm?: Date | null;
   },
 ): Campanha {
-  const { slug, slugAlteradoEm, ...rest } = params;
+  const { slug, slugAlteradoEm, arquivadaEm, ...rest } = params;
   const next: Campanha = {
     ...rest,
     slug: slug ?? null,
     slugAlteradoEm: slugAlteradoEm ?? null,
+    arquivadaEm: arquivadaEm ?? null,
     idRecebedor: null,
     dadosRecebedor: null,
   };
