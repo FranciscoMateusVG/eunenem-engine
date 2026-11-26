@@ -147,3 +147,36 @@ describe('aperture-t8zj5 — reais→cents parser handles thousand separators', 
     expect(parseValorInput('1.234.567,89')).toBe(123456789);
   });
 });
+
+/**
+ * aperture-bqvb5 — phone numeric keypads (inputMode="decimal") often only
+ * offer "." as the decimal key. A dot followed by ONE or TWO digits can never
+ * be a thousand separator (those groups are always three digits), so it is
+ * read as the decimal point. Three-digit groups keep their thousand meaning.
+ */
+describe('aperture-bqvb5 — decimal point typed on a phone keypad', () => {
+  it.each([
+    ['50.00', 5000],
+    ['50.5', 5050],
+    ['1234.56', 123456],
+    ['10.00', 1000],
+  ])('%s → %d cents', (raw, cents) => {
+    expect(parseValorInput(raw)).toBe(cents);
+    expect(valorUnitarioPresenteInputValido(raw)).toBe(true);
+  });
+
+  it.each([
+    ['50.000', 5000000],
+    ['1.500', 150000],
+  ])('three-digit dot group stays a thousand separator: %s → %d cents', (raw, cents) => {
+    expect(parseValorInput(raw)).toBe(cents);
+  });
+
+  it.each(['1.234.56', '1.234.5', '50.', '.50', '50,00.1', '9.99'])('rejects %s', (raw) => {
+    expect(valorUnitarioPresenteInputValido(raw)).toBe(false);
+  });
+
+  it('an absurdly long dot-decimal input parses to 0, never Infinity', () => {
+    expect(parseValorBRL(`${'9'.repeat(400)}.00`)).toBe(0);
+  });
+});

@@ -21,7 +21,13 @@ import { createTestDatabase, type TestDatabase } from '../helpers/test-db.js';
  *       pago dos pagamentos; por método
  *   C2  borda de fuso: 23:59 SP e 00:00 SP caem em dias diferentes
  *   C3  estorno entra pela data do cancelamento; líquido = bruto − estornos
- *   C4  saída só com transferido_em; aprovado/verificando = pendente, fora da saída
+ *   C4  saída = resgate aceito pelo banco (aperture-9nmdo): enviado_ao_banco, pago e
+ *       manual aprovado com referência; aprovado sem ref/transferindo/falhou/
+ *       verificando = pendente; solicitado/cancelado = nada
+ *   C10 saída = repasse.amount_cents (o valor da tela de resgates), datada por
+ *       quando o banco aceitou; lista "resgates no período" soma == saídas
+ *   C11 admin.repasses.efetuados (filtro de período da tela de resgates) ==
+ *       saídas do caixa no mesmo período
  *   C5  saldo = entradas líquidas − saídas; série == total independente
  *   C6  outra plataforma não entra
  *   C7  leitura pura: nenhuma linha de pagamento/repasse muda
@@ -237,6 +243,7 @@ async function seedRepasse(input: {
   interCodigo?: string | null;
   bankRef?: string | null;
   enviadoAoBancoEm?: Date | null;
+  aprovadoEm?: Date | null;
 }): Promise<string> {
   const id = randomUUID();
   await anyDb()
@@ -247,7 +254,12 @@ async function seedRepasse(input: {
       amount_cents: input.amountCents,
       status: input.status,
       solicitado_em: input.solicitadoEm,
-      aprovado_em: input.status === 'solicitado' ? null : input.solicitadoEm,
+      aprovado_em:
+        input.aprovadoEm !== undefined
+          ? input.aprovadoEm
+          : input.status === 'solicitado'
+            ? null
+            : input.solicitadoEm,
       inter_codigo_solicitacao: input.interCodigo ?? null,
       bank_transfer_ref: input.bankRef ?? null,
       enviado_ao_banco_em: input.enviadoAoBancoEm ?? null,
@@ -404,7 +416,7 @@ describe('Fluxo de caixa — contra Postgres real', () => {
     expect(ambos.entradas.liquidoCents).toBe(0);
   });
 
-  it('C4: só transferido_em é saída; aprovado/transferindo/enviado/falhou e verificando ficam pendentes', async () => {
+  it('C4: saída = aceito pelo banco (enviado_ao_banco, pago, manual com ref); resto pendente', async () => {
     const campanha = await seedCampanha();
     const dia = new Date('2033-08-10T15:00:00Z');
     const mk = async (status: string, extra: Record<string, unknown> = {}, presente = 1_000) => {
@@ -457,20 +469,24 @@ describe('Fluxo de caixa — contra Postgres real', () => {
     void cancelado;
 
     const painel = await load(periodo('2033-08-01', '2033-09-01', 'mes'));
-    expect(painel.saidas.totalCents).toBe(3_000);
-    expect(painel.saidas.repasses).toBe(2);
-    expect(painel.saidas.porMetodo.inter).toEqual({ cents: 1_000, repasses: 1 });
+    // Banco aceitou: pago (Inter), manual aprovado com referência, enviado_ao_banco.
+    expect(painel.saidas.totalCents).toBe(1_000 + 2_000 + 5_000);
+    expect(painel.saidas.repasses).toBe(3);
+    expect(painel.saidas.porMetodo.inter).toEqual({ cents: 6_000, repasses: 2 });
     expect(painel.saidas.porMetodo.manual).toEqual({ cents: 2_000, repasses: 1 });
-    // aprovados ainda não transferidos: aprovado + transferindo + enviado_ao_banco + falhou.
+    expect(painel.saidas.resgates.map((r) => r.idRepasse).sort()).toEqual(
+      [pago, pagoManual, enviado].sort(),
+    );
+    // Ainda não aceitos pelo banco: aprovado sem ref + transferindo + falhou.
     expect(painel.pendentes.aprovadosNaoTransferidos).toEqual({
-      cents: 3_000 + 4_000 + 5_000 + 6_000,
-      repasses: 4,
+      cents: 3_000 + 4_000 + 6_000,
+      repasses: 3,
     });
     expect(painel.pendentes.emVerificacao).toEqual({ cents: 7_000, repasses: 1 });
     // Marcado como transferido sem comprovante: pendente, NUNCA saída.
     expect(painel.pendentes.semComprovante).toEqual({ cents: 1_500, repasses: 1 });
     // Pendente nunca entra no saldo.
-    expect(painel.saldoCents).toBe(painel.entradas.liquidoCents - 3_000);
+    expect(painel.saldoCents).toBe(painel.entradas.liquidoCents - 8_000);
     expect(painel.conciliacao.diferencas.repassesCents).toBe(0);
     // Pendente é foto de agora: não muda com o período escolhido.
     const outro = await load(periodo('2033-01-01', '2033-02-01', 'mes'));
@@ -616,7 +632,7 @@ describe('Fluxo de caixa — contra Postgres real', () => {
     expect(linhas).toContain('contagens,pendentes_em_verificacao_repasses,0,');
     expect(linhas).toContain('contagens,pendentes_sem_comprovante_repasses,0,');
     expect(linhas).toContain('conciliacao,total_pago_dos_pagamentos,10705,"107,05"');
-    expect(linhas).toContain('conciliacao,total_dos_repasses,0,"0,00"');
+    expect(linhas).toContain('conciliacao,total_no_livro_dos_resgates,0,"0,00"');
     expect(linhas).toContain('conciliacao,diferenca_entradas_brutas,0,"0,00"');
     expect(linhas).toContain('conciliacao,diferenca_estornos,0,"0,00"');
     expect(linhas).toContain('conciliacao,diferenca_saidas,0,"0,00"');
@@ -673,5 +689,192 @@ describe('Fluxo de caixa — contra Postgres real', () => {
       admin.admin.caixa.painel({ de: '2033-08-01', ate: '2033-09-01', granularidade: 'dia' }),
     ).resolves.toBeDefined();
     void InvalidCaixaPeriodoError;
+  });
+});
+
+describe('aperture-9nmdo — saídas = resgates aceitos pelo banco', () => {
+  it('C10: valor do resgate (não do livro), datado por quando o banco aceitou; lista soma == saídas', async () => {
+    const campanha = await seedCampanha();
+    const sp = (d: string) => new Date(`${d}T12:00:00-03:00`);
+    // Inter aceito em 05/ago, ainda sem carimbo no livro: saída em 05/ago.
+    const enviado = await seedRepasse({
+      campaignId: campanha,
+      amountCents: 5_000,
+      status: 'enviado_ao_banco',
+      solicitadoEm: sp('2033-07-30'),
+      interCodigo: 'c-env',
+      enviadoAoBancoEm: sp('2033-08-05'),
+    });
+    await seedPagamento({
+      campaignId: campanha,
+      presenteCents: 5_000,
+      taxaCents: 0,
+      criadoEm: sp('2033-07-20'),
+      idRepasse: enviado,
+    });
+    // Pago depois de passar por enviado_ao_banco: data = aceite (06/ago), não o carimbo (20/ago).
+    const pagoViaBanco = await seedRepasse({
+      campaignId: campanha,
+      amountCents: 2_500,
+      status: 'pago',
+      solicitadoEm: sp('2033-07-30'),
+      interCodigo: 'c-pago',
+      enviadoAoBancoEm: sp('2033-08-06'),
+    });
+    await seedPagamento({
+      campaignId: campanha,
+      presenteCents: 2_500,
+      taxaCents: 0,
+      criadoEm: sp('2033-07-20'),
+      idRepasse: pagoViaBanco,
+      transferidoEm: sp('2033-08-20'),
+    });
+    // Pago direto (sem enviado_ao_banco_em): data = carimbo do livro (07/ago).
+    // Valor do repasse 3.000 ≠ livro 2.900: saída usa o repasse; diferença aparece na conciliação.
+    const pagoDireto = await seedRepasse({
+      campaignId: campanha,
+      amountCents: 3_000,
+      status: 'pago',
+      solicitadoEm: sp('2033-07-30'),
+      interCodigo: 'c-dir',
+    });
+    await seedPagamento({
+      campaignId: campanha,
+      presenteCents: 2_900,
+      taxaCents: 0,
+      criadoEm: sp('2033-07-20'),
+      idRepasse: pagoDireto,
+      transferidoEm: sp('2033-08-07'),
+    });
+    // Manual com referência sem carimbo no livro: data = aprovado_em (08/ago).
+    const manual = await seedRepasse({
+      campaignId: campanha,
+      amountCents: 1_000,
+      status: 'aprovado',
+      solicitadoEm: sp('2033-07-30'),
+      bankRef: 'TED-9',
+      aprovadoEm: sp('2033-08-08'),
+    });
+    await seedPagamento({
+      campaignId: campanha,
+      presenteCents: 1_000,
+      taxaCents: 0,
+      criadoEm: sp('2033-07-20'),
+      idRepasse: manual,
+    });
+    // Aceito em julho: fora de agosto.
+    const julho = await seedRepasse({
+      campaignId: campanha,
+      amountCents: 700,
+      status: 'enviado_ao_banco',
+      solicitadoEm: sp('2033-07-01'),
+      interCodigo: 'c-jul',
+      enviadoAoBancoEm: sp('2033-07-31'),
+    });
+
+    const painel = await load(periodo('2033-08-01', '2033-09-01', 'dia'));
+    expect(painel.saidas.totalCents).toBe(5_000 + 2_500 + 3_000 + 1_000);
+    expect(painel.saidas.repasses).toBe(4);
+    const porId = new Map(painel.saidas.resgates.map((r) => [r.idRepasse, r]));
+    expect([...porId.keys()].sort()).toEqual([enviado, pagoViaBanco, pagoDireto, manual].sort());
+    expect(porId.has(julho)).toBe(false);
+    expect(porId.get(enviado)).toMatchObject({
+      amountCents: 5_000,
+      status: 'enviado_ao_banco',
+      metodo: 'inter',
+      efetuadoEm: sp('2033-08-05'),
+    });
+    expect(porId.get(pagoViaBanco)?.efetuadoEm).toEqual(sp('2033-08-06'));
+    expect(porId.get(pagoDireto)).toMatchObject({
+      amountCents: 3_000,
+      efetuadoEm: sp('2033-08-07'),
+    });
+    expect(porId.get(manual)).toMatchObject({
+      metodo: 'manual',
+      bankTransferRef: 'TED-9',
+      efetuadoEm: sp('2033-08-08'),
+    });
+    expect(porId.get(enviado)?.campanhaTitulo).toMatch(/^Campanha /);
+    expect(painel.saidas.resgates.reduce((a, r) => a + r.amountCents, 0)).toBe(
+      painel.saidas.totalCents,
+    );
+    // Série diária no dia do aceite.
+    const dia = (d: string) => painel.serie.find((b) => b.inicio === d)?.saidasCents;
+    expect(dia('2033-08-05')).toBe(5_000);
+    expect(dia('2033-08-06')).toBe(2_500);
+    expect(dia('2033-08-07')).toBe(3_000);
+    expect(dia('2033-08-08')).toBe(1_000);
+    expect(dia('2033-08-20')).toBe(0);
+    expect(painel.conciliacao.diferencas.saidasCents).toBe(0);
+    // Livro dos resgates (5.000 + 2.500 + 2.900 + 1.000) − saídas (11.500) = −100.
+    expect(painel.conciliacao.totalNoLivroDosResgatesCents).toBe(11_400);
+    expect(painel.conciliacao.diferencas.repassesCents).toBe(-100);
+    // Nada aceito vira pendente.
+    expect(painel.pendentes.aprovadosNaoTransferidos.repasses).toBe(0);
+
+    const julhoPainel = await load(periodo('2033-07-01', '2033-08-01', 'mes'));
+    expect(julhoPainel.saidas.resgates.map((r) => r.idRepasse)).toEqual([julho]);
+  });
+
+  it('C11: admin.repasses.efetuados (período da tela de resgates) == saídas do caixa', async () => {
+    const campanha = await seedCampanha();
+    const alheia = await seedCampanha(OTHER_PLATFORM);
+    const sp = (d: string) => new Date(`${d}T12:00:00-03:00`);
+    const a = await seedRepasse({
+      campaignId: campanha,
+      amountCents: 1_234,
+      status: 'pago',
+      solicitadoEm: sp('2033-08-01'),
+      interCodigo: 'x',
+      enviadoAoBancoEm: sp('2033-08-02'),
+    });
+    const b = await seedRepasse({
+      campaignId: campanha,
+      amountCents: 4_321,
+      status: 'enviado_ao_banco',
+      solicitadoEm: sp('2033-08-01'),
+      interCodigo: 'y',
+      enviadoAoBancoEm: sp('2033-08-31'),
+    });
+    await seedRepasse({
+      campaignId: campanha,
+      amountCents: 999,
+      status: 'falhou',
+      solicitadoEm: sp('2033-08-01'),
+    });
+    await seedRepasse({
+      campaignId: alheia,
+      amountCents: 50_000,
+      status: 'pago',
+      solicitadoEm: sp('2033-08-01'),
+      interCodigo: 'z',
+      enviadoAoBancoEm: sp('2033-08-03'),
+    });
+    const auth = adminAuthOverrides();
+    const deps = {
+      db: testDb.db,
+      clock: () => NOW,
+      ...auth.depsOverrides,
+    } as unknown as ServerDeps;
+    const ctx = (headers: Headers): TrpcContext =>
+      ({ deps, headers, resHeaders: new Headers() }) as unknown as TrpcContext;
+    const admin = appRouter.createCaller(ctx(auth.headers)).admin;
+    const entrada = { de: '2033-08-01', ate: '2033-09-01' };
+    const efetuados = await admin.repasses.efetuados(entrada);
+    const caixa = await admin.caixa.painel({ ...entrada, granularidade: 'mes' });
+    expect(efetuados.totalCents).toBe(1_234 + 4_321);
+    expect(efetuados.totalCents).toBe(caixa.saidas.totalCents);
+    expect(efetuados.resgates.map((r) => r.idRepasse)).toEqual(
+      caixa.saidas.resgates.map((r) => r.idRepasse),
+    );
+    expect(efetuados.resgates.map((r) => r.idRepasse).sort()).toEqual([a, b].sort());
+    await expect(
+      appRouter.createCaller(ctx(new Headers())).admin.repasses.efetuados(entrada),
+    ).rejects.toMatchObject({ code: 'UNAUTHORIZED' });
+    await expect(
+      admin.repasses.efetuados({ de: '2033-09-01', ate: '2033-08-01' }),
+    ).rejects.toMatchObject({
+      code: 'BAD_REQUEST',
+    });
   });
 });

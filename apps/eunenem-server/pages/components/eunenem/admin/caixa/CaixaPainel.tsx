@@ -3,6 +3,7 @@ import { formatBRL } from "@/lib/formatBRL";
 import { formatLocalDate } from "@/lib/receitaPeriodo";
 import type { inferRouterOutputs } from "@trpc/server";
 import type { AppRouter } from "../../../../../server/trpc/router.js";
+import { ResgatesEfetuadosTabela } from "../ResgatesEfetuados";
 
 /**
  * Painel do Fluxo de caixa (aperture-zoxel). Só apresenta o read model
@@ -80,12 +81,12 @@ export function CaixaPainel({
           <Cartao
             titulo="Saiu"
             valor={formatBRL(saidas.totalCents)}
-            nota={`${saidas.repasses} repasse(s) já transferido(s)`}
+            nota={`${saidas.repasses} resgate(s) aceito(s) pelo banco`}
           />
           <Cartao
             titulo="Saldo do período"
             valor={formatBRL(data.saldoCents)}
-            nota="Entrou − saiu. Repasses ainda não transferidos não entram."
+            nota="Entrou − saiu. Resgates ainda não aceitos pelo banco não entram."
             tom="forte"
           />
           <Cartao
@@ -157,8 +158,13 @@ export function CaixaPainel({
 
       <section aria-labelledby="caixa-saidas" className="space-y-3">
         <h2 id="caixa-saidas" className="text-[16px] font-semibold text-ink">
-          Saídas: repasses já transferidos
+          Saídas: resgates aceitos pelo banco
         </h2>
+        <p className="text-[12px] text-ink-mute">
+          Conta como saída o resgate que o banco aceitou: enviado ao banco, pago, ou manual
+          aprovado com referência bancária. Data = quando o banco aceitou. Valores iguais aos da
+          tela de resgates.
+        </p>
         <div className="grid gap-3 sm:grid-cols-2">
           <Cartao
             titulo="Pelo Inter (automático)"
@@ -175,7 +181,7 @@ export function CaixaPainel({
           <Cartao
             titulo="Aprovados, ainda não transferidos"
             valor={formatBRL(pendentes.aprovadosNaoTransferidos.cents)}
-            nota={`${pendentes.aprovadosNaoTransferidos.repasses} repasse(s) aprovado(s) cujo dinheiro ainda não saiu (em envio, enviado ao banco ou com falha)`}
+            nota={`${pendentes.aprovadosNaoTransferidos.repasses} repasse(s) aprovado(s) que o banco ainda não aceitou (em envio, com falha ou manual sem referência)`}
           />
           <Cartao
             titulo="Em verificação"
@@ -188,6 +194,21 @@ export function CaixaPainel({
             nota={`${pendentes.semComprovante.repasses} repasse(s) aprovado(s) e marcado(s) como transferido(s), mas sem envio pelo banco nem referência bancária. Não contam como saída.`}
           />
         </div>
+      </section>
+
+      <section aria-labelledby="caixa-resgates" className="space-y-3">
+        <div className="flex flex-wrap items-baseline justify-between gap-2">
+          <h2 id="caixa-resgates" className="text-[16px] font-semibold text-ink">
+            Resgates no período
+          </h2>
+          <a
+            href={`/admin/repasses?${new URLSearchParams({ de: data.periodo.de, ate: data.periodo.ate }).toString()}`}
+            className="font-mono text-[12px] text-plum hover:underline"
+          >
+            ver na tela de resgates →
+          </a>
+        </div>
+        <ResgatesEfetuadosTabela resgates={saidas.resgates} totalCents={saidas.totalCents} />
       </section>
 
       <section aria-labelledby="caixa-serie" className="space-y-3">
@@ -241,8 +262,9 @@ export function CaixaPainel({
           <p className="text-[13px] text-ink-soft" data-testid="caixa-conciliado">
             Fecha ao centavo: o total das entradas é igual ao valor pago nos{" "}
             {entradas.pagamentos} pagamento(s) ({formatBRL(conciliacao.totalPagoDosPagamentosCents)}
-            ), as saídas são iguais aos repasses ({formatBRL(conciliacao.totalDosRepassesCents)}) e
-            a soma da tabela é igual ao total.
+            ), as saídas são iguais ao que o livro registra para esses resgates (
+            {formatBRL(conciliacao.totalNoLivroDosResgatesCents)}) e a soma da tabela é igual ao
+            total.
           </p>
         )}
       </section>

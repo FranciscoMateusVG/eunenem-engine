@@ -1,7 +1,7 @@
 // aperture-zoxel — CSV do Fluxo de caixa. Função pura sobre o mesmo read
 // model da tela: o arquivo nunca discorda do que está na página.
 
-import { addDays } from "./receitaPeriodo.js";
+import { addDays, localDateInSaoPaulo } from "./receitaPeriodo.js";
 
 /** Formato mínimo que o CSV precisa do painel (o painel completo satisfaz). */
 export interface CaixaCsvEntrada {
@@ -28,6 +28,12 @@ export interface CaixaCsvPainel {
     readonly totalCents: number;
     readonly repasses: number;
     readonly porMetodo: Readonly<Record<string, { readonly cents: number; readonly repasses: number }>>;
+    readonly resgates: ReadonlyArray<{
+      readonly idRepasse: string;
+      readonly amountCents: number;
+      readonly status: string;
+      readonly efetuadoEm: Date | string;
+    }>;
   };
   readonly pendentes: {
     readonly aprovadosNaoTransferidos: Contagem;
@@ -36,7 +42,7 @@ export interface CaixaCsvPainel {
   };
   readonly conciliacao: {
     readonly totalPagoDosPagamentosCents: number;
-    readonly totalDosRepassesCents: number;
+    readonly totalNoLivroDosResgatesCents: number;
     readonly diferencas: {
       readonly entradasBrutasCents: number;
       readonly estornosCents: number;
@@ -108,6 +114,11 @@ export function caixaParaCsv(painel: CaixaCsvPainel): string {
   for (const [metodo, m] of Object.entries(painel.saidas.porMetodo)) {
     out.push(linha("saidas_por_metodo", NOME_METODO[metodo] ?? metodo, m.cents));
   }
+  // aperture-9nmdo: cada resgate da saída, para conferir com /admin/repasses.
+  for (const r of painel.saidas.resgates) {
+    const dia = localDateInSaoPaulo(new Date(r.efetuadoEm));
+    out.push(linha("resgates_no_periodo", `${dia}|${r.idRepasse}|${r.status}`, r.amountCents));
+  }
 
   // Pendentes são fotografia de agora e NÃO entram no saldo.
   out.push(
@@ -145,7 +156,7 @@ export function caixaParaCsv(painel: CaixaCsvPainel): string {
   // Conferência com o livro: diferença ≠ 0 nunca fica escondida.
   const c = painel.conciliacao;
   out.push(linha("conciliacao", "total_pago_dos_pagamentos", c.totalPagoDosPagamentosCents));
-  out.push(linha("conciliacao", "total_dos_repasses", c.totalDosRepassesCents));
+  out.push(linha("conciliacao", "total_no_livro_dos_resgates", c.totalNoLivroDosResgatesCents));
   out.push(linha("conciliacao", "diferenca_entradas_brutas", c.diferencas.entradasBrutasCents));
   out.push(linha("conciliacao", "diferenca_estornos", c.diferencas.estornosCents));
   out.push(linha("conciliacao", "diferenca_saidas", c.diferencas.saidasCents));

@@ -37,6 +37,9 @@ export const E2E_SPEC_SAFETY = [
   // runner (e2e/support/9bpre-ephemeral-run.mjs), so it never seeds a shared
   // or remote database.
   { file: '9bpre-admin-receita.spec.ts', safety: 'non-payment' },
+  // Read-only admin screens (Fluxo de caixa x resgates). Synthetic repasses
+  // only; self-skips unless launched by the 9bpre ephemeral-DB runner.
+  { file: '9nmdo-caixa-resgates.spec.ts', safety: 'non-payment' },
   {
     file: 'a4pqt-inter-pix-expiry.spec.ts',
     safety: 'money-movement',
@@ -50,6 +53,8 @@ export const E2E_SPEC_SAFETY = [
   { file: 'acr3t-switcher-mobile.spec.ts', safety: 'non-payment' },
   // Owner thanks a seeded giver; no-op email transport locally, never pays.
   { file: 'bqvb5-agradecer-presentes.spec.ts', safety: 'non-payment' },
+  // Owner adds a custom gift on a phone viewport; never pays.
+  { file: 'bqvb5-personalizado-mobile.spec.ts', safety: 'non-payment' },
   // Guest page CTA + signup first touch; seeds a campaign, never pays.
   { file: 'i06qu-guest-cta.spec.ts', safety: 'non-payment' },
   // Deliberately safe: only denied anonymous/non-admin approval attempts with

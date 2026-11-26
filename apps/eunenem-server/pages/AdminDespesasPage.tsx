@@ -79,6 +79,7 @@ function DespesasManuaisSecao({ hoje }: { hoje: string }) {
   const alterarValor = trpc.admin.despesas.manuais.alterarValor.useMutation(aoMudar);
   const encerrar = trpc.admin.despesas.manuais.encerrar.useMutation(aoMudar);
   const excluir = trpc.admin.despesas.manuais.excluir.useMutation(aoMudar);
+  const corrigirMes = trpc.admin.despesas.manuais.corrigirMes.useMutation(aoMudar);
 
   return (
     <section data-testid="despesas-manuais" className="flex flex-col gap-4">
@@ -105,11 +106,20 @@ function DespesasManuaisSecao({ hoje }: { hoje: string }) {
         <DespesasManuaisLista
           despesas={lista.data.despesas}
           hoje={hoje}
-          salvando={alterarValor.isPending || encerrar.isPending || excluir.isPending}
-          erro={excluir.error?.message ?? alterarValor.error?.message ?? encerrar.error?.message ?? null}
+          salvando={
+            alterarValor.isPending || encerrar.isPending || excluir.isPending || corrigirMes.isPending
+          }
+          erro={
+            excluir.error?.message ??
+            alterarValor.error?.message ??
+            encerrar.error?.message ??
+            corrigirMes.error?.message ??
+            null
+          }
           onAlterarValor={(input) => alterarValor.mutate(input)}
           onEncerrar={(input) => encerrar.mutate(input)}
           onExcluir={(input) => excluir.mutate(input)}
+          onCorrigirMes={(input) => corrigirMes.mutate(input)}
         />
       ) : (
         <p role="status" className="font-mono text-[12px] text-ink-mute">

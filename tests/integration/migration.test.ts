@@ -504,6 +504,25 @@ describe('Migration round-trip', () => {
     expect(await agradecimentos()).toBeNull();
     expect(await mensagemCol()).toBeUndefined();
 
+    // 078 despesas a cada N meses + correção de um mês (aperture-9nmdo).
+    expect((await getColumn(db, 'despesas_manuais', 'intervalo_meses'))?.is_nullable).toBe('NO');
+    expect(
+      (
+        await sql<{
+          name: string | null;
+        }>`SELECT to_regclass('despesas_manuais_ajustes')::text AS name`.execute(db)
+      ).rows[0]?.name,
+    ).not.toBeNull();
+    expect((await migrator.migrateDown()).error).toBeUndefined();
+    expect(await getColumn(db, 'despesas_manuais', 'intervalo_meses')).toBeUndefined();
+    expect(
+      (
+        await sql<{
+          name: string | null;
+        }>`SELECT to_regclass('despesas_manuais_ajustes')::text AS name`.execute(db)
+      ).rows[0]?.name,
+    ).toBeNull();
+
     // 077 repasse attempt 'reenvio_inter' operation.
     expect((await migrator.migrateDown()).error).toBeUndefined();
 

@@ -2514,6 +2514,18 @@ h4 {
 .lista-foot-actions-end {
   margin-left: auto;
 }
+/* aperture-bqvb5 — on narrow phones (320px) "Cancelar" + "Adicionar à lista"
+   are wider than the modal, and the modal's overflow:hidden clipped the
+   primary button. Let the actions take the full row and wrap. */
+@media (max-width: 480px) {
+  .lista-foot-actions {
+    width: 100%;
+    flex-wrap: wrap;
+  }
+  .lista-foot-actions .btn {
+    flex: 1 1 auto;
+  }
+}
 
 /* =================================================================
  * aperture-17cls — "Adicionar à minha lista" tabbed modal.
