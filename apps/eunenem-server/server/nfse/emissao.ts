@@ -7,7 +7,7 @@ import { assinarDps, assinarPedidoEvento, carregarCertificado, type MaterialCert
 import type { NfseConfig } from './config.js';
 import { dhEmiSaoPaulo, montarDpsXml, montarIdDps, type TipoAmbiente } from './dps.js';
 import { montarPedidoCancelamento, type MotivoCancelamento, TIPO_EVENTO_CANCELAMENTO } from './evento.js';
-import { montarPlanoEmissao, type NotaPlanejada, type PlanoEmissao } from './plano-emissao.js';
+import { montarPlanoEmissao, type NotaFixada, type NotaPlanejada, type PlanoEmissao } from './plano-emissao.js';
 import { carregarPreviaMensal, montarDpsDaNota } from './previa-mensal.js';
 import { type ClienteSefin, type ErroSefin, extrairDadosNfse } from './sefin-cliente.js';
 
@@ -17,11 +17,16 @@ import { type ClienteSefin, type ErroSefin, extrairDadosNfse } from './sefin-cli
  * Só roda por ação explícita do admin (router `notaFiscal.emitir`); não há
  * job nem cron. Garantias:
  *
+ *   - COMPETÊNCIA FIXADA: o 1º clique grava TODAS as notas do mês (CPF, valor,
+ *     campanhas, nDPS) numa transação antes de qualquer envio. Retries enviam
+ *     os valores gravados; recálculo divergente (ex.: recebedor trocado)
+ *     bloqueia em vez de gerar nota nova — ver plano-emissao.ts.
  *   - IDEMPOTÊNCIA: uma linha em `nfse_emissoes` por (ambiente, competência,
  *     CPF). Nota autorizada ou cancelada nunca é reenviada.
- *   - NUMERAÇÃO: o nDPS é reservado numa transação (sequência por ambiente e
- *     série) ANTES do envio, junto com a linha. O Id da DPS fica estável para
- *     todas as tentativas daquela nota.
+ *   - NUMERAÇÃO: nDPS sequencial por ambiente e série, reservado na fixação.
+ *     O Id da DPS fica estável para todas as tentativas daquela nota.
+ *   - CONFIRMAÇÃO: o admin confirma a impressão (sha256) do plano completo;
+ *     ambiente, série, CPFs, valores, campanhas e campos fiscais entram nela.
  *   - TIMEOUT: qualquer tentativa depois da primeira consulta GET /dps/{Id}
  *     antes de reenviar; se a NFS-e já existe, só é registrada.
  *   - CONCORRÊNCIA: cada envio "reivindica" a linha (status → enviando) com
@@ -176,51 +181,85 @@ export async function xmlDaEmissao(
 }
 
 /**
- * Reserva o próximo nDPS e cria a linha, na mesma transação. Se outro clique
- * criou a linha antes (unicidade por CPF), desfaz — o número não é consumido.
+ * FIXA a competência: grava todas as notas do plano (valor + campanhas) e
+ * reserva os nDPS em sequência, numa transação, ANTES do primeiro envio. Se
+ * outro clique fixou antes (unicidade por CPF), desfaz tudo — nenhum número é
+ * consumido — e devolve false.
  */
-async function reservarNota(
+async function fixarCompetencia(
   db: Database,
-  input: { readonly ambiente: TipoAmbiente; readonly serie: string; readonly mes: string; readonly nota: NotaPlanejada; readonly idDps: (nDps: string) => string; readonly autorId: string; readonly now: Date },
-): Promise<void> {
-  await db
-    .transaction()
-    .execute(async (trx) => {
-      const { proximo } = await trx
-        .insertInto('nfse_numeracao')
-        .values({ ambiente: input.ambiente, serie: input.serie, proximo: 2 })
-        .onConflict((oc) => oc.columns(['ambiente', 'serie']).doUpdateSet({ proximo: sql`nfse_numeracao.proximo + 1` }))
-        .returning('proximo')
-        .executeTakeFirstOrThrow();
-      const nDps = String(BigInt(proximo) - 1n);
-      const inserida = await trx
-        .insertInto('nfse_emissoes')
-        .values({
-          id: randomUUID(),
-          ambiente: input.ambiente,
-          competencia: input.mes,
-          tomador_cpf: input.nota.tomadorCpf,
-          tomador_nome: input.nota.tomadorNome,
-          valor_cents: input.nota.valorCents,
-          serie: input.serie,
-          n_dps: nDps,
-          id_dps: input.idDps(nDps),
-          status: 'pendente',
-          solicitada_por: input.autorId,
-          criada_em: input.now,
-          atualizada_em: input.now,
-        })
-        .onConflict((oc) => oc.columns(['ambiente', 'competencia', 'tomador_cpf']).doNothing())
-        .returning('id')
-        .executeTakeFirst();
-      if (!inserida) throw new LinhaJaExiste();
-    })
-    .catch((e: unknown) => {
-      if (!(e instanceof LinhaJaExiste)) throw e;
+  input: {
+    readonly ambiente: TipoAmbiente;
+    readonly serie: string;
+    readonly mes: string;
+    readonly notas: readonly NotaPlanejada[];
+    readonly idDps: (nDps: string) => string;
+    readonly autorId: string;
+    readonly now: Date;
+  },
+): Promise<boolean> {
+  try {
+    await db.transaction().execute(async (trx) => {
+      for (const nota of input.notas) {
+        const { proximo } = await trx
+          .insertInto('nfse_numeracao')
+          .values({ ambiente: input.ambiente, serie: input.serie, proximo: 2 })
+          .onConflict((oc) => oc.columns(['ambiente', 'serie']).doUpdateSet({ proximo: sql`nfse_numeracao.proximo + 1` }))
+          .returning('proximo')
+          .executeTakeFirstOrThrow();
+        const nDps = String(BigInt(proximo) - 1n);
+        const inserida = await trx
+          .insertInto('nfse_emissoes')
+          .values({
+            id: randomUUID(),
+            ambiente: input.ambiente,
+            competencia: input.mes,
+            tomador_cpf: nota.tomadorCpf,
+            tomador_nome: nota.tomadorNome,
+            valor_cents: nota.valorCents,
+            campanhas: [...nota.campanhas],
+            serie: input.serie,
+            n_dps: nDps,
+            id_dps: input.idDps(nDps),
+            status: 'pendente',
+            solicitada_por: input.autorId,
+            criada_em: input.now,
+            atualizada_em: input.now,
+          })
+          .onConflict((oc) => oc.columns(['ambiente', 'competencia', 'tomador_cpf']).doNothing())
+          .returning('id')
+          .executeTakeFirst();
+        if (!inserida) throw new CompetenciaJaFixada();
+      }
     });
+    return true;
+  } catch (e: unknown) {
+    if (e instanceof CompetenciaJaFixada) return false;
+    throw e;
+  }
 }
 
-class LinhaJaExiste extends Error {}
+class CompetenciaJaFixada extends Error {}
+
+function linhasDaCompetencia(db: Database, ambiente: TipoAmbiente, mes: string) {
+  return db
+    .selectFrom('nfse_emissoes')
+    .selectAll()
+    .where('ambiente', '=', ambiente)
+    .where('competencia', '=', mes)
+    .orderBy('n_dps')
+    .execute();
+}
+
+function notaDaLinha(l: NonNullable<Linha>): NotaFixada {
+  return {
+    tomadorCpf: l.tomador_cpf,
+    tomadorNome: l.tomador_nome,
+    valorCents: Number(l.valor_cents),
+    campanhas: [...l.campanhas].sort(),
+    status: l.status as StatusEmissao,
+  };
+}
 
 /**
  * Reivindica a linha para UMA tentativa de envio. Devolve o número de
@@ -301,7 +340,8 @@ export async function carregarPlanoEmissao(
   input: { readonly platformId: string; readonly mes: string },
 ): Promise<PlanoEmissao> {
   const previa = await carregarPreviaMensal(deps.db, { platformId: input.platformId, mes: input.mes, now: deps.clock(), config: deps.config });
-  return montarPlanoEmissao({ previa, config: deps.config });
+  const fixadas = (await linhasDaCompetencia(deps.db, deps.config.ambiente.valor, input.mes)).map(notaDaLinha);
+  return montarPlanoEmissao({ previa, config: deps.config, fixadas });
 }
 
 export type ResultadoNota = { readonly tomadorCpf: string; readonly resultado: 'ja_emitida' | 'em_andamento' | StatusEmissao };
@@ -312,7 +352,8 @@ export async function emitirCompetencia(
     readonly platformId: string;
     readonly mes: string;
     readonly autorId: string;
-    readonly confirmacao: { readonly quantidade: number; readonly totalCents: number };
+    /** Impressão do plano que o admin viu e confirmou. */
+    readonly confirmacao: { readonly impressao: string };
   },
 ): Promise<{ readonly plano: PlanoEmissao; readonly resultados: readonly ResultadoNota[] }> {
   return comSpan('nfse.emitirCompetencia', { 'nfse.mes': input.mes }, async () => {
@@ -320,44 +361,35 @@ export async function emitirCompetencia(
     exigirProducaoLiberada(config);
     const plano = await carregarPlanoEmissao(deps, input);
     if (plano.bloqueios.length > 0) throw new EmissaoBloqueadaError(plano.bloqueios);
-    if (plano.quantidade !== input.confirmacao.quantidade || plano.totalCents !== input.confirmacao.totalCents) {
-      throw new PlanoMudouError();
-    }
+    if (plano.impressao !== input.confirmacao.impressao) throw new PlanoMudouError();
     const { material, cliente } = prepararCliente(config, deps.clienteSefin);
     const ambiente = config.ambiente.valor;
     const { prestadorCnpj, municipioIbge } = config;
     if (prestadorCnpj === null || municipioIbge === null) throw new EmissaoBloqueadaError(['config_incompleta']);
 
+    if (!plano.fixada) {
+      const fixou = await fixarCompetencia(db, {
+        ambiente,
+        serie: plano.serie,
+        mes: input.mes,
+        notas: plano.notas,
+        autorId: input.autorId,
+        now: deps.clock(),
+        idDps: (nDps) => montarIdDps({ cLocEmi: municipioIbge, cnpj: prestadorCnpj, serie: plano.serie, nDPS: nDps }),
+      });
+      // Outro clique fixou a competência agora: o plano confirmado não vale mais.
+      if (!fixou) throw new PlanoMudouError();
+    }
+
+    // Envia o que está FIXADO (valores gravados), nunca um recálculo.
     const resultados: ResultadoNota[] = [];
-    for (const nota of plano.notas) {
-      const existente = () =>
-        db
-          .selectFrom('nfse_emissoes')
-          .selectAll()
-          .where('ambiente', '=', ambiente)
-          .where('competencia', '=', input.mes)
-          .where('tomador_cpf', '=', nota.tomadorCpf)
-          .executeTakeFirst();
-      let linha = await existente();
-      if (!linha) {
-        await reservarNota(db, {
-          ambiente,
-          serie: plano.serie,
-          mes: input.mes,
-          nota,
-          autorId: input.autorId,
-          now: deps.clock(),
-          idDps: (nDps) => montarIdDps({ cLocEmi: municipioIbge, cnpj: prestadorCnpj, serie: plano.serie, nDPS: nDps }),
-        });
-        linha = await existente();
-      }
-      if (!linha) throw new Error('nfse_reserva_falhou');
+    for (const linha of await linhasDaCompetencia(db, ambiente, input.mes)) {
       if (linha.status === 'autorizada' || linha.status === 'cancelada') {
-        resultados.push({ tomadorCpf: nota.tomadorCpf, resultado: 'ja_emitida' });
+        resultados.push({ tomadorCpf: linha.tomador_cpf, resultado: 'ja_emitida' });
         continue;
       }
-      const status = await enviarNota(deps, { linha, nota, material, cliente });
-      resultados.push({ tomadorCpf: nota.tomadorCpf, resultado: status });
+      const status = await enviarNota(deps, { linha, material, cliente });
+      resultados.push({ tomadorCpf: linha.tomador_cpf, resultado: status });
     }
     trace.getActiveSpan()?.setAttribute('nfse.notas', resultados.length);
     return { plano, resultados };
@@ -387,10 +419,11 @@ function dpsOuFalha(
 /** Uma tentativa de envio de uma nota já reservada. Nunca lança por resposta do Sefin. */
 async function enviarNota(
   deps: DepsEmissao,
-  input: { readonly linha: NonNullable<Linha>; readonly nota: NotaPlanejada; readonly material: MaterialCertificado; readonly cliente: ClienteSefin },
+  input: { readonly linha: NonNullable<Linha>; readonly material: MaterialCertificado; readonly cliente: ClienteSefin },
 ): Promise<StatusEmissao | 'em_andamento'> {
   const { db, config } = deps;
-  const { linha, nota, material, cliente } = input;
+  const { linha, material, cliente } = input;
+  const nota = notaDaLinha(linha);
   const anteriores = await reivindicar(db, linha.id, deps.clock());
   if (anteriores === null) return 'em_andamento';
 
@@ -400,15 +433,13 @@ async function enviarNota(
     if (recuperada !== 'nao_encontrada') return recuperada;
   }
 
-  // Ainda não existe no Sistema Nacional: monta com os valores atuais do plano.
+  // Ainda não existe no Sistema Nacional: monta com os valores FIXADOS.
   const dps = dpsOuFalha(config, linha.competencia, nota, deps.clock(), { serie: linha.serie, nDPS: String(linha.n_dps) });
   const { xml, idDps } = montarDpsXml(dps);
   if (idDps !== linha.id_dps) throw new Error('nfse_id_dps_mudou');
   const assinado = assinarDps(xml, idDps, material);
   await atualizar(db, linha.id, {
     dps_xml_assinado: assinado,
-    valor_cents: nota.valorCents,
-    tomador_nome: nota.tomadorNome,
     enviada_em: deps.clock(),
     atualizada_em: deps.clock(),
   });

@@ -31,9 +31,22 @@ function plano(overrides: Partial<PlanoEmissao> = {}): PlanoEmissao {
     ambiente: '2',
     serie: '00001',
     notas: [
-      { tomadorCpf: '52998224725', tomadorNome: 'Ana Titular', valorCents: 1234 },
-      { tomadorCpf: '11144477735', tomadorNome: 'Bruno Titular', valorCents: 500 },
+      {
+        tomadorCpf: '52998224725',
+        tomadorNome: 'Ana Titular',
+        valorCents: 1234,
+        campanhas: ['c1'],
+      },
+      {
+        tomadorCpf: '11144477735',
+        tomadorNome: 'Bruno Titular',
+        valorCents: 500,
+        campanhas: ['c2'],
+      },
     ],
+    fixada: false,
+    divergencias: [],
+    impressao: 'a'.repeat(64),
     quantidade: 2,
     totalCents: 1734,
     bloqueios: [],
@@ -136,6 +149,21 @@ describe('ConfirmacaoEmissao', () => {
     expect(html).toContain('nenhuma nota do mês é emitida');
     expect(html).toContain('NFSE_EMISSAO_PRODUCAO');
     expect(html).toMatch(/<input type="checkbox"[^>]*disabled=""/);
+  });
+});
+
+describe('ConfirmacaoEmissao — competência já fixada', () => {
+  it('divergência: explica o bloqueio e lista as diferenças', () => {
+    const html = confirmacao(
+      plano({
+        fixada: true,
+        bloqueios: ['competencia_divergente'],
+        divergencias: ['Recalculada e não fixada: CPF 39053344705, 1234 centavos, campanhas c1'],
+      }),
+    );
+    expect(html).toContain('Este mês já teve emissão');
+    expect(html).toContain('Nada novo é emitido');
+    expect(html).toContain('CPF 39053344705');
   });
 });
 

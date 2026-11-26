@@ -372,6 +372,7 @@ export interface NfseEmissoes {
   ambiente: string;
   atualizada_em: Timestamp;
   autorizada_em: Timestamp | null;
+  campanhas: string[];
   cancelada_em: Timestamp | null;
   cancelada_por: string | null;
   cancelamento_evento_xml: string | null;

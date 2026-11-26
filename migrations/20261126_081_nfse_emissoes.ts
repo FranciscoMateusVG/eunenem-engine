@@ -8,6 +8,9 @@ import { type Kysely, sql } from 'kysely';
  *     e nunca reaproveitado para outra nota.
  *   - `nfse_emissoes`: uma linha por (ambiente, competência, CPF do tomador).
  *     A unicidade é a idempotência: a mesma nota nunca é emitida duas vezes.
+ *     Todas as notas da competência são gravadas juntas antes do primeiro
+ *     envio (valor + campanhas de origem): é a competência FIXADA, contra a
+ *     qual qualquer recálculo posterior é conferido.
  *     Guarda o XML assinado enviado e o XML da NFS-e devolvido.
  *
  * Só acrescenta tabelas; nada existente muda.
@@ -29,6 +32,7 @@ export async function up(db: Kysely<unknown>): Promise<void> {
       tomador_cpf text NOT NULL CHECK (tomador_cpf ~ '^[0-9]{11}$'),
       tomador_nome text NOT NULL,
       valor_cents bigint NOT NULL CHECK (valor_cents > 0),
+      campanhas uuid[] NOT NULL CHECK (cardinality(campanhas) > 0),
       serie text NOT NULL,
       n_dps bigint NOT NULL,
       id_dps text NOT NULL,

@@ -98,7 +98,7 @@ describe('admin.notaFiscal emissão (aperture-wp6j6) — gate antes de banco e d
     () =>
       c.admin.notaFiscal.emitir({
         mes: '2031-05',
-        confirmacao: { quantidade: 1, totalCents: 100 },
+        confirmacao: { impressao: 'a'.repeat(64) },
       }),
     () => c.admin.notaFiscal.consultar({ id: ID }),
     () =>

@@ -40,6 +40,8 @@ const TEXTO_BLOQUEIO: Record<string, string> = {
   producao_nao_liberada:
     "Ambiente de produção configurado, mas a emissão em produção não foi liberada (NFSE_EMISSAO_PRODUCAO).",
   sem_notas: "Não há nota a emitir neste mês.",
+  competencia_divergente:
+    "O mês já foi emitido e o cálculo de hoje é diferente do que foi gravado (ex.: recebedor trocado ou valor mudou). Nada novo é emitido: reconcilie com o contador antes.",
 };
 
 const TEXTO_STATUS: Record<Emissao["status"], string> = {
@@ -116,6 +118,13 @@ export function ConfirmacaoEmissao({
         </div>
       </dl>
 
+      {plano.fixada ? (
+        <p className="text-[13px] text-ink-soft">
+          Este mês já teve emissão. Só as notas gravadas que ainda não foram autorizadas são reenviadas, com os
+          valores gravados.
+        </p>
+      ) : null}
+
       {bloqueada ? (
         <div role="alert" className="rounded-md border border-red-200 bg-red-50 p-4 text-[13px] text-red-800">
           <p className="font-semibold">A emissão está bloqueada:</p>
@@ -126,6 +135,13 @@ export function ConfirmacaoEmissao({
               </li>
             ))}
           </ul>
+          {plano.divergencias.length > 0 ? (
+            <ul className="mt-2 list-disc pl-5 font-mono text-[12px]" data-testid="nf-divergencias">
+              {plano.divergencias.map((d) => (
+                <li key={d}>{d}</li>
+              ))}
+            </ul>
+          ) : null}
         </div>
       ) : null}
 
@@ -513,7 +529,7 @@ export function NotaFiscalEmissao({ mes, mesFechado }: { mes: string; mesFechado
           enviando={emitir.isPending}
           onVoltar={() => setConfirmando(false)}
           onConfirmar={() =>
-            emitir.mutate({ mes, confirmacao: { quantidade: plano.data.quantidade, totalCents: plano.data.totalCents } })
+            emitir.mutate({ mes, confirmacao: { impressao: plano.data.impressao } })
           }
         />
       ) : null}

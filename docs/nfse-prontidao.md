@@ -34,8 +34,16 @@ confirmação (ambiente, série, tomadores, total, campos fiscais, caixa
   em todas as tentativas.
 - Sem resposta (timeout, conexão, 5xx) a nota fica "incerta"; a próxima
   tentativa (ou "Consultar") faz GET /dps/{Id} antes de reenviar.
-- O servidor recalcula o plano no clique e recusa (CONFLICT) se quantidade ou
-  total diferirem do que o admin confirmou.
+- Competência FIXADA: o primeiro clique grava todas as notas do mês (CPF, valor,
+  campanhas de origem, nDPS) antes de qualquer envio. Retries enviam só os
+  valores gravados. Se o recálculo divergir do fixado (ex.: recebedor trocado
+  depois da emissão), a emissão é bloqueada (`competencia_divergente`) em vez
+  de gerar outra nota para a mesma receita; a nota incerta continua
+  recuperável por "Consultar". Reconciliação dessa divergência é manual
+  (contador), fora deste fluxo.
+- O admin confirma a impressão (sha256) do plano completo: ambiente, série,
+  prestador, CPFs, valores, campanhas e campos fiscais. O servidor recalcula
+  no clique e recusa (CONFLICT) se for outra.
 - Produção exige NFSE_AMBIENTE=1 E NFSE_EMISSAO_PRODUCAO=liberada.
 - Cancelamento (evento e101101): motivo oficial (1/2/9), justificativa de 15 a
   255 caracteres e a chave de acesso redigitada. Sem resposta, a nova tentativa

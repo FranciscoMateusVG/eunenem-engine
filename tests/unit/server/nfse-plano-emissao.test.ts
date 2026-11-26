@@ -37,7 +37,14 @@ function previa(overrides: Partial<PreviaMensal> = {}): PreviaMensal {
     avisos: [],
     pendencias: [],
     notas: [
-      { cpf: '52998224725', nome: 'Ana', resultadoCents: 100, houveTroca: false, dps: assinada },
+      {
+        cpf: '52998224725',
+        nome: 'Ana',
+        resultadoCents: 100,
+        houveTroca: false,
+        campanhas: ['c1'],
+        dps: assinada,
+      },
       {
         cpf: '11144477735',
         nome: 'Bruno',
@@ -53,7 +60,9 @@ function previa(overrides: Partial<PreviaMensal> = {}): PreviaMensal {
 describe('montarPlanoEmissao', () => {
   it('por tomador: só notas com DPS gerada (valor positivo)', () => {
     const p = montarPlanoEmissao({ previa: previa(), config: CONFIG });
-    expect(p.notas).toEqual([{ tomadorCpf: '52998224725', tomadorNome: 'Ana', valorCents: 100 }]);
+    expect(p.notas).toEqual([
+      { tomadorCpf: '52998224725', tomadorNome: 'Ana', valorCents: 100, campanhas: ['c1'] },
+    ]);
     expect(p.quantidade).toBe(1);
     expect(p.totalCents).toBe(100);
     expect(p.bloqueios).toEqual([]);
@@ -73,7 +82,12 @@ describe('montarPlanoEmissao', () => {
 
   it('estratégia injetada (ex.: consolidada) troca as notas sem mexer nos bloqueios', () => {
     const consolidada = () => [
-      { tomadorCpf: '00000000000', tomadorNome: 'consolidada', valorCents: 999 },
+      {
+        tomadorCpf: '00000000000',
+        tomadorNome: 'consolidada',
+        valorCents: 999,
+        campanhas: ['c1', 'c2'],
+      },
     ];
     const p = montarPlanoEmissao({ previa: previa(), config: CONFIG, agrupar: consolidada });
     expect(p.notas).toHaveLength(1);
@@ -109,5 +123,67 @@ describe('montarPlanoEmissao', () => {
   it('sem notas positivas: bloqueado (nada a emitir)', () => {
     const p = montarPlanoEmissao({ previa: previa({ notas: [] }), config: CONFIG });
     expect(p.bloqueios).toContain('sem_notas');
+  });
+});
+
+describe('competência fixada e impressão', () => {
+  const fixadaA = {
+    tomadorCpf: '52998224725',
+    tomadorNome: 'Ana',
+    valorCents: 100,
+    campanhas: ['c1'],
+  };
+
+  it('igual ao fixado: sem bloqueio; só reenvia o que não foi autorizado', () => {
+    const p = montarPlanoEmissao({
+      previa: previa(),
+      config: CONFIG,
+      fixadas: [{ ...fixadaA, status: 'autorizada' }],
+    });
+    expect(p.fixada).toBe(true);
+    expect(p.bloqueios).toEqual([]);
+    expect(p.notas).toEqual([]);
+  });
+
+  it('mesma receita sob outro CPF (recebedor trocado): competencia_divergente', () => {
+    const p = montarPlanoEmissao({
+      previa: previa(),
+      config: CONFIG,
+      fixadas: [{ ...fixadaA, tomadorCpf: '39053344705', status: 'autorizada' }],
+    });
+    expect(p.bloqueios).toContain('competencia_divergente');
+    expect(p.divergencias).toHaveLength(2);
+  });
+
+  it('a impressão muda com ambiente, série, valores, campanhas e campos fiscais', () => {
+    const base = montarPlanoEmissao({ previa: previa(), config: CONFIG }).impressao;
+    expect(base).toMatch(/^[0-9a-f]{64}$/);
+    expect(montarPlanoEmissao({ previa: previa(), config: CONFIG }).impressao).toBe(base);
+    const variantes = [
+      montarPlanoEmissao({
+        previa: previa(),
+        config: parseNfseConfig({ ...CONFIG_ENV, NFSE_AMBIENTE: '1' }),
+      }),
+      montarPlanoEmissao({
+        previa: previa(),
+        config: parseNfseConfig({ ...CONFIG_ENV, NFSE_SERIE: '00002' }),
+      }),
+      montarPlanoEmissao({
+        previa: previa(),
+        config: CONFIG,
+        agrupar: () => [{ ...fixadaA, valorCents: 101 }],
+      }),
+      montarPlanoEmissao({
+        previa: previa(),
+        config: CONFIG,
+        agrupar: () => [{ ...fixadaA, campanhas: ['c9'] }],
+      }),
+      montarPlanoEmissao({
+        previa: previa(),
+        config: CONFIG,
+        agrupar: () => [{ ...fixadaA, tomadorCpf: '39053344705' }],
+      }),
+    ];
+    for (const v of variantes) expect(v.impressao).not.toBe(base);
   });
 });

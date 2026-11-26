@@ -4776,7 +4776,12 @@ const NotaFiscalPlanoSchema = z.object({
   rotulo: z.string(),
   ambiente: z.enum(["1", "2"]),
   serie: z.string(),
-  notas: z.array(z.object({ tomadorCpf: z.string(), tomadorNome: z.string(), valorCents: z.number().int() })),
+  notas: z.array(
+    z.object({ tomadorCpf: z.string(), tomadorNome: z.string(), valorCents: z.number().int(), campanhas: z.array(z.string()) }),
+  ),
+  fixada: z.boolean(),
+  divergencias: z.array(z.string()),
+  impressao: z.string(),
   quantidade: z.number().int().nonnegative(),
   totalCents: z.number().int(),
   bloqueios: z.array(z.string()),
@@ -4924,7 +4929,7 @@ const notaFiscalRouter = t.router({
     .query(async ({ ctx, input }) => {
       try {
         const p = await carregarPlanoEmissao(depsEmissao(ctx.deps), { platformId: ID_PLATAFORMA_EUNENEM, mes: input.mes });
-        return { ...p, notas: [...p.notas], bloqueios: [...p.bloqueios], avisos: [...p.avisos], camposFiscais: [...p.camposFiscais] };
+        return { ...p, notas: p.notas.map((n) => ({ ...n, campanhas: [...n.campanhas] })), divergencias: [...p.divergencias], bloqueios: [...p.bloqueios], avisos: [...p.avisos], camposFiscais: [...p.camposFiscais] };
       } catch (error: unknown) {
         return erroEmissao(error);
       }
@@ -4942,7 +4947,8 @@ const notaFiscalRouter = t.router({
     .input(
       z.object({
         mes: MesSchema,
-        confirmacao: z.object({ quantidade: z.number().int().positive(), totalCents: z.number().int().positive() }),
+        /** Impressão (sha256) do plano que o admin viu na confirmação. */
+        confirmacao: z.object({ impressao: z.string().regex(/^[0-9a-f]{64}$/) }),
       }),
     )
     .output(z.object({ resultados: z.array(z.object({ tomadorCpf: z.string(), resultado: z.string() })) }))

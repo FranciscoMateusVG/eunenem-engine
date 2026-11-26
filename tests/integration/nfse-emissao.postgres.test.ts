@@ -38,6 +38,7 @@ const MES = '2033-03';
 const NOW = new Date('2033-04-10T15:00:00.000Z');
 const CPF_A = '52998224725';
 const CPF_B = '11144477735';
+const CPF_C = '39053344705';
 
 let testDb: TestDatabase;
 let seed: ReceitaLedgerSeed & {
@@ -156,8 +157,30 @@ async function seedDoisTomadores() {
   await seed.taxa({ campaignId: b, taxaCents: 500, criadoEm: new Date('2033-03-07T15:00:00Z') });
 }
 
-async function emitir(c = caller(), confirmacao = { quantidade: 2, totalCents: 1734 }) {
-  return c.emitir({ mes: MES, confirmacao });
+/** Emite confirmando o plano que o admin VIU (impressão digital do plano). */
+async function emitir(c = caller(), impressao?: string) {
+  return c.emitir({
+    mes: MES,
+    confirmacao: { impressao: impressao ?? (await c.planoEmissao({ mes: MES })).impressao },
+  });
+}
+
+/** Troca o recebedor da campanha (novo registro mais recente). */
+async function trocarRecebedor(cpfAntigo: string, novoCpf: string, nome: string) {
+  const r = await sql<{
+    campanha_id: string;
+  }>`SELECT campanha_id FROM recebedores WHERE cpf_titular = ${cpfAntigo} LIMIT 1`.execute(
+    testDb.db,
+  );
+  const campanha = r.rows[0]?.campanha_id;
+  if (!campanha) throw new Error('campanha não encontrada');
+  await sql`UPDATE recebedores SET is_active = false WHERE campanha_id = ${campanha}::uuid`.execute(
+    testDb.db,
+  );
+  await sql`INSERT INTO recebedores(id,campanha_id,metodo,nome_titular,cpf_titular,tipo_chave_pix,chave_pix,is_active,criada_em)
+    VALUES(${randomUUID()}::uuid,${campanha}::uuid,'pix',${nome},${novoCpf},'cpf',${novoCpf},true,'2033-04-01T15:00:00Z')`.execute(
+    testDb.db,
+  );
 }
 
 const posts = () => fake.requisicoes.filter((r) => r.method === 'POST' && r.path === '/nfse');
@@ -171,10 +194,12 @@ describe('planoEmissao — o que a confirmação mostra', () => {
     expect(plano.serie).toBe('00001');
     expect(plano.quantidade).toBe(2);
     expect(plano.totalCents).toBe(1734);
-    expect(plano.notas).toEqual([
+    expect(plano.notas).toMatchObject([
       { tomadorCpf: CPF_B, tomadorNome: 'Bruno Titular', valorCents: 500 },
       { tomadorCpf: CPF_A, tomadorNome: 'Ana Titular', valorCents: 1234 },
     ]);
+    for (const n of plano.notas) expect(n.campanhas).toHaveLength(1);
+    expect(plano.impressao).toMatch(/^[0-9a-f]{64}$/);
     const tags = plano.camposFiscais.map((c) => c.tag);
     expect(tags).toEqual(
       expect.arrayContaining([
@@ -202,7 +227,7 @@ describe('planoEmissao — o que a confirmação mostra', () => {
     });
     const plano = await caller().planoEmissao({ mes: MES });
     expect(plano.bloqueios).toContain('pendencias_de_tomador');
-    const e = await erroDe(emitir(caller(), { quantidade: 2, totalCents: 1734 }));
+    const e = await erroDe(emitir(caller()));
     expect(e.code).toBe('PRECONDITION_FAILED');
     expect(e.message).toContain('pendencias_de_tomador');
     expect(fake.requisicoes).toHaveLength(0);
@@ -244,10 +269,34 @@ describe('planoEmissao — o que a confirmação mostra', () => {
 describe('emitir — envio real ao (fake) Sistema Nacional', () => {
   it('confirmação diferente do plano recalculado: nada é enviado', async () => {
     await seedDoisTomadores();
-    const e = await erroDe(emitir(caller(), { quantidade: 2, totalCents: 1733 }));
+    const e = await erroDe(emitir(caller(), 'f'.repeat(64)));
     expect(e.code).toBe('CONFLICT');
     expect(fake.requisicoes).toHaveLength(0);
     expect(await caller().emissoes({ mes: MES })).toEqual([]);
+  });
+
+  it('confirmação vista em homologação não emite em produção (mesma quantidade/total)', async () => {
+    await seedDoisTomadores();
+    const { impressao } = await caller().planoEmissao({ mes: MES });
+    const prod = caller({ env: env({ NFSE_AMBIENTE: '1', NFSE_EMISSAO_PRODUCAO: 'liberada' }) });
+    const e = await erroDe(emitir(prod, impressao));
+    expect(e.code).toBe('CONFLICT');
+    expect(fake.requisicoes).toHaveLength(0);
+  });
+
+  it('redistribuir valores entre tomadores (mesmo total) invalida a confirmação', async () => {
+    await seedDoisTomadores();
+    const { impressao } = await caller().planoEmissao({ mes: MES });
+    // Move 100 de A para B: mesma quantidade (2) e mesmo total (1734).
+    await sql`UPDATE lancamentos_financeiros SET amount_cents = 900
+      WHERE amount_cents = 1000 AND tipo = 'credito_receita_plataforma'`.execute(testDb.db);
+    await sql`UPDATE lancamentos_financeiros SET amount_cents = 600
+      WHERE amount_cents = 500 AND tipo = 'credito_receita_plataforma'`.execute(testDb.db);
+    const novo = await caller().planoEmissao({ mes: MES });
+    expect([novo.quantidade, novo.totalCents]).toEqual([2, 1734]);
+    expect(novo.impressao).not.toBe(impressao);
+    expect((await erroDe(emitir(caller(), impressao))).code).toBe('CONFLICT');
+    expect(fake.requisicoes).toHaveLength(0);
   });
 
   it('emite uma nota por tomador: DPS assinada, XSD válido, numeração 1..N, resultado persistido', async () => {
@@ -295,7 +344,10 @@ describe('emitir — envio real ao (fake) Sistema Nacional', () => {
 
   it('dois cliques simultâneos: cada nota é enviada uma vez só', async () => {
     await seedDoisTomadores();
-    await Promise.all([emitir(), emitir()]);
+    const { impressao } = await caller().planoEmissao({ mes: MES });
+    const r = await Promise.allSettled([emitir(caller(), impressao), emitir(caller(), impressao)]);
+    // Um fixa e envia; o outro encontra a competência já fixada (plano mudou) ou nada a fazer.
+    expect(r.some((x) => x.status === 'fulfilled')).toBe(true);
     expect(posts()).toHaveLength(2);
     const lista = await caller().emissoes({ mes: MES });
     expect(lista.map((e) => e.status)).toEqual(['autorizada', 'autorizada']);
@@ -367,6 +419,64 @@ describe('emitir — envio real ao (fake) Sistema Nacional', () => {
     ]);
     expect(posts().filter((q) => q.xml?.includes('<tpAmb>1</tpAmb>'))).toHaveLength(2);
     expect(await caller().emissoes({ mes: MES })).toHaveLength(2);
+  });
+});
+
+describe('competência fixada na primeira emissão (sem dupla tributação)', () => {
+  it('troca de recebedor DEPOIS de autorizada: bloqueia com divergência, nenhuma nota nova', async () => {
+    await seedDoisTomadores();
+    await emitir();
+    expect(posts()).toHaveLength(2);
+    await trocarRecebedor(CPF_A, CPF_C, 'Carla Nova');
+    const plano = await caller().planoEmissao({ mes: MES });
+    expect(plano.bloqueios).toContain('competencia_divergente');
+    expect(plano.divergencias.join('\n')).toContain(CPF_C);
+    const e = await erroDe(emitir());
+    expect(e.code).toBe('PRECONDITION_FAILED');
+    expect(e.message).toContain('competencia_divergente');
+    expect(posts()).toHaveLength(2);
+    const lista = await caller().emissoes({ mes: MES });
+    expect(lista.map((x) => x.tomadorCpf).sort()).toEqual([CPF_B, CPF_A].sort());
+    expect(lista.reduce((s, x) => s + x.valorCents, 0)).toBe(1734);
+  });
+
+  it('troca de recebedor com nota INCERTA: não emite para o novo CPF; Consultar recupera a original', async () => {
+    await seedDoisTomadores();
+    fake.proximaEmissao = ['autorizar', 'registrar_e_derrubar'];
+    await emitir();
+    const incerta = (await caller().emissoes({ mes: MES })).find((x) => x.status === 'incerta');
+    expect(incerta?.tomadorCpf).toBe(CPF_A);
+    await trocarRecebedor(CPF_A, CPF_C, 'Carla Nova');
+    expect((await erroDe(emitir())).message).toContain('competencia_divergente');
+    expect(posts()).toHaveLength(2);
+    const r = await caller().consultar({ id: incerta?.id ?? '' });
+    expect(r).toMatchObject({ status: 'autorizada', tomadorCpf: CPF_A, valorCents: 1234 });
+    expect(posts()).toHaveLength(2);
+  });
+
+  it('todas as notas da competência são reservadas antes do primeiro envio', async () => {
+    await seedDoisTomadores();
+    fake.proximaEmissao = ['derrubar', 'derrubar'];
+    await emitir();
+    const lista = await caller().emissoes({ mes: MES });
+    expect(lista.map((x) => [x.tomadorCpf, x.nDps, x.valorCents])).toEqual([
+      [CPF_B, '1', 500],
+      [CPF_A, '2', 1234],
+    ]);
+  });
+
+  it('retry reenvia com os valores FIXADOS; o plano de retry só lista o que falta enviar', async () => {
+    await seedDoisTomadores();
+    fake.proximaEmissao = ['autorizar', { rejeitar: { codigo: 'E0312', descricao: 'x' } }];
+    await emitir();
+    const plano = await caller().planoEmissao({ mes: MES });
+    expect(plano.bloqueios).toEqual([]);
+    expect(plano.notas.map((n) => n.tomadorCpf)).toEqual([CPF_A]);
+    await emitir();
+    expect((await caller().emissoes({ mes: MES })).map((x) => x.status)).toEqual([
+      'autorizada',
+      'autorizada',
+    ]);
   });
 });
 

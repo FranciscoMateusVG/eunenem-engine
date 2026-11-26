@@ -458,7 +458,7 @@ export type AvisoPrevia =
 export interface PreviaMensal {
   readonly titularConsultadoEm: Date;
   readonly pendencias: readonly PendenciaTomador[];
-  readonly notas: readonly { cpf: string; nome: string; resultadoCents: number; houveTroca: boolean; dps: PreviaMensal['dps'] }[];
+  readonly notas: readonly { cpf: string; nome: string; resultadoCents: number; houveTroca: boolean; campanhas: readonly string[]; dps: PreviaMensal['dps'] }[];
   readonly mes: string;
   readonly rotulo: string;
   readonly situacao: SituacaoMes;
@@ -553,7 +553,7 @@ async function previaMensal(
   for (const [i, tomador] of titulares.tomadores.entries()) {
     const gerada = montarPreviaDps({ mes, resultadoCents: tomador.resultadoCents, config, now, tomador, ordinal:i+1 });
     const dpsNota = gerada.status === 'gerada' ? { ...gerada, ...assinarPrevia(gerada.xml, gerada.idDps, config) } : gerada;
-    notas.push({ houveTroca:tomador.houveTroca, cpf:tomador.cpf, nome:tomador.nome, resultadoCents:tomador.resultadoCents, dps:dpsNota });
+    notas.push({ houveTroca:tomador.houveTroca, campanhas:[...tomador.campanhas].sort(), cpf:tomador.cpf, nome:tomador.nome, resultadoCents:tomador.resultadoCents, dps:dpsNota });
   }
   if ((notas.length > 0 || titulares.pendencias.length === 0) && notas.every(n => n.resultadoCents <= 0)) avisos.push('resultado_nao_positivo');
   for (const nota of notas) {
