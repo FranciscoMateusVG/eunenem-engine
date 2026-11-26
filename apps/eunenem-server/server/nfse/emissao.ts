@@ -17,10 +17,11 @@ import { type ClienteSefin, type ErroSefin, extrairDadosNfse } from './sefin-cli
  * Só roda por ação explícita do admin (router `notaFiscal.emitir`); não há
  * job nem cron. Garantias:
  *
- *   - COMPETÊNCIA FIXADA: o 1º clique grava TODAS as notas do mês (CPF, valor,
+ *   - NOTAS GRAVADAS: cada clique grava as notas que vai enviar (CPF, valor,
  *     campanhas, nDPS) numa transação antes de qualquer envio. Retries enviam
- *     os valores gravados; recálculo divergente (ex.: recebedor trocado)
- *     bloqueia em vez de gerar nota nova — ver plano-emissao.ts.
+ *     os valores gravados; pendências resolvidas depois entram como notas
+ *     novas; recálculo divergente (ex.: recebedor trocado) bloqueia — ver
+ *     plano-emissao.ts.
  *   - IDEMPOTÊNCIA: uma linha em `nfse_emissoes` por (ambiente, competência,
  *     CPF). Nota autorizada ou cancelada nunca é reenviada.
  *   - NUMERAÇÃO: nDPS sequencial por ambiente e série, reservado na fixação.
@@ -181,18 +182,20 @@ export async function xmlDaEmissao(
 }
 
 /**
- * FIXA a competência: grava todas as notas do plano (valor + campanhas) e
- * reserva os nDPS em sequência, numa transação, ANTES do primeiro envio. Se
- * outro clique fixou antes (unicidade por CPF), desfaz tudo — nenhum número é
- * consumido — e devolve false.
+ * GRAVA as notas novas do plano (valor + campanhas) e reserva os nDPS em
+ * sequência, numa transação, ANTES de qualquer envio. `idsEsperados` são as
+ * notas já gravadas que o plano confirmado considerou: se o conjunto mudou
+ * desde então (outro clique gravou), desfaz tudo — nenhum número é consumido
+ * — e devolve false.
  */
-export async function fixarCompetencia(
+export async function gravarNotas(
   db: Database,
   input: {
     readonly ambiente: TipoAmbiente;
     readonly serie: string;
     readonly mes: string;
     readonly notas: readonly NotaPlanejada[];
+    readonly idsEsperados: readonly string[];
     readonly idDps: (nDps: string) => string;
     readonly autorId: string;
     readonly now: Date;
@@ -200,18 +203,18 @@ export async function fixarCompetencia(
 ): Promise<boolean> {
   try {
     await db.transaction().execute(async (trx) => {
-      // Serializa a fixação por (ambiente, competência) e relê DENTRO da
-      // transação: dois primeiros cliques com planos de CPFs disjuntos (ex.:
-      // recebedor trocado entre eles) não podem fixar o mês duas vezes.
+      // Serializa a gravação por (ambiente, competência) e relê DENTRO da
+      // transação: dois cliques com planos de CPFs disjuntos (ex.: recebedor
+      // trocado entre eles) não podem gravar a mesma receita duas vezes.
       await sql`SELECT pg_advisory_xact_lock(hashtext(${`nfse_competencia:${input.ambiente}:${input.mes}`}))`.execute(trx);
-      const jaFixada = await trx
+      const atuais = await trx
         .selectFrom('nfse_emissoes')
         .select('id')
         .where('ambiente', '=', input.ambiente)
         .where('competencia', '=', input.mes)
-        .limit(1)
-        .executeTakeFirst();
-      if (jaFixada) throw new CompetenciaJaFixada();
+        .execute();
+      const esperados = [...input.idsEsperados].sort().join(',');
+      if (atuais.map((l) => l.id).sort().join(',') !== esperados) throw new CompetenciaJaFixada();
       for (const nota of input.notas) {
         const { proximo } = await trx
           .insertInto('nfse_numeracao')
@@ -265,6 +268,7 @@ function linhasDaCompetencia(db: Database, ambiente: TipoAmbiente, mes: string) 
 
 function notaDaLinha(l: NonNullable<Linha>): NotaFixada {
   return {
+    id: l.id,
     tomadorCpf: l.tomador_cpf,
     tomadorNome: l.tomador_nome,
     valorCents: Number(l.valor_cents),
@@ -380,21 +384,26 @@ export async function emitirCompetencia(
     const { prestadorCnpj, municipioIbge } = config;
     if (prestadorCnpj === null || municipioIbge === null) throw new EmissaoBloqueadaError(['config_incompleta']);
 
-    if (!plano.fixada) {
-      const fixou = await fixarCompetencia(db, {
+    const jaGravados = new Set(
+      (await linhasDaCompetencia(db, ambiente, input.mes)).filter((l) => plano.idsFixados.includes(l.id)).map((l) => l.tomador_cpf),
+    );
+    const novas = plano.notas.filter((n) => !jaGravados.has(n.tomadorCpf));
+    if (novas.length > 0) {
+      const gravou = await gravarNotas(db, {
         ambiente,
         serie: plano.serie,
         mes: input.mes,
-        notas: plano.notas,
+        notas: novas,
+        idsEsperados: plano.idsFixados,
         autorId: input.autorId,
         now: deps.clock(),
         idDps: (nDps) => montarIdDps({ cLocEmi: municipioIbge, cnpj: prestadorCnpj, serie: plano.serie, nDPS: nDps }),
       });
-      // Outro clique fixou a competência agora: o plano confirmado não vale mais.
-      if (!fixou) throw new PlanoMudouError();
+      // Outro clique gravou notas agora: o plano confirmado não vale mais.
+      if (!gravou) throw new PlanoMudouError();
     }
 
-    // Envia o que está FIXADO (valores gravados), nunca um recálculo.
+    // Envia o que está GRAVADO (valores gravados), nunca um recálculo.
     const resultados: ResultadoNota[] = [];
     for (const linha of await linhasDaCompetencia(db, ambiente, input.mes)) {
       if (linha.status === 'autorizada' || linha.status === 'cancelada') {

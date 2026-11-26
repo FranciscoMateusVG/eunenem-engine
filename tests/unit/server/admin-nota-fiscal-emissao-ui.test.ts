@@ -44,6 +44,7 @@ function plano(overrides: Partial<PlanoEmissao> = {}): PlanoEmissao {
         campanhas: ['c2'],
       },
     ],
+    puladas: [],
     fixada: false,
     divergencias: [],
     impressao: 'a'.repeat(64),
@@ -164,6 +165,20 @@ describe('ConfirmacaoEmissao — competência já fixada', () => {
     expect(html).toContain('Este mês já teve emissão');
     expect(html).toContain('Nada novo é emitido');
     expect(html).toContain('CPF 39053344705');
+  });
+});
+
+describe('ConfirmacaoEmissao — pendências puladas', () => {
+  it('lista o que fica de fora e diz que pode ser emitido depois', () => {
+    const html = confirmacao(
+      plano({
+        puladas: [{ referencia: 'camp-1', motivo: 'cpf_ausente_ou_invalido', valorCents: 300 }],
+      }),
+    );
+    expect(html).toContain('Ficam de fora desta emissão (1)');
+    expect(html).toContain('CPF ausente ou inválido — R$ 3,00');
+    expect(html).toContain('camp-1');
+    expect(html).toContain('Podem ser emitidas depois, neste mesmo mês');
   });
 });
 

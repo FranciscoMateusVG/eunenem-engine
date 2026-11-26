@@ -35,6 +35,8 @@ const TEXTO_BLOQUEIO: Record<string, string> = {
   certificado_de_outro_cnpj: "O certificado é de outro CNPJ.",
   certificado_vencido: "O certificado está vencido.",
   tot_trib_pendente: "Total aproximado de tributos incompatível com o regime.",
+  competencia_anterior_ao_inicio:
+    "Competência anterior ao início da emissão (novembro/2026). Outubro/2026 e anteriores nunca são emitidos por aqui.",
   pendencias_de_tomador:
     "Há campanhas sem CPF/nome válido do recebedor. Enquanto houver pendência, nenhuma nota do mês é emitida.",
   producao_nao_liberada:
@@ -44,6 +46,14 @@ const TEXTO_BLOQUEIO: Record<string, string> = {
     "NFSE_SERIE mudou depois que o mês foi emitido. As notas pendentes usam a série já reservada; volte a série configurada para a original antes de reenviar.",
   competencia_divergente:
     "O mês já foi emitido e o cálculo de hoje é diferente do que foi gravado (ex.: recebedor trocado ou valor mudou). Nada novo é emitido: reconcilie com o contador antes.",
+};
+
+const MOTIVOS_PULADA: Record<string, string> = {
+  recebedor_ausente_ou_ambiguo: "Sem recebedor cadastrado",
+  cpf_ausente_ou_invalido: "CPF ausente ou inválido",
+  nome_ausente: "Nome do titular ausente",
+  nomes_divergentes_no_cpf: "Nomes divergentes para o mesmo CPF",
+  tomador_cpf_nome: "CPF/nome do tomador inválido",
 };
 
 const TEXTO_STATUS: Record<Emissao["status"], string> = {
@@ -122,8 +132,8 @@ export function ConfirmacaoEmissao({
 
       {plano.fixada ? (
         <p className="text-[13px] text-ink-soft">
-          Este mês já teve emissão. Só as notas gravadas que ainda não foram autorizadas são reenviadas, com os
-          valores gravados.
+          Este mês já teve emissão. Este clique envia só as notas gravadas que ainda não foram autorizadas (com os
+          valores gravados) e as pendências que já foram resolvidas.
         </p>
       ) : null}
 
@@ -172,6 +182,23 @@ export function ConfirmacaoEmissao({
           </tbody>
         </table>
       </div>
+
+      {plano.puladas.length > 0 ? (
+        <div className="rounded-md border border-amber-200 bg-amber-50 p-4 text-[13px] text-amber-900" data-testid="nf-puladas">
+          <p className="font-semibold">
+            Ficam de fora desta emissão ({plano.puladas.length}) — dados do tomador incompletos:
+          </p>
+          <ul className="mt-1 list-disc pl-5">
+            {plano.puladas.map((p) => (
+              <li key={`${p.referencia}-${p.motivo}`}>
+                {MOTIVOS_PULADA[p.motivo] ?? p.motivo} — {formatBRL(p.valorCents)}{" "}
+                <span className="font-mono text-[11px]">({p.referencia})</span>
+              </li>
+            ))}
+          </ul>
+          <p className="mt-1">Podem ser emitidas depois, neste mesmo mês, quando os dados estiverem completos.</p>
+        </div>
+      ) : null}
 
       {plano.camposFiscais.length > 0 ? (
         <details className="text-[12px]">

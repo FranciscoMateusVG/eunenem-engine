@@ -46,7 +46,7 @@ export interface DpsInput {
     readonly regApTribSN: RegApTribSN | null;
     readonly regEspTrib: RegEspTrib;
   };
-  readonly tomador?: { readonly cpf: string; readonly nome: string };
+  readonly tomador?: { readonly cpf: string; readonly nome: string; readonly endereco?: EnderecoTomador };
   readonly ibscbs?: boolean;
   readonly servico: {
     readonly cLocPrestacao: string;
@@ -64,6 +64,29 @@ export interface DpsInput {
     readonly pAliq: string | null;
     readonly totTrib: TotTrib;
   };
+}
+
+/** TCEndereco com endNac (endereço no Brasil). */
+export interface EnderecoTomador {
+  /** IBGE do município, 7 dígitos. */
+  readonly cMun: string;
+  /** 8 dígitos. */
+  readonly cep: string;
+  readonly logradouro: string;
+  readonly numero: string;
+  readonly complemento?: string | null;
+  readonly bairro: string;
+}
+
+function enderecoXml(e: EnderecoTomador): string {
+  return el(
+    'end',
+    el('endNac', txt('cMun', e.cMun) + txt('CEP', e.cep)) +
+      txt('xLgr', e.logradouro) +
+      txt('nro', e.numero) +
+      (e.complemento ? txt('xCpl', e.complemento) : '') +
+      txt('xBairro', e.bairro),
+  );
 }
 
 /**
@@ -267,7 +290,14 @@ export function montarDpsXml(input: DpsInput): { readonly xml: string; readonly 
     txt('tpEmit', '1') +
     txt('cLocEmi', input.cLocEmi) +
     prest +
-    (input.tomador ? el('toma', txt('CPF', input.tomador.cpf) + txt('xNome', input.tomador.nome)) : '') +
+    (input.tomador
+      ? el(
+          'toma',
+          txt('CPF', input.tomador.cpf) +
+            txt('xNome', input.tomador.nome) +
+            (input.tomador.endereco ? enderecoXml(input.tomador.endereco) : ''),
+        )
+      : '') +
     serv +
     vals +
     (input.ibscbs ? '<IBSCBS><finNFSe>0</finNFSe><indFinal>1</indFinal><cIndOp>100301</cIndOp><indDest>0</indDest><valores><trib><gIBSCBS><CST>000</CST><cClassTrib>000001</cClassTrib></gIBSCBS></trib></valores></IBSCBS>' : '') +

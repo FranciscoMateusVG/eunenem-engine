@@ -381,3 +381,39 @@ it('besta: configuração nacional divergente não gera combinação municipal i
     }),
   ).toEqual({ status: 'config_incompleta', faltando: ['NFSE_CTRIB_NAC'] });
 });
+
+describe('endereço do tomador (aperture-wp6j6)', () => {
+  const endereco = {
+    cMun: '3106200',
+    cep: '30130010',
+    logradouro: 'Av. Afonso Pena',
+    numero: '1000',
+    complemento: 'Apto 12 & B',
+    bairro: 'Centro',
+  };
+
+  it('toma/end com endNac (cMun, CEP), logradouro, número, complemento e bairro; passa no XSD', async () => {
+    const { validateDps } = await import('../../helpers/nfse-xsd.js');
+    const { xml } = montarDpsXml(
+      input({ tomador: { cpf: '52998224725', nome: 'Ana Titular', endereco } }),
+    );
+    expect(xml).toContain(
+      '<toma><CPF>52998224725</CPF><xNome>Ana Titular</xNome><end><endNac><cMun>3106200</cMun><CEP>30130010</CEP></endNac>' +
+        '<xLgr>Av. Afonso Pena</xLgr><nro>1000</nro><xCpl>Apto 12 &amp; B</xCpl><xBairro>Centro</xBairro></end></toma>',
+    );
+    expect(validateDps(xml).errors).toEqual([]);
+  });
+
+  it('sem complemento omite xCpl; sem endereço, toma só com CPF e nome', async () => {
+    const { validateDps } = await import('../../helpers/nfse-xsd.js');
+    const sem = montarDpsXml(
+      input({
+        tomador: { cpf: '52998224725', nome: 'Ana', endereco: { ...endereco, complemento: null } },
+      }),
+    ).xml;
+    expect(sem).not.toContain('<xCpl>');
+    expect(validateDps(sem).ok).toBe(true);
+    const semEnd = montarDpsXml(input({ tomador: { cpf: '52998224725', nome: 'Ana' } })).xml;
+    expect(semEnd).toContain('<toma><CPF>52998224725</CPF><xNome>Ana</xNome></toma>');
+  });
+});

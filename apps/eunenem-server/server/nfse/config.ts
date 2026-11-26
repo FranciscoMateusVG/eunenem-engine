@@ -113,6 +113,12 @@ export interface NfseConfig {
    * NFSE_EMISSAO_PRODUCAO=liberada. Homologação não depende dela.
    */
   readonly emissaoProducaoLiberada: boolean;
+  /**
+   * NFSE_COMPETENCIA_MINIMA (AAAA-MM): primeira competência emitível. Só pode
+   * SUBIR o piso absoluto 2026-11 (decisão do contador); valor menor é
+   * ignorado pelo plano.
+   */
+  readonly competenciaMinima: string;
   readonly problemas: readonly ProblemaConfig[];
 }
 
@@ -210,6 +216,7 @@ export const NfseEnvShape = {
   NFSE_CERT_PASSWORD: z.string().optional(),
   NFSE_SERIE: z.string().optional(),
   NFSE_EMISSAO_PRODUCAO: z.string().optional(),
+  NFSE_COMPETENCIA_MINIMA: z.string().optional(),
 };
 
 export function parseNfseConfig(env: NfseEnv): NfseConfig {
@@ -268,6 +275,7 @@ export function parseNfseConfig(env: NfseEnv): NfseConfig {
   const descricaoServico = campo('NFSE_DESCRICAO_SERVICO', DescricaoSchema, DESCRICAO_SERVICO_PADRAO);
   const serie = campo('NFSE_SERIE', SerieSchema, SERIE_DPS_PADRAO);
   const emissaoProducaoLiberada = ler('NFSE_EMISSAO_PRODUCAO') === 'liberada';
+  const competenciaMinima = campo('NFSE_COMPETENCIA_MINIMA', z.string().regex(/^20\d{2}-(0[1-9]|1[0-2])$/), '2026-11').valor;
 
   // A senha NÃO passa por trim: espaços nas pontas fazem parte dela.
   const certificado = parseCertificado(ler, env.NFSE_CERT_PASSWORD ?? '', problemas);
@@ -291,6 +299,7 @@ export function parseNfseConfig(env: NfseEnv): NfseConfig {
     certificado,
     serie,
     emissaoProducaoLiberada,
+    competenciaMinima,
     problemas,
   };
 }

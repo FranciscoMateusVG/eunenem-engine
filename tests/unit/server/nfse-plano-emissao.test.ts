@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { parseNfseConfig } from '../../../apps/eunenem-server/server/nfse/config.js';
-import { montarPlanoEmissao } from '../../../apps/eunenem-server/server/nfse/plano-emissao.js';
+import {
+  bloquearCompetenciaComPendencias,
+  montarPlanoEmissao,
+} from '../../../apps/eunenem-server/server/nfse/plano-emissao.js';
 import type { PreviaMensal } from '../../../apps/eunenem-server/server/nfse/previa-mensal.js';
 
 /**
@@ -68,16 +71,68 @@ describe('montarPlanoEmissao', () => {
     expect(p.bloqueios).toEqual([]);
   });
 
-  it('pendência bloqueia a competência; política injetada pode liberar', () => {
+  it('pendência é pulada e listada (padrão); a política alternativa bloqueia', () => {
     const comPendencia = previa({
-      pendencias: [{ campanhaId: 'c1', motivo: 'cpf_ausente_ou_invalido', resultadoCents: 300 }],
+      pendencias: [{ campanhaId: 'c9', motivo: 'cpf_ausente_ou_invalido', resultadoCents: 300 }],
     });
-    expect(montarPlanoEmissao({ previa: comPendencia, config: CONFIG }).bloqueios).toEqual([
-      'pendencias_de_tomador',
+    const p = montarPlanoEmissao({ previa: comPendencia, config: CONFIG });
+    expect(p.bloqueios).toEqual([]);
+    expect(p.notas).toHaveLength(1);
+    expect(p.puladas).toEqual([
+      { referencia: 'c9', motivo: 'cpf_ausente_ou_invalido', valorCents: 300 },
     ]);
     expect(
-      montarPlanoEmissao({ previa: comPendencia, config: CONFIG, pendencias: () => [] }).bloqueios,
-    ).toEqual([]);
+      montarPlanoEmissao({
+        previa: comPendencia,
+        config: CONFIG,
+        pendencias: bloquearCompetenciaComPendencias,
+      }).bloqueios,
+    ).toEqual(['pendencias_de_tomador']);
+  });
+
+  it('pendência resolvida depois entra como nota nova; campanha já gravada sob outro CPF diverge', () => {
+    const gravada = {
+      id: 'r1',
+      tomadorCpf: '11144477735',
+      tomadorNome: 'Bruno',
+      valorCents: 50,
+      campanhas: ['c2'],
+      serie: '00001',
+      status: 'autorizada' as const,
+    };
+    const agora = () => [
+      { tomadorCpf: '11144477735', tomadorNome: 'Bruno', valorCents: 50, campanhas: ['c2'] },
+      { tomadorCpf: '52998224725', tomadorNome: 'Ana', valorCents: 100, campanhas: ['c1'] },
+    ];
+    const ok = montarPlanoEmissao({
+      previa: previa(),
+      config: CONFIG,
+      fixadas: [gravada],
+      agrupar: agora,
+    });
+    expect(ok.bloqueios).toEqual([]);
+    expect(ok.notas.map((n) => n.tomadorCpf)).toEqual(['52998224725']);
+    const trocado = () => [
+      { tomadorCpf: '39053344705', tomadorNome: 'C', valorCents: 50, campanhas: ['c2'] },
+    ];
+    expect(
+      montarPlanoEmissao({ previa: previa(), config: CONFIG, fixadas: [gravada], agrupar: trocado })
+        .bloqueios,
+    ).toContain('competencia_divergente');
+  });
+
+  it('piso absoluto 2026-11: outubro/2026 bloqueado mesmo com NFSE_COMPETENCIA_MINIMA menor', () => {
+    const out = previa({ mes: '2026-10' });
+    expect(montarPlanoEmissao({ previa: out, config: CONFIG }).bloqueios).toContain(
+      'competencia_anterior_ao_inicio',
+    );
+    const baixo = parseNfseConfig({ ...CONFIG_ENV, NFSE_COMPETENCIA_MINIMA: '2025-01' });
+    expect(montarPlanoEmissao({ previa: out, config: baixo }).bloqueios).toContain(
+      'competencia_anterior_ao_inicio',
+    );
+    expect(
+      montarPlanoEmissao({ previa: previa({ mes: '2026-11' }), config: CONFIG }).bloqueios,
+    ).not.toContain('competencia_anterior_ao_inicio');
   });
 
   it('estratégia injetada (ex.: consolidada) troca as notas sem mexer nos bloqueios', () => {
@@ -138,7 +193,7 @@ describe('competência fixada e impressão', () => {
     const p = montarPlanoEmissao({
       previa: previa(),
       config: CONFIG,
-      fixadas: [{ ...fixadaA, serie: '00001', status: 'autorizada' }],
+      fixadas: [{ ...fixadaA, id: 'r1', serie: '00001', status: 'autorizada' }],
     });
     expect(p.fixada).toBe(true);
     expect(p.bloqueios).toEqual([]);
@@ -149,7 +204,9 @@ describe('competência fixada e impressão', () => {
     const p = montarPlanoEmissao({
       previa: previa(),
       config: CONFIG,
-      fixadas: [{ ...fixadaA, serie: '00001', tomadorCpf: '39053344705', status: 'autorizada' }],
+      fixadas: [
+        { ...fixadaA, id: 'r1', serie: '00001', tomadorCpf: '39053344705', status: 'autorizada' },
+      ],
     });
     expect(p.bloqueios).toContain('competencia_divergente');
     expect(p.divergencias).toHaveLength(2);
@@ -191,6 +248,7 @@ describe('competência fixada e impressão', () => {
 describe('série reservada × configurada', () => {
   it('NFSE_SERIE mudou depois da fixação: bloqueia (serie_divergente)', () => {
     const fixada = {
+      id: 'r1',
       tomadorCpf: '52998224725',
       tomadorNome: 'Ana',
       valorCents: 100,

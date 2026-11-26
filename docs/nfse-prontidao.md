@@ -25,22 +25,27 @@ Fluxo: /admin/pagamentos/nota-fiscal → mês fechado → "Emitir NFS-e" →
 confirmação (ambiente, série, tomadores, total, campos fiscais, caixa
 "conferi") → "Confirmar emissão". Nada roda sozinho: não há job nem cron.
 
-- Uma nota por CPF de tomador (estratégia `agruparPorTomador`); qualquer
-  pendência de tomador bloqueia o mês inteiro (`bloquearCompetenciaComPendencias`).
-  As duas decisões estão isoladas em `server/nfse/plano-emissao.ts`.
+- Decisões do contador (26/11/2026), isoladas em `server/nfse/plano-emissao.ts`:
+  uma nota por mês por tomador (`agruparPorTomador`); pendências de tomador são
+  PULADAS e listadas na confirmação (`pularPendencias`) e podem ser emitidas
+  depois na mesma competência; competência = data da taxa; piso absoluto
+  2026-11 (outubro/2026 nunca; `NFSE_COMPETENCIA_MINIMA` só sobe o piso).
+- Endereço do tomador: o builder já gera `toma/end` (endNac) quando houver
+  endereço; a coleta obrigatória no resgate é a aperture-xdylg.
 - Idempotência: `nfse_emissoes` tem uma linha por (ambiente, competência, CPF);
   autorizada/cancelada nunca é reenviada. O nDPS é reservado em transação
   (`nfse_numeracao`, por ambiente e série) antes do envio; o Id da DPS é o mesmo
   em todas as tentativas.
 - Sem resposta (timeout, conexão, 5xx) a nota fica "incerta"; a próxima
   tentativa (ou "Consultar") faz GET /dps/{Id} antes de reenviar.
-- Competência FIXADA: o primeiro clique grava todas as notas do mês (CPF, valor,
-  campanhas de origem, nDPS) antes de qualquer envio. Retries enviam só os
-  valores gravados. Se o recálculo divergir do fixado (ex.: recebedor trocado
-  depois da emissão), a emissão é bloqueada (`competencia_divergente`) em vez
-  de gerar outra nota para a mesma receita; a nota incerta continua
-  recuperável por "Consultar". Reconciliação dessa divergência é manual
-  (contador), fora deste fluxo.
+- Notas gravadas: cada clique grava as notas que vai enviar (CPF, valor,
+  campanhas de origem, nDPS) antes de qualquer envio, sob lock por
+  competência. Retries enviam só os valores gravados; pendências resolvidas
+  entram como notas novas (CPF novo, campanhas ainda não emitidas). Qualquer
+  outra divergência (ex.: recebedor trocado depois da emissão) bloqueia
+  (`competencia_divergente`) em vez de gerar outra nota para a mesma receita;
+  a nota incerta continua recuperável por "Consultar". Reconciliar essa
+  divergência é manual (contador), fora deste fluxo.
 - O admin confirma a impressão (sha256) do plano completo: ambiente, série,
   prestador, CPFs, valores, campanhas e campos fiscais. O servidor recalcula
   no clique e recusa (CONFLICT) se for outra.

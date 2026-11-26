@@ -11,7 +11,7 @@ import {
 } from '../../apps/eunenem-server/server/nfse/config.js';
 import {
   type FabricaClienteSefin,
-  fixarCompetencia,
+  gravarNotas,
 } from '../../apps/eunenem-server/server/nfse/emissao.js';
 import { criarClienteSefin } from '../../apps/eunenem-server/server/nfse/sefin-cliente.js';
 import type { TrpcContext } from '../../apps/eunenem-server/server/trpc/context.js';
@@ -219,7 +219,7 @@ describe('planoEmissao — o que a confirmação mostra', () => {
     expect(fake.requisicoes).toHaveLength(0);
   });
 
-  it('pendência de tomador bloqueia a competência inteira', async () => {
+  it('pendência é PULADA: emite as possíveis e lista a pulada; resolvida, o 2º clique emite só ela', async () => {
     await seedDoisTomadores();
     const semCpf = await seed.campanha();
     await seed.recebedor(semCpf, '12345678900', 'CPF com DV errado');
@@ -228,13 +228,60 @@ describe('planoEmissao — o que a confirmação mostra', () => {
       taxaCents: 300,
       criadoEm: new Date('2033-03-08T15:00:00Z'),
     });
+
     const plano = await caller().planoEmissao({ mes: MES });
-    expect(plano.bloqueios).toContain('pendencias_de_tomador');
-    const e = await erroDe(emitir(caller()));
-    expect(e.code).toBe('PRECONDITION_FAILED');
-    expect(e.message).toContain('pendencias_de_tomador');
+    expect(plano.bloqueios).toEqual([]);
+    expect(plano.quantidade).toBe(2);
+    expect(plano.totalCents).toBe(1734);
+    expect(plano.puladas).toEqual([
+      { referencia: semCpf, motivo: 'cpf_ausente_ou_invalido', valorCents: 300 },
+    ]);
+    expect((await emitir()).resultados.map((x) => x.resultado)).toEqual([
+      'autorizada',
+      'autorizada',
+    ]);
+    expect(posts()).toHaveLength(2);
+
+    // Dados completados: novo recebedor válido para a campanha pendente.
+    await trocarRecebedor('12345678900', CPF_C, 'Carla Completa');
+    const depois = await caller().planoEmissao({ mes: MES });
+    expect(depois.bloqueios).toEqual([]);
+    expect(depois.fixada).toBe(true);
+    expect(depois.puladas).toEqual([]);
+    expect(depois.notas).toMatchObject([{ tomadorCpf: CPF_C, valorCents: 300 }]);
+    const r = await emitir();
+    expect(
+      r.resultados.filter((x) => x.resultado === 'autorizada').map((x) => x.tomadorCpf),
+    ).toEqual([CPF_C]);
+    expect(posts()).toHaveLength(3);
+    const lista = await caller().emissoes({ mes: MES });
+    expect(lista.map((e) => [e.tomadorCpf, e.nDps])).toEqual([
+      [CPF_B, '1'],
+      [CPF_A, '2'],
+      [CPF_C, '3'],
+    ]);
+    // Idempotente de novo.
+    await emitir();
+    expect(posts()).toHaveLength(3);
+  });
+
+  it('piso: outubro/2026 nunca; NFSE_COMPETENCIA_MINIMA só sobe o piso', async () => {
+    const outubro = await caller().planoEmissao({ mes: '2026-10' });
+    expect(outubro.bloqueios).toContain('competencia_anterior_ao_inicio');
+    const tentaBaixar = await caller({
+      env: env({ NFSE_COMPETENCIA_MINIMA: '2026-01' }),
+    }).planoEmissao({ mes: '2026-10' });
+    expect(tentaBaixar.bloqueios).toContain('competencia_anterior_ao_inicio');
+    await seedDoisTomadores();
+    const subiu = caller({ env: env({ NFSE_COMPETENCIA_MINIMA: '2033-04' }) });
+    expect((await subiu.planoEmissao({ mes: MES })).bloqueios).toContain(
+      'competencia_anterior_ao_inicio',
+    );
+    expect((await erroDe(emitir(subiu))).message).toContain('competencia_anterior_ao_inicio');
     expect(fake.requisicoes).toHaveLength(0);
-    expect(await caller().emissoes({ mes: MES })).toEqual([]);
+    expect((await caller().planoEmissao({ mes: MES })).bloqueios).not.toContain(
+      'competencia_anterior_ao_inicio',
+    );
   });
 
   it.each([
@@ -491,7 +538,8 @@ describe('fixação concorrente da competência', () => {
     campanhas: [campanha],
   });
   const fixar = (cpf: string) =>
-    fixarCompetencia(testDb.db, {
+    gravarNotas(testDb.db, {
+      idsEsperados: [],
       ambiente: '2',
       serie: '00001',
       mes: MES,

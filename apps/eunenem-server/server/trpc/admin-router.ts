@@ -4779,6 +4779,7 @@ const NotaFiscalPlanoSchema = z.object({
   notas: z.array(
     z.object({ tomadorCpf: z.string(), tomadorNome: z.string(), valorCents: z.number().int(), campanhas: z.array(z.string()) }),
   ),
+  puladas: z.array(z.object({ referencia: z.string(), motivo: z.string(), valorCents: z.number().int() })),
   fixada: z.boolean(),
   divergencias: z.array(z.string()),
   impressao: z.string(),
@@ -4929,7 +4930,7 @@ const notaFiscalRouter = t.router({
     .query(async ({ ctx, input }) => {
       try {
         const p = await carregarPlanoEmissao(depsEmissao(ctx.deps), { platformId: ID_PLATAFORMA_EUNENEM, mes: input.mes });
-        return { ...p, notas: p.notas.map((n) => ({ ...n, campanhas: [...n.campanhas] })), divergencias: [...p.divergencias], bloqueios: [...p.bloqueios], avisos: [...p.avisos], camposFiscais: [...p.camposFiscais] };
+        return { ...p, notas: p.notas.map((n) => ({ ...n, campanhas: [...n.campanhas] })), divergencias: [...p.divergencias], puladas: [...p.puladas], bloqueios: [...p.bloqueios], avisos: [...p.avisos], camposFiscais: [...p.camposFiscais] };
       } catch (error: unknown) {
         return erroEmissao(error);
       }
