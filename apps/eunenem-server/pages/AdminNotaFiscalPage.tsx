@@ -83,7 +83,7 @@ export function AdminNotaFiscalPage() {
           </p>
         ) : null}
 
-        {mes && query.data ? <NotaFiscalEmissao mes={mes} mesFechado={query.data.situacao === "fechado"} /> : null}
+        {mes && query.data ? <NotaFiscalEmissao mes={mes} mesFechado={query.data.situacao === "fechado"} piso={query.data.pisoEmissao} /> : null}
 
         {mes ? <CadastrosIncompletos mes={mes} /> : null}
 
