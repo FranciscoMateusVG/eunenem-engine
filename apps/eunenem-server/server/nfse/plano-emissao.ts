@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import type { NfseConfig } from './config.js';
-import type { EnderecoTomador, TipoAmbiente } from './dps.js';
+import { competenciaDoMes, type EnderecoTomador, type TipoAmbiente } from './dps.js';
 import type { AvisoPrevia, CampoDps, PreviaMensal } from './previa-mensal.js';
 
 /**
@@ -35,6 +35,26 @@ import type { AvisoPrevia, CampoDps, PreviaMensal } from './previa-mensal.js';
 
 /** Primeira competência emitível. Outubro/2026 e anteriores: nunca. */
 export const COMPETENCIA_MINIMA_ABSOLUTA = '2026-11';
+
+export interface PisoCompetencia {
+  /** Primeira competência emitível; null = sem piso (homologação). */
+  readonly competenciaMinima: string | null;
+  /** "novembro/2026"; null quando não há piso. */
+  readonly rotuloMinima: string | null;
+  /** A competência está abaixo do piso: o plano a bloqueia (`competencia_anterior_ao_inicio`). */
+  readonly abaixoDoPiso: boolean;
+}
+
+/**
+ * Piso de competência (só em PRODUÇÃO, tpAmb=1): o maior entre o absoluto
+ * 2026-11 e NFSE_COMPETENCIA_MINIMA. É a única fonte da decisão: o plano usa
+ * para bloquear e a prévia expõe para a tela desligar "Emitir NFS-e".
+ */
+export function pisoDaCompetencia(config: NfseConfig, mes: string): PisoCompetencia {
+  if (config.ambiente.valor !== '1') return { competenciaMinima: null, rotuloMinima: null, abaixoDoPiso: false };
+  const minima = config.competenciaMinima > COMPETENCIA_MINIMA_ABSOLUTA ? config.competenciaMinima : COMPETENCIA_MINIMA_ABSOLUTA;
+  return { competenciaMinima: minima, rotuloMinima: competenciaDoMes(minima).rotulo, abaixoDoPiso: mes < minima };
+}
 
 export interface NotaPlanejada {
   readonly tomadorCpf: string;
@@ -156,7 +176,6 @@ export function montarPlanoEmissao(input: {
   const fixadas = input.fixadas ?? [];
   const agrupar = input.agrupar ?? agruparPorTomador;
   const politica = input.pendencias ?? pularPendencias;
-  const minima = config.competenciaMinima > COMPETENCIA_MINIMA_ABSOLUTA ? config.competenciaMinima : COMPETENCIA_MINIMA_ABSOLUTA;
 
   const bloqueios = new Set<BloqueioEmissao>();
   const avisos: AvisoPrevia[] = [];
@@ -168,7 +187,7 @@ export function montarPlanoEmissao(input: {
   for (const b of politica(previa)) bloqueios.add(b);
   // O piso vale só em PRODUÇÃO (tpAmb=1). Homologação não tem valor fiscal e
   // precisa aceitar qualquer mês fechado para o smoke test (glados, 26/11).
-  if (config.ambiente.valor === '1' && previa.mes < minima) bloqueios.add('competencia_anterior_ao_inicio');
+  if (pisoDaCompetencia(config, previa.mes).abaixoDoPiso) bloqueios.add('competencia_anterior_ao_inicio');
 
   if (config.prestadorCnpj === null || config.municipioIbge === null) bloqueios.add('config_incompleta');
   // Falta de configuração fiscal (não de tomador) numa nota é problema global.

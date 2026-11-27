@@ -20,6 +20,8 @@ import { formatInstante } from "../receita/types";
 type Saidas = inferRouterOutputs<AppRouter>["admin"]["notaFiscal"];
 export type PlanoEmissao = Saidas["planoEmissao"];
 export type Emissao = Saidas["emissoes"][number];
+/** Piso de competência decidido no servidor (vem na prévia do mês). */
+export type PisoEmissao = Saidas["previaMensal"]["pisoEmissao"];
 
 export const ROTULO_AMBIENTE: Record<PlanoEmissao["ambiente"], string> = {
   "1": "PRODUÇÃO (nota com valor fiscal)",
@@ -470,6 +472,41 @@ export function FormularioCancelamento({
 }
 
 // ────────────────────────────────────────────────────────────────────
+//  Ação "Emitir NFS-e" (pura)
+// ────────────────────────────────────────────────────────────────────
+
+/**
+ * Botão que abre a confirmação. Desligado com o mês em andamento e, em
+ * produção, abaixo do piso de competência — decisão do servidor
+ * (`pisoEmissao.abaixoDoPiso`, a mesma regra que bloqueia o plano).
+ */
+export function AcaoEmitir({
+  mesFechado,
+  piso,
+  ocupado,
+  onEmitir,
+}: {
+  mesFechado: boolean;
+  piso: PisoEmissao;
+  ocupado: boolean;
+  onEmitir: () => void;
+}) {
+  return (
+    <>
+      <button type="button" className={BOTAO_PRIMARIO} disabled={!mesFechado || piso.abaixoDoPiso || ocupado} onClick={onEmitir}>
+        Emitir NFS-e
+      </button>
+      {!mesFechado ? <p className="basis-full text-[13px] text-ink-soft">Só é possível emitir depois que o mês terminar.</p> : null}
+      {piso.abaixoDoPiso ? (
+        <p className="basis-full text-[13px] text-ink-soft" data-testid="nf-abaixo-do-piso">
+          Competências anteriores a {piso.rotuloMinima} não são emitidas por este sistema.
+        </p>
+      ) : null}
+    </>
+  );
+}
+
+// ────────────────────────────────────────────────────────────────────
 //  Container (hooks)
 // ────────────────────────────────────────────────────────────────────
 
@@ -482,7 +519,7 @@ function baixar(conteudo: BlobPart, tipo: string, nome: string) {
   URL.revokeObjectURL(url);
 }
 
-export function NotaFiscalEmissao({ mes, mesFechado }: { mes: string; mesFechado: boolean }) {
+export function NotaFiscalEmissao({ mes, mesFechado, piso }: { mes: string; mesFechado: boolean; piso: PisoEmissao }) {
   const utils = trpc.useUtils();
   const [confirmando, setConfirmando] = useState(false);
   const [cancelando, setCancelando] = useState<Emissao | null>(null);
@@ -536,20 +573,17 @@ export function NotaFiscalEmissao({ mes, mesFechado }: { mes: string; mesFechado
       <div className="flex flex-wrap items-center gap-3">
         <h2 className="mr-auto text-lg font-semibold text-ink">Emissão no Sistema Nacional</h2>
         {!confirmando ? (
-          <button
-            type="button"
-            className={BOTAO_PRIMARIO}
-            disabled={!mesFechado || ocupado}
-            onClick={() => {
+          <AcaoEmitir
+            mesFechado={mesFechado}
+            piso={piso}
+            ocupado={ocupado}
+            onEmitir={() => {
               setMensagem(null);
               setConfirmando(true);
             }}
-          >
-            Emitir NFS-e
-          </button>
+          />
         ) : null}
       </div>
-      {!mesFechado ? <p className="text-[13px] text-ink-soft">Só é possível emitir depois que o mês terminar.</p> : null}
 
       {mensagem ? (
         <p role="status" className="rounded border border-line bg-cream-2/40 p-3 text-[13px] text-ink">
